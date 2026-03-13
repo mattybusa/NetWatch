@@ -1,6 +1,29 @@
 NETWATCH AI SESSION PROCESS
 ============================
-Version: 1.4 | Created: 2026-03-08 | Revised: 2026-03-13
+Version: 1.5 | Created: 2026-03-08 | Revised: 2026-03-13
+
+GITEA REPOSITORY
+----------------
+All NetWatch files live at: https://gitea-pi.home:3000/mboynton/netwatch
+Raw file URL format: https://gitea-pi.home:3000/mboynton/netwatch/raw/branch/main/PATH
+File listing API:    https://gitea-pi.home:3000/api/v1/repos/mboynton/netwatch/contents/PATH?token=TOKEN
+Token is provided by the user in the opening prompt.
+
+HOW TO START A SESSION (NEW METHOD — Gitea fetch)
+--------------------------------------------------
+The user will provide the repo URL and token in the opening prompt. From there:
+
+1. Fetch and read AI_Session_Process.txt (this file) — you are already reading it
+2. Fetch the file list from dev_docs/ via the API to know what is available
+3. Fetch and read the required session files (see SESSION START below) using raw URLs
+4. Fetch additional files on demand during the session as needed
+5. Confirm ready state to the user
+
+Raw URL construction:
+  https://gitea-pi.home:3000/mboynton/netwatch/raw/branch/main/dev_docs/FILENAME.txt?token=TOKEN
+
+Do not ask the user to upload or paste files. Fetch them directly from Gitea.
+If a fetch fails, report the error and ask the user to check that Gitea is reachable.
 
 PURPOSE
 -------
@@ -31,6 +54,8 @@ exists to make that growth manageable across session boundaries.
 
 SESSION START — READ IN THIS ORDER
 -----------------------------------
+Fetch each of these from Gitea using the raw URL format above. Read completely.
+
 1. NetWatch_AI_Context_latest.txt
    Architecture, current version, backlog, critical working rules. Read completely.
    Do not proceed until this is fully absorbed.
@@ -176,26 +201,21 @@ SESSION END — DO THIS BEFORE CLOSING
 
 5. Update CurrentTask.txt with exactly where things stand and what the next step is
 
-GETTING SUMMARY FILES ONTO THE PI
-----------------------------------
-Summary files (ChatSummary_N.txt, Feature_*.txt, Bug_*.txt) can be uploaded directly
-via NetWatch > Dev Docs -- no package required.
+GETTING SUMMARY FILES ONTO THE PI AND INTO GIT
+-----------------------------------------------
+After installing any code packages via the Package Installer, commit and push
+all changes to Gitea from the NetWatch Pi:
 
-Gotchas.txt: new entries are appended directly to the file during a dev session and at
-close-out. Upload the updated Gotchas.txt directly via Dev Docs. No separate append file
-is needed for dev sessions.
-Note: summarization sessions (where Claude reads a transcript and produces a summary in
-a separate chat) produce a Gotchas_Append_SessionN.txt for the user to merge, because
-Gotchas.txt is not live in that context.
+  cd ~/netwatch
+  git add .
+  git commit -m "Session N closeout: brief description"
+  git push
 
-NetWatch_AI_Context_latest.txt and CurrentTask.txt: upload directly via Dev Docs,
-or include in the next package -- either works.
+This captures all updated dev_docs, code changes, and new files in one operation.
+Gitea becomes the source of truth. No manual folder management needed.
 
-AI_Session_Process.txt and SummaryInstructions.txt: upload directly via Dev Docs if
-the process itself has been updated.
-
-Never install a package just to update documentation. If there are no code changes,
-use direct upload.
+For documentation-only sessions (no code changes), still run git add/commit/push
+after installing the closeout package via the Package Installer.
 
 
 PACKAGING RULES (CRITICAL)
