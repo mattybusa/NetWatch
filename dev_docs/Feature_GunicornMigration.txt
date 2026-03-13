@@ -1,0 +1,78 @@
+Feature_Gunicorn.txt
+====================
+FEATURE/BUG HEADER
+------------------
+Name: Gunicorn Migration (Flask dev server → gunicorn)
+Type: Infrastructure / Bug fix
+Date worked on: 2026-03-07
+Sessions: Session 2
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+NetWatch was running Flask's built-in development server, which logs:
+"WARNING: This is a development server. Do not use it in a production environment."
+This server is single-threaded and hangs on HTTP requests to the HTTPS port — any
+visitor hitting http:// on port 5000 (accidentally or otherwise) would cause all
+requests to block for 1–2 minutes. The root cause was identified during v3.2.52 test
+plan execution when test step 1 appeared to crash the site.
+
+Two backlog items were created and then immediately promoted to elevated priority:
+- Bug: HTTP requests to HTTPS port cause Flask dev server to hang.
+- Feature: Replace Flask dev server with gunicorn.
+
+Context: NetWatch is a live production system, not a development environment. The Pi
+running it IS NetWatch. Urgency was elevated accordingly.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+No failed technical approaches. The patcher.py action list does not support run_script
+or systemd file editing directly. The solution required a one-time manual shell script
+(gunicorn_upgrade.sh) run after installing the package.
+
+
+WHAT WORKED
+-----------
+Package: v3.2.64 — three files: wsgi.py (new), gunicorn.conf.py (new), install.sh
+Package: v3.2.65 — adds gunicorn.conf.py with preload_app=True, cleanup
+
+New files:
+- wsgi.py: calls init() once, exposes app object for gunicorn.
+  init() is the correct startup path under gunicorn — "if __name__ == '__main__'" in
+  webapp.py is unused by the service.
+- gunicorn.conf.py: workers=2, worker_class='sync', bind='0.0.0.0:5000',
+  certfile and keyfile from ~/netwatch/certs/, preload_app=True.
+  preload_app=True: app loaded once in master process before forking workers.
+  init() runs once, not once per worker. Eliminates double-init race condition.
+- gunicorn_upgrade.sh: one-time migration script. Installs gunicorn into venv,
+  updates /etc/systemd/system/netwatch-web.service ExecStart to use gunicorn with
+  config file, reloads systemd daemon, restarts service.
+
+install.sh updated for future fresh installs to use gunicorn from the start.
+
+Verified working:
+- Three gunicorn processes: 1 master (Ssl flag) + 2 workers.
+- Both workers confirmed via ps aux — the second worker boots quietly without logging
+  under preload_app=True (normal behavior).
+- HTTP-hang bug gone — gunicorn handles malformed/plain-HTTP requests gracefully.
+- SD card wear reduced — proper WSGI server handles concurrent requests efficiently.
+
+State:
+- ~/netwatch/gunicorn.conf.py: config file for gunicorn
+- ~/netwatch/wsgi.py: entry point
+- systemd ExecStart: gunicorn --config ~/netwatch/gunicorn.conf.py wsgi:app
+- gunicorn.ctl: Unix socket file in ~/netwatch/ — MUST be excluded from any file-walk
+  export operation (see Gotchas.txt).
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+Logged as a future optimization: move init() to a gunicorn post_fork hook or ensure
+preload_app=True fully prevents double-init. Current preload_app=True approach is
+correct and working — this was noted as a potential improvement only.
+
+gunicorn.ctl is a Unix socket (not a regular file) and will cause OSError if picked up
+by os.walk() in export routes. This was handled in v3.2.94 in a later session; see
+Gotchas.txt entry "GUNICORN.CTL IS A RUNTIME SOCKET — NOT A REGULAR FILE."

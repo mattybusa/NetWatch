@@ -1,0 +1,156 @@
+FEATURE: ROLLBACK SCRIPT IMPROVEMENT + DB RESTORE FIX
+======================================================
+
+FEATURE/BUG HEADER
+------------------
+- Name: Rollback Improvement — Snapshot Selection, Configurable Retention, DB Restore Fix
+- Type: Feature + Bug Fix
+- Date: 2026-03-11
+- Session: 5
+- Versions: v3.3.2, v3.3.3 (superseded), v3.3.4
+- Final outcome: Complete (DB restore fix unverified via live test — see Known Limitations)
+
+
+BACKGROUND
+----------
+Two separate improvements were planned:
+1. Rollback script should allow selecting which snapshot to restore, not just the most
+   recent. The script should list all available snapshots with version labels.
+2. Snapshot retention was hardcoded to 5 in patcher.py. Should be configurable.
+
+A production incident during v3.3.2 install exposed a third issue: the DB restore in
+rollback.sh was silently failing. This turned a routine rollback into a multi-package
+debugging arc.
+
+Timeline:
+- v3.3.2: snapshot selection + configurable retention shipped; rollback script had a
+  hidden bash heredoc bug
+- v3.3.2 install → web service went down → Matt attempted rollback → rollback ran but
+  DB was not restored (version still showed 3.3.2)
+- v3.3.3: heredoc replaced with printf, but Unicode characters remained → bash syntax
+  error on Pi
+- v3.3.4: entire rollback.sh rewritten in pure ASCII, no heredocs, all v3.3.2 changes
+  re-included in a single catch-up package
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Bash heredoc for DB restore (original rollback.sh):
+  The original rollback.sh used a bash heredoc to run an inline Python script:
+    python3 - << PYEOF
+      import sqlite3, shutil, os, json
+      ...
+    PYEOF
+  This pattern failed silently on the Pi. Python ran but stdin received no input, so
+  the DB restore never executed. The script exited with status 0, making the failure
+  invisible. The root cause is that bash's heredoc handling in certain shell environments
+  (particularly when scripts are invoked via exec, subprocess, or non-login shells) does
+  not deliver stdin to the child process reliably. There was no error message.
+
+v3.3.3 fix attempt — printf without ASCII cleanup:
+  The heredoc was replaced with a printf-built temp file approach:
+    printf '%s\n' 'import sqlite3...' > /tmp/nw_restore.py
+    python3 /tmp/nw_restore.py "$arg"
+  This is the correct pattern. However, the file still contained Unicode characters from
+  the original script — box-drawing characters (the visual separators like ======= and
+  -------) had been written using Unicode code points rather than plain ASCII hyphens and
+  equals signs. When the file was transferred to the Pi via Dev Docs upload, bash
+  encountered multi-byte UTF-8 sequences in the script body and threw:
+    syntax error near unexpected token 'then'
+  at the first if/then block after a Unicode echo statement. This is the same class of
+  error as using Unicode in a Python bytes literal — the shell interpreter does not
+  handle UTF-8 gracefully in all positions.
+
+  v3.3.3 was superseded immediately.
+
+Web service outage after v3.3.2 install:
+  After v3.3.2 was installed, the web service (netwatch-web) stopped and did not restart
+  automatically. gunicorn exited with status=0 (SUCCESS), so systemd's Restart=always
+  did not trigger. The web service was recovered manually:
+    sudo systemctl start netwatch-web.service
+  This may be a pre-existing behavior in the 2-second delayed restart mechanism — the
+  background script that runs "sleep 2 && sudo systemctl restart netwatch-web" exits
+  cleanly regardless of whether gunicorn actually started. Not confirmed as a new bug;
+  flagged for monitoring.
+
+
+WHAT WORKED
+-----------
+SNAPSHOT SELECTION (rollback.sh, v3.3.2/v3.3.4):
+
+The script lists all snapshots in ~/netwatch/snapshots/ sorted newest-first. For each
+snapshot, it reads the VERSION file inside the snapshot to produce a labeled list:
+  [1] v3.3.2  (snapshot from YYYY-MM-DD HH:MM)
+  [2] v3.3.1  ...
+  ...
+User is prompted to enter a number. Pressing Enter with no input selects [1] (most
+recent) as the default. Input is validated — non-numeric and out-of-range entries
+are rejected with a message.
+
+CONFIGURABLE SNAPSHOT RETENTION (patcher.py, v3.3.2/v3.3.4):
+
+Hardcoded keep=5 in _prune_snapshots() replaced with:
+  keep = max(1, getattr(config, "SNAPSHOT_RETENTION", 10))
+Safety floor of 1 — cannot be set to 0 or negative. Default is 10 (was 5).
+Pruning still only runs at the end of a successful package install, not on rollback.
+
+config_schema.py: SNAPSHOT_RETENTION added to the "retention" group:
+  Key: SNAPSHOT_RETENTION
+  Type: int
+  Default: 10
+  Description: Number of snapshots to keep (minimum 1)
+
+DB RESTORE FIX (rollback.sh, v3.3.4):
+
+The inline Python was moved to a temp file written with printf:
+  printf '%s\n' \
+    'import sys, sqlite3, shutil, os, json' \
+    'snap = sys.argv[1]' \
+    ... > /tmp/nw_db_restore.py
+  /home/mboynton/netwatch/venv/bin/python3 /tmp/nw_db_restore.py "$selected_snap"
+  rm -f /tmp/nw_db_restore.py
+
+The Python script itself:
+- Reads snapshot_meta.json from the snapshot directory to find the DB backup filename
+- Copies the DB backup to ~/netwatch/netwatch.db
+- Reports success or failure
+
+PURE ASCII RULE (v3.3.4 + Gotchas.txt):
+
+The entire rollback.sh was rewritten from scratch using only ASCII characters:
+- Visual separators: = and - (not Unicode box-drawing)
+- Status indicators: OK, FAILED, DONE (not Unicode checkmarks/crosses)
+- Arrow indicators: -> (not Unicode arrows)
+- No Unicode in echo statements, comments, or variable values
+
+This rule is now documented in Gotchas.txt and applies to all future .sh files.
+
+Files changed:
+- rollback.sh (v3.3.2, v3.3.3 superseded, v3.3.4)
+- patcher.py (v3.3.2, v3.3.4)
+- config_schema.py (v3.3.2, v3.3.4)
+- dev_docs/Gotchas.txt (v3.3.4 — Unicode/heredoc lessons appended)
+
+IMPORTANT: Because v3.3.3 failed on the Pi and rollback was broken at the time,
+v3.3.4 was built as a catch-up package with min_version: 3.2.99 to allow install
+over any of the intermediate states. It included:
+- Fixed rollback.sh
+- patcher.py with SNAPSHOT_RETENTION
+- config_schema.py with SNAPSHOT_RETENTION
+- base.html at v3.3.1 state (About popover)
+- Gotchas.txt with new entries
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+-----------------------------------
+- DB restore fix has not been verified with a live rollback test. The script was
+  rewritten and shipped, and v3.3.5 is running, but a live test to confirm the DB
+  actually restores was not performed this session. Recommend testing before the next
+  production rollback is needed.
+
+- CRITICAL INTERACTION: If you install a fixed rollback.sh via a package, then run
+  rollback, the rollback will restore the .sh files from the snapshot — overwriting
+  your fixed version with the old broken one. This is documented in Gotchas.txt.
+  If rollback.sh needs to be fixed urgently, the correct approach is to install the
+  fixed version, then immediately take a new snapshot (via a no-op package install) so
+  that the fixed version is in the snapshot pool before rolling back.

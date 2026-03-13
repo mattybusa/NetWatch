@@ -1,0 +1,580 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Metrics{% endblock %}
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+
+<!-- Range selector -->
+<div class="d-flex align-items-center gap-2 mb-4 flex-wrap">
+  <span class="nw-label me-2">TIME RANGE:</span>
+  <button class="range-btn active" onclick="setRange(1,this)">1H</button>
+  <button class="range-btn" onclick="setRange(6,this)">6H</button>
+  <button class="range-btn" onclick="setRange(24,this)">24H</button>
+  <button class="range-btn" onclick="setRange(168,this)">7D</button>
+  <button class="range-btn" onclick="setRange(720,this)">30D</button>
+  <button id="reset-zoom-btn" class="range-btn ms-3" onclick="resetZoom()"
+          style="display:none;color:var(--accent);border-color:var(--accent);">
+    <i class="bi bi-zoom-out me-1"></i>Reset Zoom
+  </button>
+</div>
+
+<!-- Latency -->
+<div class="nw-card p-4 mb-4">
+  <div class="nw-label mb-2">WAN Latency (ms)</div>
+  <canvas id="chart-latency" height="70"></canvas>
+</div>
+
+<!-- Packet loss -->
+<div class="nw-card p-4 mb-4">
+  <div class="nw-label mb-2">Packet Loss (%)</div>
+  <canvas id="chart-loss" height="70"></canvas>
+</div>
+
+<!-- Speedtest row -->
+<div class="row">
+  <div class="col-md-6">
+    <div class="nw-card p-4 h-100">
+      <div class="nw-label mb-2">Speedtest — Download &amp; Upload (Mbps)</div>
+      <div style="position:relative;height:200px;">
+        <canvas id="chart-speed"></canvas>
+        <div id="speed-no-data" style="display:none;position:absolute;inset:0;
+             align-items:center;justify-content:center;flex-direction:column;gap:6px;
+             background:rgba(var(--bg-card-rgb,13,27,42),0.75);border-radius:6px;">
+          <span style="font-size:1.4rem;">📊</span>
+          <span style="font-size:0.82rem;color:var(--text-muted);text-align:center;">
+            No data collected in this time range<br>
+            <small>Speed tests run every 2 hours</small>
+          </span>
+        </div>
+      </div>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px;text-align:center;">
+        <i class="bi bi-info-circle me-1"></i>Tests run every 2 hours — chart shows available data points only
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="nw-card p-4 h-100">
+      <div class="nw-label mb-2">Speedtest Ping (ms)</div>
+      <div style="position:relative;height:200px;">
+        <canvas id="chart-sping"></canvas>
+        <div id="sping-no-data" style="display:none;position:absolute;inset:0;
+             align-items:center;justify-content:center;flex-direction:column;gap:6px;
+             background:rgba(var(--bg-card-rgb,13,27,42),0.75);border-radius:6px;">
+          <span style="font-size:1.4rem;">📊</span>
+          <span style="font-size:0.82rem;color:var(--text-muted);text-align:center;">
+            No data collected in this time range<br>
+            <small>Speed tests run every 2 hours</small>
+          </span>
+        </div>
+      </div>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px;text-align:center;">
+        <i class="bi bi-info-circle me-1"></i>Tests run every 2 hours — chart shows available data points only
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Read CSS variables for chart colors so they match the active theme
+function cssVar(name) {
+  return getComputedStyle(document.body).getPropertyValue(name).trim();
+}
+
+// ─── Crosshair + floating tooltip plugin ────────────────────────────────────
+const CrosshairPlugin = {
+  id: 'crosshair',
+  afterInit(chart) {
+    chart._crosshairX = null;
+    const canvas = chart.canvas;
+    canvas.addEventListener('mousemove', e => {
+      const rect = canvas.getBoundingClientRect();
+      chart._crosshairX = e.clientX - rect.left;
+      chart.draw();
+    });
+    canvas.addEventListener('mouseleave', () => {
+      chart._crosshairX = null;
+      chart.draw();
+    });
+  },
+  afterDraw(chart) {
+    const x = chart._crosshairX;
+    if (x === null || x === undefined) return;
+
+    const { ctx, chartArea: ca, scales } = chart;
+    const xScale = scales.x;
+    const yScale = scales.y;
+
+    // Only draw inside the chart area
+    if (x < ca.left || x > ca.right) return;
+
+    // ── Vertical crosshair line ──
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, ca.top);
+    ctx.lineTo(x, ca.bottom);
+    ctx.strokeStyle = 'rgba(180,180,200,0.35)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.restore();
+
+    // ── Find nearest data index ──
+    const dataCount = chart.data.labels.length;
+    if (!dataCount) return;
+    const pxPerPoint = (ca.right - ca.left) / Math.max(dataCount - 1, 1);
+    let idx = Math.round((x - ca.left) / pxPerPoint);
+    idx = Math.max(0, Math.min(dataCount - 1, idx));
+
+    // ── Collect all visible dataset values at this index ──
+    const entries = [];
+    chart.data.datasets.forEach((ds, di) => {
+      const meta = chart.getDatasetMeta(di);
+      if (meta.hidden) return;
+      const val = ds.data[idx];
+      if (val === null || val === undefined) return;
+      entries.push({ label: ds.label, value: val, color: ds.borderColor });
+    });
+    if (!entries.length) return;
+
+    // ── Tooltip dimensions & position ──
+    // Use full raw timestamp if available, fall back to display label
+    const label = (chart._rawLabels && chart._rawLabels[idx]) || chart.data.labels[idx] || '';
+    const PAD = 8, LINE_H = 17, HEADER_H = 20;
+    const boxH = HEADER_H + entries.length * LINE_H + PAD * 2;
+
+    // Measure all text to size the box dynamically
+    ctx.save();
+    ctx.font = '600 11px system-ui, sans-serif';
+    let maxW = ctx.measureText(label).width;
+    entries.forEach(e => {
+      const valStr = typeof e.value === 'number'
+        ? (Number.isInteger(e.value) ? e.value.toString() : e.value.toFixed(2))
+        : String(e.value);
+      ctx.font = '11px system-ui, sans-serif';
+      const labelW = ctx.measureText(e.label).width;
+      ctx.font = '600 11px system-ui, sans-serif';
+      const valW = ctx.measureText(valStr).width;
+      // dot(8) + label + gap(12) + val
+      maxW = Math.max(maxW, 8 + labelW + 12 + valW);
+    });
+    ctx.restore();
+    const boxW = maxW + PAD * 2;
+
+    // X position of the data point pixel
+    const pointPx = ca.left + idx * pxPerPoint;
+
+    // Average Y of all datasets for vertical positioning
+    const avgY = entries.reduce((sum, e) => {
+      const yPx = yScale.getPixelForValue(e.value);
+      return sum + yPx;
+    }, 0) / entries.length;
+
+    // Place box above the avg point, nudge left/right to stay in bounds
+    let bx = pointPx + 12;
+    let by = avgY - boxH / 2;
+    if (bx + boxW > ca.right) bx = pointPx - boxW - 12;
+    if (by < ca.top) by = ca.top + 2;
+    if (by + boxH > ca.bottom) by = ca.bottom - boxH - 2;
+
+    // ── Draw dot on each dataset line at this index ──
+    entries.forEach(e => {
+      const yPx = yScale.getPixelForValue(e.value);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(pointPx, yPx, 4, 0, Math.PI * 2);
+      ctx.fillStyle = e.color;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // ── Draw tooltip box ──
+    ctx.save();
+    ctx.beginPath();
+    const r = 6;
+    ctx.roundRect(bx, by, boxW, boxH, r);
+    ctx.fillStyle = 'rgba(15,25,45,0.92)';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(180,180,220,0.2)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+
+    // ── Timestamp header ──
+    ctx.save();
+    ctx.font = '600 11px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(180,180,210,0.75)';
+    ctx.fillText(label, bx + PAD, by + PAD + 12);
+    ctx.restore();
+
+    // ── Dataset rows ──
+    entries.forEach((e, i) => {
+      const ty = by + PAD + HEADER_H + i * LINE_H + 12;
+      // Colored dot
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(bx + PAD + 5, ty - 4, 4, 0, Math.PI * 2);
+      ctx.fillStyle = e.color;
+      ctx.fill();
+      ctx.restore();
+      // Label
+      ctx.save();
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(220,220,240,0.85)';
+      ctx.fillText(e.label, bx + PAD + 14, ty);
+      ctx.restore();
+      // Value (right-aligned)
+      const valStr = typeof e.value === 'number'
+        ? (Number.isInteger(e.value) ? e.value.toString() : e.value.toFixed(2))
+        : String(e.value);
+      ctx.save();
+      ctx.font = '600 11px system-ui, sans-serif';
+      ctx.fillStyle = e.color;
+      ctx.textAlign = 'right';
+      ctx.fillText(valStr, bx + boxW - PAD, ty);
+      ctx.restore();
+    });
+  }
+};
+
+Chart.register(CrosshairPlugin);
+// ────────────────────────────────────────────────────────────────────────────
+
+function makeOpts(maintainAspect) {
+  return {
+    responsive: true,
+    maintainAspectRatio: maintainAspect !== false,
+    animation: false,
+    plugins: {
+      legend: { labels: { color: cssVar("--text-label"), boxWidth: 12 } },
+      tooltip: { enabled: false }   // native tooltip off — crosshair handles it
+    },
+    scales: {
+      x: { ticks:{ color:cssVar("--text-label"), maxRotation:45, autoSkip:true, maxTicksLimit:8,
+             callback: function(val, idx) {
+               const label = this.getLabelForValue(val);
+               return label || null;
+             }
+           }, grid:{ color:cssVar("--border-color") } },
+      y: { ticks:{ color:cssVar("--text-label") }, grid:{ color:cssVar("--border-color") }, beginAtZero:true }
+    }
+  };
+}
+
+function ds(label, color, fill=true) {
+  return { label, data:[], borderColor:color, backgroundColor:color+"28",
+           fill, tension:0.3, pointRadius:0, borderWidth:2, spanGaps:true };
+}
+
+let latencyChart, lossChart, speedChart, spingChart;
+
+function initCharts() {
+  const healthOpts = makeOpts(true);
+  const speedOpts  = makeOpts(false);
+  latencyChart = new Chart(document.getElementById("chart-latency"),
+    { type:"line", data:{ labels:[], datasets:[ds("Latency (ms)", cssVar("--accent"))] }, options:healthOpts });
+  lossChart = new Chart(document.getElementById("chart-loss"),
+    { type:"line", data:{ labels:[], datasets:[ds("Packet Loss (%)", cssVar("--fail"))] }, options:healthOpts });
+  speedChart = new Chart(document.getElementById("chart-speed"),
+    { type:"line", data:{ labels:[], datasets:[ds("Download", cssVar("--ok")), ds("Upload", cssVar("--accent"))] }, options:speedOpts });
+  spingChart = new Chart(document.getElementById("chart-sping"),
+    { type:"line", data:{ labels:[], datasets:[ds("Ping (ms)", cssVar("--warn"))] }, options:speedOpts });
+}
+
+function fmtTime(ts) {
+  // Append Z so browser treats as UTC and converts to local time automatically
+  const t = ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z';
+  return new Date(t).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+}
+
+function fmtDateTime(ts) {
+  const t = ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z';
+  const d = new Date(t);
+  return d.toLocaleDateString([], { month:"short", day:"numeric" }) + " " +
+         d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+}
+
+// ─── Time-bucketed averaging ─────────────────────────────────────────────────
+// Divides [startMs, endMs] into numBuckets fixed-width buckets and averages
+// all readings that fall within each bucket. Returns array of:
+//   { midMs, fields... }  where midMs is the bucket midpoint timestamp (ms).
+// Buckets are time-anchored so historical buckets never change on refresh.
+function bucketAvg(arr, fields, numBuckets, startMs, endMs) {
+  if (!arr.length) return [];
+  const bucketMs = (endMs - startMs) / numBuckets;
+  const buckets  = Array.from({ length: numBuckets }, () => ({ counts: {}, sums: {} }));
+
+  arr.forEach(r => {
+    const t = r.timestamp.endsWith('Z') ? r.timestamp : r.timestamp.replace(' ', 'T') + 'Z';
+    const ms = new Date(t).getTime();
+    const bi = Math.min(Math.floor((ms - startMs) / bucketMs), numBuckets - 1);
+    if (bi < 0) return;
+    const b = buckets[bi];
+    fields.forEach(f => {
+      const v = r[f];
+      if (v !== null && v !== undefined && !isNaN(v)) {
+        b.sums[f]   = (b.sums[f]   || 0) + Number(v);
+        b.counts[f] = (b.counts[f] || 0) + 1;
+      }
+    });
+  });
+
+  return buckets.map((b, i) => {
+    const midMs = startMs + (i + 0.5) * bucketMs;
+    const out   = { midMs, bucketMs };
+    fields.forEach(f => {
+      out[f] = b.counts[f] ? b.sums[f] / b.counts[f] : null;
+    });
+    return out;
+  });
+}
+
+// Build sparse x-axis display labels from bucketed data
+function makeBucketLabels(buckets, hours) {
+  const targetTicks = 10;
+  const step = Math.max(1, Math.floor(buckets.length / targetTicks));
+  let lastDate = null;
+
+  return buckets.map((b, i) => {
+    const d = new Date(b.midMs);
+    const dateStr = d.toLocaleDateString([], { month:"short", day:"numeric" });
+    const timeStr = d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+
+    if (hours <= 6) {
+      return i % step === 0 ? timeStr : '';
+    }
+    if (dateStr !== lastDate) {
+      lastDate = dateStr;
+      return dateStr + " " + timeStr;
+    }
+    if (i % step === 0) return timeStr;
+    return '';
+  });
+}
+
+// Build raw tooltip labels from bucketed data — shows avg range
+function makeBucketRawLabels(buckets) {
+  return buckets.map(b => {
+    const halfMs  = b.bucketMs / 2;
+    const startDt = new Date(b.midMs - halfMs);
+    const endDt   = new Date(b.midMs + halfMs);
+    const fmt = d => d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+    const fmtFull = d => d.toLocaleDateString([], { month:"short", day:"numeric" }) + " " + fmt(d);
+    // If start/end are same date, abbreviate
+    const sameDay = startDt.toDateString() === endDt.toDateString();
+    const label = sameDay
+      ? `${fmtFull(startDt)} – ${fmt(endDt)}`
+      : `${fmtFull(startDt)} – ${fmtFull(endDt)}`;
+    return `Avg: ${label}`;
+  });
+}
+
+// Number of buckets to use based on hours range
+function numBuckets(hours) {
+  if (hours <=   1) return 60;   // 1-min buckets
+  if (hours <=   6) return 72;   // 5-min buckets
+  if (hours <=  24) return 96;   // 15-min buckets
+  if (hours <= 168) return 168;  // 1-hr buckets
+  return 240;                    // ~3-hr buckets for 30d
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Zoom state ──────────────────────────────────────────────────────────────
+let zoomStart = null;   // ISO string
+let zoomEnd   = null;   // ISO string
+let isZoomed  = false;
+
+function toIso(ms) {
+  return new Date(ms).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+}
+
+function showResetZoom(show) {
+  document.getElementById('reset-zoom-btn').style.display = show ? '' : 'none';
+}
+
+function resetZoom() {
+  isZoomed  = false;
+  zoomStart = null;
+  zoomEnd   = null;
+  showResetZoom(false);
+  loadData(currentHours);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function loadData(hours, startIso, endIso) {
+  let hUrl = `/api/health_history?hours=${hours}`;
+  let sUrl = `/api/speedtest_history?hours=${hours}`;
+  if (startIso && endIso) {
+    hUrl = `/api/health_history?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`;
+    sUrl = `/api/speedtest_history?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`;
+  }
+
+  const [health, speed] = await Promise.all([
+    fetch(hUrl).then(r => r.json()),
+    fetch(sUrl).then(r => r.json())
+  ]);
+
+  // Determine time window for bucket anchoring.
+  // Always span the full requested range so the x-axis is consistent and
+  // any gaps in data (monitor restart, Pi reboot) show as empty areas
+  // rather than the chart silently starting late.
+  const nowMs   = Date.now();
+  const rangeMs = hours * 3600 * 1000;
+
+  let startMs, endMs;
+  if (startIso && endIso) {
+    startMs = new Date(startIso + 'Z').getTime();
+    endMs   = new Date(endIso   + 'Z').getTime();
+  } else {
+    endMs   = nowMs;
+    startMs = nowMs - rangeMs;
+  }
+  const nb = isZoomed ? Math.min(numBuckets(hours), 120) : numBuckets(hours);
+
+  // Health charts — bucketed
+  const hFields  = ['latency_ms', 'packet_loss'];
+  const hBuckets = bucketAvg(health, hFields, nb, startMs, endMs);
+  const hLabels  = makeBucketLabels(hBuckets, isZoomed ? (rangeMs / 3600000) : hours);
+  const hRaw     = makeBucketRawLabels(hBuckets);
+
+  latencyChart.data.labels           = hLabels;
+  latencyChart._rawLabels            = hRaw;
+  latencyChart._buckets              = hBuckets;
+  latencyChart.data.datasets[0].data = hBuckets.map(b => b.latency_ms !== null ? +b.latency_ms.toFixed(2) : null);
+  latencyChart.update();
+
+  lossChart.data.labels           = hLabels;
+  lossChart._rawLabels            = hRaw;
+  lossChart._buckets              = hBuckets;
+  lossChart.data.datasets[0].data = hBuckets.map(b => b.packet_loss !== null ? +b.packet_loss.toFixed(2) : null);
+  lossChart.update();
+
+  // Speed charts — bucketed
+  const sFields  = ['download_mbps', 'upload_mbps', 'ping_ms'];
+  const sBuckets = bucketAvg(speed, sFields, nb, startMs, endMs);
+  const sLabels  = makeBucketLabels(sBuckets, isZoomed ? (rangeMs / 3600000) : hours);
+  const sRaw     = makeBucketRawLabels(sBuckets);
+
+  speedChart.data.labels              = sLabels;
+  speedChart._rawLabels               = sRaw;
+  speedChart._buckets                 = sBuckets;
+  speedChart.data.datasets[0].data    = sBuckets.map(b => b.download_mbps !== null ? +b.download_mbps.toFixed(2) : null);
+  speedChart.data.datasets[1].data    = sBuckets.map(b => b.upload_mbps   !== null ? +b.upload_mbps.toFixed(2)   : null);
+  speedChart.update('none');
+  speedChart.update();
+
+  spingChart.data.labels           = sLabels;
+  spingChart._rawLabels            = sRaw;
+  spingChart._buckets              = sBuckets;
+  spingChart.data.datasets[0].data = sBuckets.map(b => b.ping_ms !== null ? +b.ping_ms.toFixed(2) : null);
+  spingChart.update('none');
+  spingChart.update();
+
+  // Show/hide no-data overlays for speedtest charts
+  const noData = speed.length === 0;
+  document.getElementById('speed-no-data').style.display = noData ? 'flex' : 'none';
+  document.getElementById('sping-no-data').style.display = noData ? 'flex' : 'none';
+}
+
+let currentHours = 1;
+
+function setRange(hours, btn) {
+  document.querySelectorAll(".range-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  currentHours = hours;
+  isZoomed  = false;
+  zoomStart = null;
+  zoomEnd   = null;
+  showResetZoom(false);
+  loadData(hours);
+}
+
+// ─── Zoom-by-drag plugin ─────────────────────────────────────────────────────
+const ZoomDragPlugin = {
+  id: 'zoomdrag',
+  afterInit(chart) {
+    chart._drag = null;
+    const canvas = chart.canvas;
+
+    canvas.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const ca = chart.chartArea;
+      if (!ca || x < ca.left || x > ca.right) return;
+      chart._drag = { startX: x, currentX: x };
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      if (!chart._drag) return;
+      const rect = canvas.getBoundingClientRect();
+      chart._drag.currentX = Math.min(Math.max(e.clientX - rect.left, chart.chartArea.left), chart.chartArea.right);
+      chart.draw();
+    });
+
+    canvas.addEventListener('mouseup', e => {
+      if (!chart._drag) return;
+      const drag = chart._drag;
+      chart._drag = null;
+
+      const dx = Math.abs(drag.currentX - drag.startX);
+      if (dx < 10) { chart.draw(); return; }  // too small — ignore
+
+      const ca      = chart.chartArea;
+      const buckets = chart._buckets;
+      if (!buckets || !buckets.length) return;
+
+      const pxPerBucket = (ca.right - ca.left) / buckets.length;
+      const i0 = Math.max(0, Math.floor((Math.min(drag.startX, drag.currentX) - ca.left) / pxPerBucket));
+      const i1 = Math.min(buckets.length - 1, Math.floor((Math.max(drag.startX, drag.currentX) - ca.left) / pxPerBucket));
+
+      const b0 = buckets[i0], b1 = buckets[i1];
+      const half = b0.bucketMs / 2;
+      zoomStart = toIso(b0.midMs - half);
+      zoomEnd   = toIso(b1.midMs + half);
+      isZoomed  = true;
+      showResetZoom(true);
+      loadData(currentHours, zoomStart, zoomEnd);
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      if (chart._drag) { chart._drag = null; chart.draw(); }
+    });
+  },
+
+  afterDraw(chart) {
+    if (!chart._drag) return;
+    const { ctx, chartArea: ca } = chart;
+    const x0 = chart._drag.startX, x1 = chart._drag.currentX;
+    ctx.save();
+    ctx.fillStyle = 'rgba(100,140,255,0.15)';
+    ctx.fillRect(Math.min(x0,x1), ca.top, Math.abs(x1-x0), ca.bottom - ca.top);
+    ctx.strokeStyle = 'rgba(100,140,255,0.6)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3,2]);
+    ctx.strokeRect(Math.min(x0,x1), ca.top, Math.abs(x1-x0), ca.bottom - ca.top);
+    ctx.restore();
+  }
+};
+
+Chart.register(ZoomDragPlugin);
+// ─────────────────────────────────────────────────────────────────────────────
+
+initCharts();
+loadData(currentHours);
+
+// Auto-refresh — only when not zoomed
+const METRICS_POLL_MS = {{ check_interval | default(30) }} * 1000;
+setInterval(() => { if (!isZoomed) loadData(currentHours); }, METRICS_POLL_MS);
+</script>
+{% endblock %}

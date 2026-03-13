@@ -1,0 +1,229 @@
+NETWATCH PRE-MBASE AUDIT CHECKLIST
+====================================
+Created: 2026-03-13 | Session 10
+Purpose: Structured agenda for the audit session before mBase extraction begins.
+         For each item: is this correct, is this the right design for a reusable
+         framework, and does it need to change before being inherited by mBase?
+
+This is the AGENDA, not the answers. The audit session works through each item
+by reading the actual code and evaluating it against the questions listed.
+
+DESIGN STANDARD REFERENCE
+--------------------------
+All audit evaluations must be made against Networked_App_Standards_Summary.txt.
+That document defines the BORROW/BUILD/MIXED/ADOPT classification for every major
+concern in networked application development. Where NetWatch currently deviates
+from those standards, note it as a finding. The audit output should flag which
+deviations are worth correcting before mBase extraction vs which can be deferred.
+
+Key standards to apply during audit:
+- Auth: should use an IdP (Keycloak) rather than hand-rolled. Flag for mBase.
+- TLS: Let's Encrypt + Certbot standard. Evaluate current cert approach.
+- Logging: structured JSON + correlation IDs. Evaluate current logging format.
+- API design: versioned (/v1/), correct HTTP status codes, OpenAPI spec.
+- Input validation: Pydantic schema validation at all boundaries.
+- Error handling: no stack traces to users, RFC 7807 standard error format.
+- UI: Tailwind CSS + shadcn/ui is the target stack for mBase.
+
+
+SUBSYSTEM 1: AUTHENTICATION & SESSION MANAGEMENT
+-------------------------------------------------
+Files: auth.py, webapp.py (login/logout/session routes)
+Questions:
+- Is the password hashing implementation current best practice? (bcrypt rounds?)
+- Are sessions handled securely? (secret key, session lifetime, invalidation)
+- Is the "remember me" / persistent session handled correctly?
+- Are there any auth bypass risks in route protection?
+- Is get_current_user() consistent everywhere it's called?
+- Is the role system (admin/user/guest) clean enough to extend?
+- Would a new project need to change auth.py at all, or is it truly generic?
+Known history: Auth went through multiple redesigns. Early versions had dict vs
+  object access bugs (v3.2.49-v3.2.50). Check for any remaining inconsistencies.
+
+
+SUBSYSTEM 2: USER & ROLE MANAGEMENT
+-------------------------------------
+Files: auth.py, webapp.py (user management routes), database.py (users table)
+Questions:
+- Is the users table schema clean and complete?
+- Is role enforcement consistent across all protected routes?
+- Is the first-run/setup wizard logic separable from NetWatch-specific config?
+- Are there any hardcoded assumptions about user count or role names?
+- Is password reset fully self-contained and reusable?
+
+
+SUBSYSTEM 3: DATABASE LAYER
+-----------------------------
+Files: database.py
+Questions:
+- Is init_db() idempotent? (safe to run on existing DB)
+- Are all tables using separate c.execute() calls? (Gotcha: multi-statement crash)
+- Is the schema versioned or migration-aware?
+- Are there NetWatch-specific tables mixed in with generic ones?
+- Which tables are generic (users, sessions, settings, security_log) vs
+  NetWatch-specific (ping_results, speed_results, events)?
+- Is connection handling safe under gunicorn multi-worker?
+
+
+SUBSYSTEM 4: CONFIGURATION SYSTEM
+-----------------------------------
+Files: config.py, config_schema.py, configeditor.py
+Questions:
+- Is config_schema.py truly the single source of truth now? (v3.3.9 redesign)
+- Are there any hardcoded config references outside config.py?
+- Is the config editor UI generic enough to use for any project?
+- Are NetWatch-specific keys clearly separated from generic ones?
+- Is the NEEDS SETUP badge logic reusable?
+- Is config validation clean and extensible?
+
+
+SUBSYSTEM 5: PACKAGE INSTALLER / PATCHER
+------------------------------------------
+Files: patcher.py, updater.py
+Questions:
+- Is patcher.py fully generic or does it have NetWatch-specific assumptions?
+- Is the manifest format well-defined and documented?
+- Is the temp file handling bug fixed? (backlog item -- if not done yet, do it here)
+- Is SERVICE_MAP in updater.py the right abstraction for multiple projects?
+- Is the version enforcement (min_version) logic solid?
+- Are there any path assumptions baked in that would break under mBase?
+
+
+SUBSYSTEM 6: BACKUP & RESTORE
+-------------------------------
+Files: backup.sh, backup_db.sh, restore.sh, rollback.sh
+Questions:
+- Is the backup scope well-defined? (what's included, what's excluded)
+- Is the GPG encryption implementation solid?
+- Is rollback truly atomic? (confirmed in Sessions 6/7 but worth re-verifying design)
+- Are the shell scripts free of NetWatch-specific paths? (post v3.3.25 they should be)
+- Is the backup/restore flow something a new project could inherit without changes?
+
+
+SUBSYSTEM 7: SECURITY & LOGGING
+---------------------------------
+Files: security_log.py, webapp.py (security log routes)
+Questions:
+- Is security logging comprehensive? (failed logins, config changes, etc.)
+- Is the security log UI generic?
+- Are there any gaps in what gets logged?
+- Is the log retention policy defined and enforced?
+
+
+SUBSYSTEM 8: SSL/TLS & CERTIFICATE MANAGEMENT
+-----------------------------------------------
+Files: certmanager.py, generate_certs.sh, gunicorn.conf.py
+Questions:
+- Is the CA + server cert architecture solid?
+- Is cert generation fully automated or still partially manual?
+- Is the HTTPS configuration correct and secure? (cipher suites, TLS version)
+- Is this reusable as-is for mBase or does it need cleanup?
+
+
+SUBSYSTEM 9: ALERT & NOTIFICATION SYSTEM
+------------------------------------------
+Files: alerts.py, alert_subscribers.py
+Questions:
+- Is the subscriber model generic enough for non-network alerts?
+- Is email delivery solid and well-tested?
+- Is the alert deduplication / cooldown logic correct?
+- Are there NetWatch-specific alert types hardcoded that need extracting?
+- Is delivery history tracked and accessible?
+
+
+SUBSYSTEM 10: PACKAGE UPDATE SCHEDULING
+-----------------------------------------
+Files: pkg_update.sh, pkg_update_alert.py, webapp.py (scheduling routes)
+Questions:
+- Is the cron-based scheduling approach the right one for mBase?
+- Is the update flow safe? (dry-run before apply, logging, alerting)
+- Is this generic enough to inherit or too NetWatch-specific?
+
+
+SUBSYSTEM 11: WEB FRAMEWORK & GUNICORN
+----------------------------------------
+Files: webapp.py, wsgi.py, gunicorn.conf.py
+Questions:
+- Is the Flask app structure clean and well-organized?
+- Is the blueprint/route organization scalable?
+- Are there NetWatch-specific routes mixed into what should be generic routes?
+- Is the gunicorn configuration correct for a Pi? (workers, timeout, preload)
+- Is the WebCrypto / AES-GCM implementation for config encryption solid?
+
+
+SUBSYSTEM 12: FRONTEND ARCHITECTURE
+--------------------------------------
+Files: templates/, static/
+Questions:
+- Is the base template clean and generic?
+- Is the theme/layout system reusable?
+- Are there NetWatch-specific UI elements baked into the base template?
+- Is the JavaScript organized or scattered?
+- Is Chart.js usage encapsulated or spread throughout?
+
+
+SUBSYSTEM 13: SERVICE ACCOUNT & DEPLOYMENT
+--------------------------------------------
+Files: install.sh, systemd unit files, sudoers
+Questions:
+- Is the install.sh generic enough for mBase? (post v3.3.25 it mostly is)
+- Is the service account approach documented well enough to replicate?
+- Are the systemd unit files correct and complete?
+- Is the deployment workflow (package installer + manual steps) well-documented?
+
+
+CROSS-CUTTING CONCERNS
+-----------------------
+- Are there any hardcoded hostnames, IPs, or paths that would break under mBase?
+- Is error handling consistent across the codebase?
+- Is logging consistent? (all modules using the same logger pattern?)
+- Are there any known security issues that should be fixed before mBase inherits them?
+- Is the inline documentation sufficient for a future Claude to understand each module?
+- Are there any dependencies that are NetWatch-specific vs generic?
+
+
+MBASE EXTRACTION QUESTIONS
+---------------------------
+After evaluating each subsystem, answer these:
+1. Which subsystems are generic as-is and can be copied directly?
+2. Which subsystems need cleanup before extraction?
+3. Which subsystems are NetWatch-specific and stay in NetWatch only?
+4. What is the minimum viable mBase? (what must be there for any new project)
+5. What is the recommended mBase? (what should be there for most projects)
+6. What order should the extraction happen in?
+7. Should mBase be a separate Git repo, a separate Pi, or a directory structure?
+
+
+MODULE SYSTEM EVALUATION (ADDED SESSION 10)
+--------------------------------------------
+These questions were added after the mBase planning discussion. The audit session
+must evaluate NetWatch's current architecture against the module system design
+described in mBase_Plan.txt.
+
+Questions:
+- Where in the current codebase would the module loader live?
+- How does webapp.py currently handle route registration -- is it extensible or
+  would a module system require significant refactoring?
+- How does the database layer handle schema additions -- could a module register
+  new tables cleanly?
+- Is the dashboard architecture (templates, JS, Chart.js) structured in a way
+  that supports dynamic card registration from modules?
+- Is the scheduler (currently cron-based) extensible enough for modules to
+  register their own scheduled tasks?
+- Is the alert system structured so modules can define their own alert rules
+  without modifying alerts.py directly?
+- Is the config schema system (config_schema.py) extensible enough that a module
+  can add its own config entries?
+
+Integration standard readiness:
+- Does the current codebase have any hooks for OpenTelemetry, or would OTel
+  support need to be built from scratch?
+- Is there a clean place to add an HTTP client library for webhook/REST integrations?
+- Are there any existing patterns in the code that approximate module registration
+  that could be extended rather than replaced?
+
+Output from this section:
+- Assessment of how much refactoring the module system requires vs how much
+  can be built on top of what exists
+- Identification of any current architectural decisions that would actively
+  conflict with the module system design

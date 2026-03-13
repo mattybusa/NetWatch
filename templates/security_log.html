@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Security Log{% endblock %}
+
+{% block content %}
+<div style="max-width:960px;">
+
+  <!-- ── Page header with period selector ── -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+    <h2 style="font-family:var(--font-mono);color:var(--accent);font-size:1.1rem;letter-spacing:2px;margin:0;">
+      SECURITY LOG
+    </h2>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:0.7rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;">Period:</span>
+      <div style="display:flex;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;background:var(--bg-input);">
+        <button class="period-btn active" data-hours="24"  onclick="setPeriod(this)">24H</button>
+        <button class="period-btn"        data-hours="168" onclick="setPeriod(this)">7D</button>
+        <button class="period-btn"        data-hours="720" onclick="setPeriod(this)">30D</button>
+      </div>
+    </div>
+  </div>
+  <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:20px;">
+    Login attempts, password changes, relay triggers, and other security-relevant events.
+  </p>
+
+  <!-- ── Summary bar ── -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+    <div class="nw-card p-3" style="text-align:center;">
+      <div style="font-size:1.4rem;font-weight:700;color:var(--ok);" id="stat-logins">—</div>
+      <div style="font-size:0.72rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;" id="label-logins">Logins (24H)</div>
+    </div>
+    <div class="nw-card p-3" style="text-align:center;">
+      <div style="font-size:1.4rem;font-weight:700;color:var(--fail);" id="stat-failures">—</div>
+      <div style="font-size:0.72rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;" id="label-failures">Failures (24H)</div>
+    </div>
+    <div class="nw-card p-3 clickable-card" style="text-align:center;cursor:pointer;"
+         onclick="openIpModal()" title="Click to view IP details">
+      <div style="font-size:1.4rem;font-weight:700;color:var(--warn);" id="stat-unique-ips">—</div>
+      <div style="font-size:0.72rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;" id="label-unique-ips">
+        Unique IPs (24H) <span style="color:var(--accent);font-size:0.65rem;">↗</span>
+      </div>
+    </div>
+    <div class="nw-card p-3" style="text-align:center;">
+      <div style="font-size:1.4rem;font-weight:700;color:var(--accent);" id="stat-pw-changes">—</div>
+      <div style="font-size:0.72rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;" id="label-pw-changes">PW Changes (24H)</div>
+    </div>
+  </div>
+
+  <!-- ── Filter bar ── -->
+  <div class="nw-card p-3 mb-3" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+    <div style="font-size:0.72rem;color:var(--text-label);letter-spacing:1px;text-transform:uppercase;font-weight:600;">Filter:</div>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="login_ok" checked> ✅ Logins</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="login_fail" checked> ❌ Failures</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="login_disabled" checked> 🔒 Disabled</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="logout" checked> 👋 Logouts</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="password_change" checked> 🔑 Password</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="relay_trigger" checked> ⚡ Relay</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="config_change" checked> ⚙️ Config</label>
+    <select id="limit-select" style="margin-left:auto;background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;padding:4px 8px;color:var(--text-primary);font-size:0.8rem;">
+      <option value="100">Last 100</option>
+      <option value="250">Last 250</option>
+      <option value="500">Last 500</option>
+    </select>
+    <button class="nw-btn" onclick="loadEvents()" style="font-size:0.8rem;padding:4px 12px;">Refresh</button>
+  </div>
+
+  <!-- ── Events table ── -->
+  <div class="nw-card" style="overflow:hidden;">
+    <div style="display:grid;grid-template-columns:140px 90px 110px 1fr;gap:0;
+                font-size:0.7rem;font-weight:600;color:var(--text-label);letter-spacing:1px;
+                text-transform:uppercase;padding:10px 16px;border-bottom:1px solid var(--border-color);">
+      <div>Time (UTC)</div><div>Event</div><div>User</div><div>Detail / IP</div>
+    </div>
+    <div id="events-list" style="max-height:600px;overflow-y:auto;">
+      <div style="padding:20px;text-align:center;color:var(--text-muted);font-size:0.82rem;">Loading...</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── IP Summary Modal ── -->
+<div id="ip-modal" style="display:none;position:fixed;inset:0;z-index:1000;
+     background:rgba(0,0,0,0.6);backdrop-filter:blur(3px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;
+              max-width:780px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-color);">
+      <div>
+        <div style="font-family:var(--font-mono);color:var(--accent);font-size:0.9rem;letter-spacing:2px;text-transform:uppercase;" id="ip-modal-title">IP Activity (24H)</div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:3px;">Click any IP to look up geo and network information</div>
+      </div>
+      <button onclick="closeIpModal()" class="nw-btn" style="padding:4px 12px;">✕ Close</button>
+    </div>
+    <div style="overflow-y:auto;padding:16px 20px;flex:1;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
+        <thead>
+          <tr style="font-size:0.7rem;color:var(--text-label);letter-spacing:1px;text-transform:uppercase;">
+            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border-color);">IP Address</th>
+            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border-color);">Type</th>
+            <th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border-color);">Events</th>
+            <th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border-color);">✅ OK</th>
+            <th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border-color);">❌ Fail</th>
+            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border-color);">First Seen</th>
+            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border-color);">Last Seen</th>
+            <th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--border-color);">Lookup</th>
+          </tr>
+        </thead>
+        <tbody id="ip-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── Geo Detail Modal ── -->
+<div id="geo-modal" style="display:none;position:fixed;inset:0;z-index:1100;
+     background:rgba(0,0,0,0.7);backdrop-filter:blur(3px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;
+              max-width:480px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-color);">
+      <div style="font-family:var(--font-mono);color:var(--accent);font-size:0.9rem;letter-spacing:2px;text-transform:uppercase;" id="geo-title">IP Lookup</div>
+      <button onclick="closeGeoModal()" class="nw-btn" style="padding:4px 12px;">✕</button>
+    </div>
+    <div style="padding:20px;" id="geo-body">
+      <div style="text-align:center;color:var(--text-muted);padding:20px;">Looking up...</div>
+    </div>
+  </div>
+</div>
+
+<style>
+.evt-row { display:grid; grid-template-columns:140px 90px 110px 1fr; gap:0; padding:8px 16px; border-bottom:1px solid var(--border-color); font-size:0.8rem; align-items:center; }
+.evt-row:hover { background:var(--bg-input); }
+.evt-badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:0.68rem; font-weight:600; letter-spacing:0.5px; text-transform:uppercase; }
+.clickable-card:hover { border-color:var(--accent) !important; transform:translateY(-1px); transition:all 0.15s; }
+.ip-link { color:var(--accent); cursor:pointer; font-family:var(--font-mono); font-size:0.75rem; text-decoration:none; border-bottom:1px dashed var(--accent); }
+.ip-link:hover { opacity:0.8; }
+.geo-row { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border-color); font-size:0.82rem; }
+.geo-row:last-child { border-bottom:none; }
+.geo-label { color:var(--text-muted); font-size:0.75rem; }
+.geo-value { color:var(--text-primary); font-weight:500; text-align:right; max-width:60%; word-break:break-all; }
+.period-btn { background:none; border:none; padding:4px 12px; font-size:0.72rem; font-weight:600; letter-spacing:1px; color:var(--text-muted); cursor:pointer; transition:all 0.15s; border-right:1px solid var(--border-color); }
+.period-btn:last-child { border-right:none; }
+.period-btn:hover { color:var(--accent); background:rgba(var(--accent-rgb,100,180,255),0.08); }
+.period-btn.active { background:var(--accent); color:#fff; }
+</style>
+
+<script>
+const EVENT_META = {
+  login_ok:        { label:"LOGIN",    color:"var(--ok)" },
+  login_fail:      { label:"FAILED",   color:"var(--fail)" },
+  login_disabled:  { label:"DISABLED", color:"var(--warn)" },
+  logout:          { label:"LOGOUT",   color:"var(--text-muted)" },
+  password_change: { label:"PASSWORD", color:"var(--accent)" },
+  password_reset:  { label:"PW RESET", color:"var(--warn)" },
+  user_created:    { label:"NEW USER", color:"var(--ok)" },
+  user_deleted:    { label:"DEL USER", color:"var(--fail)" },
+  relay_trigger:   { label:"RELAY",    color:"#2980b9" },
+  config_change:   { label:"CONFIG",   color:"var(--accent)" },
+  session_expired: { label:"EXPIRED",  color:"var(--text-muted)" },
+};
+
+let allEvents         = [];
+let activePeriodHours = 24;
+
+// ── Period selector ───────────────────────────────────────────────────────────
+function setPeriod(btn) {
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  activePeriodHours = parseInt(btn.dataset.hours);
+  const lbl = btn.textContent.trim();
+  document.getElementById('label-logins').textContent    = `Logins (${lbl})`;
+  document.getElementById('label-failures').textContent  = `Failures (${lbl})`;
+  document.getElementById('label-unique-ips').innerHTML  = `Unique IPs (${lbl}) <span style="color:var(--accent);font-size:0.65rem;">↗</span>`;
+  document.getElementById('label-pw-changes').textContent= `PW Changes (${lbl})`;
+  updateStats(allEvents);
+}
+
+function getPeriodCutoff() {
+  return new Date(Date.now() - activePeriodHours * 3_600_000)
+    .toISOString().replace('T',' ').slice(0,19);
+}
+
+function activePeriodLabel() {
+  return document.querySelector('.period-btn.active').textContent.trim();
+}
+
+// ── Private IP ────────────────────────────────────────────────────────────────
+function isPrivateIp(ip) {
+  if (!ip) return false;
+  return ip.startsWith("192.168.") || ip.startsWith("10.") ||
+         /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
+         ip === "127.0.0.1" || ip === "::1";
+}
+
+// ── Load & render events ──────────────────────────────────────────────────────
+async function loadEvents() {
+  const types  = [...document.querySelectorAll('.evt-filter:checked')].map(c => c.value);
+  const limit  = document.getElementById('limit-select').value;
+  const params = new URLSearchParams();
+  types.forEach(t => params.append('type', t));
+  params.set('limit', limit);
+  const events = await fetch(`/api/security/events?${params}`).then(r => r.json());
+  allEvents = events;
+  renderEvents(events);
+  updateStats(events);
+}
+
+function renderEvents(events) {
+  const el = document.getElementById('events-list');
+  if (!events.length) { el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:0.82rem;">No events found.</div>'; return; }
+  el.innerHTML = events.map(e => {
+    const meta   = EVENT_META[e.event_type] || { label: e.event_type, color: "var(--text-muted)" };
+    const badge  = `<span class="evt-badge" style="background:${meta.color}22;color:${meta.color};border:1px solid ${meta.color}44;">${meta.label}</span>`;
+    const ipPart = e.ip_address ? `<span class="ip-link" onclick="lookupIp('${e.ip_address}')" title="Click to look up ${e.ip_address}">${e.ip_address}</span>` : '';
+    const detail = [e.detail, ipPart].filter(Boolean).join(' — ');
+    const rowBg  = e.event_type === 'login_fail' ? 'background:rgba(183,28,28,0.05);' : '';
+    return `<div class="evt-row" style="${rowBg}">
+      <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);">${e.timestamp}</div>
+      <div>${badge}</div>
+      <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${e.username || '—'}</div>
+      <div style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${detail}</div>
+    </div>`;
+  }).join('');
+}
+
+function updateStats(events) {
+  const cutoff = getPeriodCutoff();
+  const recent = events.filter(e => e.timestamp >= cutoff);
+  document.getElementById('stat-logins').textContent     = recent.filter(e => e.event_type === 'login_ok').length;
+  document.getElementById('stat-failures').textContent   = recent.filter(e => e.event_type === 'login_fail').length;
+  document.getElementById('stat-unique-ips').textContent = new Set(recent.filter(e => e.ip_address).map(e => e.ip_address)).size;
+  document.getElementById('stat-pw-changes').textContent = recent.filter(e => ['password_change','password_reset'].includes(e.event_type)).length;
+}
+
+// ── IP Modal ──────────────────────────────────────────────────────────────────
+function openIpModal() {
+  const cutoff = getPeriodCutoff();
+  const recent = allEvents.filter(e => e.timestamp >= cutoff && e.ip_address);
+  document.getElementById('ip-modal-title').textContent = `IP Activity (${activePeriodLabel()})`;
+
+  const ipMap = {};
+  recent.forEach(e => {
+    const ip = e.ip_address;
+    if (!ipMap[ip]) ipMap[ip] = { ip, total:0, ok:0, fail:0, first:e.timestamp, last:e.timestamp };
+    ipMap[ip].total++;
+    if (e.event_type === 'login_ok')   ipMap[ip].ok++;
+    if (e.event_type === 'login_fail') ipMap[ip].fail++;
+    if (e.timestamp < ipMap[ip].first) ipMap[ip].first = e.timestamp;
+    if (e.timestamp > ipMap[ip].last)  ipMap[ip].last  = e.timestamp;
+  });
+
+  const ips = Object.values(ipMap).sort((a,b) => b.total - a.total);
+  const fmt = activePeriodHours > 24
+    ? t => t.slice(5,16)     // MM-DD HH:MM
+    : t => t.slice(11,19);   // HH:MM:SS
+
+  document.getElementById('ip-tbody').innerHTML = !ips.length
+    ? `<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--text-muted);">No IP activity in selected period</td></tr>`
+    : ips.map(r => {
+        const priv = isPrivateIp(r.ip);
+        const typeTag = priv
+          ? `<span style="font-size:0.68rem;padding:1px 6px;border-radius:3px;background:rgba(33,150,243,0.1);color:#2196f3;border:1px solid rgba(33,150,243,0.3);">LOCAL</span>`
+          : `<span style="font-size:0.68rem;padding:1px 6px;border-radius:3px;background:rgba(255,152,0,0.1);color:var(--warn);border:1px solid rgba(255,152,0,0.3);">EXTERNAL</span>`;
+        const failStyle = r.fail > 0 ? 'color:var(--fail);font-weight:600;' : 'color:var(--text-muted);';
+        return `<tr style="border-bottom:1px solid var(--border-color);">
+          <td style="padding:8px;font-family:var(--font-mono);font-size:0.78rem;"><span class="ip-link" onclick="lookupIp('${r.ip}')">${r.ip}</span></td>
+          <td style="padding:8px;">${typeTag}</td>
+          <td style="padding:8px;text-align:center;font-weight:600;">${r.total}</td>
+          <td style="padding:8px;text-align:center;color:var(--ok);">${r.ok || '—'}</td>
+          <td style="padding:8px;text-align:center;${failStyle}">${r.fail || '—'}</td>
+          <td style="padding:8px;font-size:0.72rem;color:var(--text-muted);">${fmt(r.first)}</td>
+          <td style="padding:8px;font-size:0.72rem;color:var(--text-muted);">${fmt(r.last)}</td>
+          <td style="padding:8px;text-align:center;"><button class="nw-btn" style="font-size:0.7rem;padding:2px 8px;" onclick="lookupIp('${r.ip}')">🔍 Lookup</button></td>
+        </tr>`;
+      }).join('');
+
+  document.getElementById('ip-modal').style.display = 'flex';
+}
+
+function closeIpModal() { document.getElementById('ip-modal').style.display = 'none'; }
+
+// ── Geo Lookup ────────────────────────────────────────────────────────────────
+async function lookupIp(ip) {
+  document.getElementById('geo-title').textContent = ip;
+  document.getElementById('geo-body').innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">Looking up...</div>';
+  document.getElementById('geo-modal').style.display = 'flex';
+
+  if (isPrivateIp(ip)) { document.getElementById('geo-body').innerHTML = renderGeoPrivate(ip); return; }
+
+  try {
+    const d = await fetch(`https://ip-api.com/json/${ip}?fields=status,message,country,regionName,city,zip,isp,org,as,reverse,mobile,proxy,hosting,query`).then(r => r.json());
+    document.getElementById('geo-body').innerHTML = d.status === 'fail'
+      ? `<div style="color:var(--fail);padding:16px;">Lookup failed: ${d.message || 'Unknown error'}</div>`
+      : renderGeoResult(d);
+  } catch {
+    document.getElementById('geo-body').innerHTML = `<div style="color:var(--fail);padding:16px;">Request failed — check network connection.</div>`;
+  }
+}
+
+function renderGeoPrivate(ip) {
+  const subnet = ip.startsWith('192.168.') ? ip.split('.').slice(0,3).join('.')+'.x' : ip.startsWith('10.') ? '10.x.x.x' : ip === '127.0.0.1' ? 'Loopback' : 'Private range';
+  return `<div style="margin-bottom:12px;"><span style="font-size:0.68rem;padding:2px 8px;border-radius:3px;background:rgba(33,150,243,0.1);color:#2196f3;border:1px solid rgba(33,150,243,0.3);">LOCAL / PRIVATE</span></div>
+    <div class="geo-row"><span class="geo-label">IP Address</span><span class="geo-value" style="font-family:var(--font-mono);">${ip}</span></div>
+    <div class="geo-row"><span class="geo-label">Subnet</span><span class="geo-value">${subnet}</span></div>
+    <div class="geo-row"><span class="geo-label">Location</span><span class="geo-value">Private network — not routable</span></div>
+    <div style="margin-top:14px;padding:10px 12px;border-radius:6px;background:rgba(33,150,243,0.07);border:1px solid rgba(33,150,243,0.2);font-size:0.75rem;color:var(--text-muted);">Private IPs are internal addresses and cannot be geo-located.</div>`;
+}
+
+function renderGeoResult(d) {
+  const flags = [];
+  if (d.proxy)   flags.push(`<span style="color:var(--warn);">⚠ Proxy/VPN detected</span>`);
+  if (d.hosting) flags.push(`<span style="color:var(--warn);">⚠ Hosting/datacenter IP</span>`);
+  if (d.mobile)  flags.push(`<span style="color:var(--accent);">📱 Mobile network</span>`);
+  return `${flags.length ? `<div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;">${flags.join('')}</div>` : ''}
+    <div class="geo-row"><span class="geo-label">IP Address</span><span class="geo-value" style="font-family:var(--font-mono);">${d.query}</span></div>
+    <div class="geo-row"><span class="geo-label">Location</span><span class="geo-value">${[d.city,d.regionName,d.country].filter(Boolean).join(', ')||'—'}</span></div>
+    <div class="geo-row"><span class="geo-label">Postal Code</span><span class="geo-value">${d.zip||'—'}</span></div>
+    <div class="geo-row"><span class="geo-label">ISP</span><span class="geo-value">${d.isp||'—'}</span></div>
+    <div class="geo-row"><span class="geo-label">Organization</span><span class="geo-value">${d.org||'—'}</span></div>
+    <div class="geo-row"><span class="geo-label">AS Number</span><span class="geo-value" style="font-family:var(--font-mono);font-size:0.75rem;">${d.as||'—'}</span></div>
+    <div class="geo-row"><span class="geo-label">Hostname</span><span class="geo-value" style="font-family:var(--font-mono);font-size:0.73rem;">${d.reverse||'—'}</span></div>
+    <div style="margin-top:14px;padding:8px 12px;border-radius:6px;background:var(--bg-input);font-size:0.7rem;color:var(--text-muted);">Data provided by ip-api.com</div>`;
+}
+
+function closeGeoModal() { document.getElementById('geo-modal').style.display = 'none'; }
+
+document.getElementById('ip-modal').addEventListener('click', function(e) { if (e.target===this) closeIpModal(); });
+document.getElementById('geo-modal').addEventListener('click', function(e) { if (e.target===this) closeGeoModal(); });
+document.querySelectorAll('.evt-filter').forEach(cb => cb.addEventListener('change', loadEvents));
+document.getElementById('limit-select').addEventListener('change', loadEvents);
+loadEvents();
+</script>
+{% endblock %}

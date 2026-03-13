@@ -1,0 +1,76 @@
+NETWATCH EXPANDED SUMMARY
+=========================
+Bug_BackfillSubscribers.txt
+
+FEATURE/BUG HEADER
+------------------
+- Name: backfill_account_subscribers() NOT NULL constraint error on startup
+- Type: Bug
+- Date worked on: 2026-03-07
+- Sessions: Session 2
+- Final outcome: Complete — fixed in v3.2.61
+
+
+BACKGROUND
+----------
+On every startup, the monitor service logged a NOT NULL constraint error from
+backfill_account_subscribers() in alert_subscribers.py. The error was non-fatal —
+the service continued running — but it logged as an error on every boot, creating
+noise in journald and potentially masking real errors.
+
+backfill_account_subscribers() is called at startup to ensure all current users have
+a corresponding row in the alert_subscribers table. It iterates over users and INSERTs
+any who are missing.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Initial SQLite testing attempt via ">" prompt:
+  Claude initially attempted to have the user test the INSERT behavior by running SQLite
+  commands directly. The user was not at a standard SQLite prompt (was at a ">" secondary
+  prompt, not the normal "sqlite>" prompt) and the commands failed with syntax errors.
+  Multiple turns were spent before Claude recognized the user was copying and pasting
+  multi-line commands into an incomplete interactive session.
+
+  Root cause of the confusion: Claude provided multi-line SQL as if the user would paste
+  it into a fresh sqlite3 session, but the user was already mid-session at a ">" prompt
+  waiting for more input. Claude had not been explicit enough about the exact prompt state.
+
+  Lesson: When directing a non-experienced Linux user to run SQLite commands, be explicit
+  about starting a fresh sqlite3 session and what the expected prompt looks like at each
+  step. Alternatively, avoid interactive SQLite testing entirely — use a Python one-liner
+  that can be executed as a single bash command.
+
+  Reference: Gotchas.txt general entry "DO NOT DIAGNOSE FROM SURFACE CODE READS" covers
+  the broader pattern. This incident is specific to interactive SQLite session state.
+
+
+WHAT WORKED
+-----------
+Root cause:
+  The INSERT statement in backfill_account_subscribers() was missing the created_at
+  column. The schema defined created_at as NOT NULL with no default value. When
+  backfill ran for a user without an existing subscriber row, the INSERT omitted
+  created_at, causing the constraint violation.
+
+Fix — v3.2.61:
+  File modified: alert_subscribers.py
+  Change: Added `created_at` column to the INSERT statement with the current timestamp.
+  Exact change: The INSERT now explicitly sets created_at = datetime('now') (or
+  equivalent strftime call — consistent with the pattern used elsewhere in database.py).
+
+  Package manifest:
+    version: v3.2.61
+    description: "Fix backfill_account_subscribers(): INSERT was missing created_at
+    column, causing NOT NULL constraint error on every startup. Non-fatal but logged
+    as error."
+    services restarted: both (alert_subscribers.py is imported by both services)
+
+Verification:
+  After installing v3.2.61, user confirmed via journalctl that the NOT NULL error was
+  no longer appearing on startup.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+None — bug fully resolved. backfill_account_subscribers() runs cleanly on startup.

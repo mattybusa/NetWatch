@@ -1,0 +1,84 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: RELAY CONTROLS AND GPIO
+=============================================================
+Name: GPIO Relay Control, Power Cycling, and Reset Logic
+Type: Feature
+Date: 2026-02-28 (initial); v2.5 (debugging, confirmed working)
+Sessions: Session 1.1 (initial wiring decision), Session 1.2 (debugging)
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+The core hardware feature of NetWatch: two GPIO-controlled relays wired to modem and
+router power supplies. When the monitor detects an internet outage, it power-cycles
+the modem and/or router in sequence. The user also has a physical button for manual
+triggering and a web UI control.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+GPIO edge detection error on first service start:
+netwatch-monitor failed immediately with "Failed to add edge detection" on the button
+GPIO pin. Root cause: relay.py initialized GPIO before button.py could set up its pin.
+Fixed by reordering initialization sequence so GPIO.setmode() is called once, then
+all GPIO.setup() calls happen before any event detection is added.
+
+Active-LOW vs Active-HIGH confusion:
+Initial configuration had RELAY_ACTIVE_LOW = True (most common relay board default).
+Debugging confirmed the user's relay boards fire on HIGH signal (active-HIGH).
+Setting corrected to RELAY_ACTIVE_LOW = False. The RELAY_ACTIVE_LOW config flag
+was kept for future flexibility.
+
+
+WHAT WORKED
+-----------
+WIRING DECISIONS:
+- NC (Normally Closed): relays wired in NC configuration. Pi GPIO LOW = relay closed
+  (power flowing). Pi GPIO HIGH = relay open (power cut). This means a Pi crash,
+  reboot, or GPIO reset does NOT accidentally trigger a power cycle. Power cycle
+  only happens on deliberate HIGH signal.
+- Relay 1 = Modem reset (GPIO pin configured in config.py as RELAY_MODEM_PIN)
+- Relay 2 = Router reset (GPIO pin configured as RELAY_ROUTER_PIN)
+- Active-HIGH: GPIOout.HIGH fires the relay (opens the NC contact, cuts power)
+
+RESET SEQUENCE LOGIC (monitor.py / relay.py):
+1. If LAN fails → do nothing (Pi itself may have a local issue, or router power already off)
+2. If WAN fails but LAN OK → modem reset sequence:
+   a. GPIO HIGH on RELAY_MODEM_PIN (cut modem power)
+   b. Wait POWER_CYCLE_OFF_TIME seconds (configurable, default 10)
+   c. GPIO LOW (restore modem power)
+   d. Wait ROUTER_BOOT_DELAY seconds (wait for modem to come up)
+   e. GPIO HIGH on RELAY_ROUTER_PIN (cut router power)
+   f. Wait POWER_CYCLE_OFF_TIME seconds
+   g. GPIO LOW (restore router power)
+   h. Wait ROUTER_BOOT_DELAY seconds (wait for router to come up)
+   i. Resume monitoring
+3. MAX_RESETS_PER_DAY circuit breaker: if daily reset count hits limit, stop
+   auto-resetting and alert instead.
+
+MANUAL CONTROLS (web UI):
+- Controls page (/controls): individual reset buttons for modem and router
+- Requires manage_controls permission
+- Manual reset triggers the same relay sequence as auto-reset
+- Reset event logged to DB with triggered_by = username
+
+PHYSICAL BUTTON:
+- button.py: GPIO input with pull-up resistor, falling-edge detection
+- Short press: manual reset (modem + router in sequence)
+- Long press (configurable): configurable action (default: no action, reserved)
+- Debounce: 300ms
+
+CONFIG.PY KEYS:
+- RELAY_MODEM_PIN — GPIO BCM pin number for modem relay
+- RELAY_ROUTER_PIN — GPIO BCM pin number for router relay
+- RELAY_ACTIVE_LOW — True for active-LOW boards, False for active-HIGH (user's boards)
+- POWER_CYCLE_OFF_TIME — seconds to hold power off during cycle (default 10)
+- ROUTER_BOOT_DELAY — seconds to wait after modem comes up before resetting router
+- MAX_RESETS_PER_DAY — daily auto-reset circuit breaker
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- ROUTER_BOOT_DELAY exact value: user was still determining the right timing for their
+  specific router at session end. Not a code issue — just a tuning value in config.py.
+- Physical button long-press action: reserved but not implemented. Currently only
+  short-press (full reset sequence) is wired.

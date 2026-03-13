@@ -1,0 +1,830 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — User Management{% endblock %}
+
+{% block content %}
+
+<style>
+.tab-btn {
+  padding: 8px 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px 6px 0 0;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.83rem;
+  font-family: var(--font-body);
+  margin-right: 4px;
+  transition: all 0.15s;
+}
+.tab-btn.active { background: var(--bg-card); color: var(--accent); border-bottom-color: var(--bg-card); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.modal-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--card-radius);
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow);
+}
+.modal-title { font-weight: 700; color: var(--text-primary); margin-bottom: 20px; font-size: 1rem; }
+.f-label { display: block; font-size: 0.7rem; color: var(--text-label); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; margin-top: 14px; }
+.f-input { width: 100%; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-family: var(--font-body); font-size: 0.85rem; outline: none; transition: border-color 0.2s; box-sizing: border-box; }
+.f-input:focus { border-color: var(--border-focus); }
+.perm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.perm-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-muted); cursor: pointer; }
+.perm-item input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+.btn-row { display: flex; gap: 10px; margin-top: 20px; }
+.role-badge {
+  font-size: 0.7rem; padding: 2px 8px; border-radius: 10px;
+  background: var(--accent-glow); color: var(--accent);
+  border: 1px solid var(--border-color);
+}
+</style>
+
+<!-- Tabs -->
+<div style="margin-bottom:-1px;">
+  <button class="tab-btn active" onclick="showTab('users')">Users</button>
+  <button class="tab-btn" onclick="showTab('roles')">Roles</button>
+
+</div>
+
+<div class="nw-card p-4" style="border-radius: 0 var(--card-radius) var(--card-radius) var(--card-radius);">
+
+  <!-- ── Users Tab ── -->
+  <div id="tab-users" class="tab-panel active">
+    <div class="d-flex align-items-center mb-3" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <div class="nw-label mb-0">User Accounts</div>
+      <button class="nw-btn nw-btn-primary" onclick="openCreateUser()">+ New User</button>
+    </div>
+    <div class="overflow-auto">
+      <table class="nw-table">
+        <thead><tr>
+          <th>Username</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="users-tbody">
+          <tr><td colspan="5" style="color:var(--text-muted);text-align:center;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Roles Tab ── -->
+  <div id="tab-roles" class="tab-panel">
+    <div class="d-flex align-items-center mb-3" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <div class="nw-label mb-0">Roles &amp; Permissions</div>
+      <button class="nw-btn nw-btn-primary" onclick="openCreateRole()">+ New Role</button>
+    </div>
+    <div class="overflow-auto">
+      <table class="nw-table">
+        <thead><tr>
+          <th>Role</th><th>View Logs</th><th>Controls</th><th>Admin</th><th>Manage Users</th><th>Session</th><th>Users</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="roles-tbody">
+          <tr><td colspan="8" style="color:var(--text-muted);text-align:center;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── Alert Defaults by Role (collapsible) ── -->
+    <div style="margin-top:24px;">
+      <div onclick="toggleRoleDefaults()" style="display:flex;align-items:center;gap:8px;
+           cursor:pointer;user-select:none;padding:10px 14px;background:var(--bg-input);
+           border-radius:8px;border:1px solid var(--border-color);">
+        <span id="role-defaults-chevron" style="font-size:0.75rem;transition:transform 0.2s;">▶</span>
+        <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);letter-spacing:1px;text-transform:uppercase;">
+          Alert Defaults by Role
+        </span>
+        <span style="font-size:0.72rem;color:var(--text-muted);margin-left:4px;">
+          — email &amp; SMS defaults per alert type for each role
+        </span>
+      </div>
+      <div id="role-defaults-panel" style="display:none;padding:16px 4px 4px;">
+        <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:14px;">
+          Subscribers inherit these defaults unless they've set their own overrides in Alert Subscriptions.
+        </p>
+        <div id="role-defaults-grid-admin" style="display:block;width:100%;"></div>
+        <div id="role-defaults-msg" style="display:none;font-size:0.8rem;margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+
+
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     MODALS
+     ══════════════════════════════════════════════════════════════════════ -->
+
+<!-- Create User -->
+<div class="modal-overlay" id="createUserModal">
+  <div class="modal-box">
+    <div class="modal-title">Create New User</div>
+    <label class="f-label">Username</label>
+    <input class="f-input" type="text" id="cu-username" placeholder="username">
+    <label class="f-label">Temporary Password</label>
+    <input class="f-input" type="password" id="cu-password" placeholder="min 8 characters">
+    <label class="f-label">Role</label>
+    <select class="f-input" id="cu-role"></select>
+    <div style="margin-top:14px;display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" id="cu-must-change" checked style="accent-color:var(--accent);width:15px;height:15px;">
+      <label for="cu-must-change" style="font-size:0.83rem;color:var(--text-muted);cursor:pointer;">
+        Require password change on first login
+      </label>
+    </div>
+    <div class="btn-row">
+      <button class="nw-btn" onclick="closeModal('createUserModal')">Cancel</button>
+      <button class="nw-btn nw-btn-primary" style="flex:1;" onclick="createUser()">Create User</button>
+    </div>
+    <div id="cu-result" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;font-size:0.82rem;"></div>
+  </div>
+</div>
+
+<!-- Edit User -->
+<div class="modal-overlay" id="editUserModal">
+  <div class="modal-box">
+    <div class="modal-title">Edit User</div>
+    <input type="hidden" id="edit-user-id">
+
+    <label class="f-label">Username</label>
+    <input class="f-input" type="text" id="edit-username" placeholder="Username">
+    <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">
+      Changing your own username updates your session immediately.
+    </div>
+
+    <label class="f-label">Role</label>
+    <select class="f-input" id="edit-role-id"></select>
+
+    <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="edit-is-active" style="accent-color:var(--accent);width:15px;height:15px;">
+        <label for="edit-is-active" style="font-size:0.83rem;color:var(--text-muted);cursor:pointer;">Account active</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="edit-must-change" style="accent-color:var(--accent);width:15px;height:15px;">
+        <label for="edit-must-change" style="font-size:0.83rem;color:var(--text-muted);cursor:pointer;">Force password change on next login</label>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="nw-btn" onclick="closeModal('editUserModal')">Cancel</button>
+      <button class="nw-btn nw-btn-primary" style="flex:1;" onclick="saveEditUser()">Save Changes</button>
+    </div>
+    <div id="eu-result" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;font-size:0.82rem;"></div>
+  </div>
+</div>
+
+<!-- Reset Password -->
+<div class="modal-overlay" id="resetPassModal">
+  <div class="modal-box">
+    <div class="modal-title">Reset Password</div>
+    <input type="hidden" id="rp-user-id">
+    <div style="font-size:0.83rem;color:var(--text-muted);margin-bottom:14px;">
+      Resetting <strong id="rp-username"></strong>'s password. They will be required to change it on next login.
+    </div>
+    <label class="f-label">New Temporary Password</label>
+    <input class="f-input" type="password" id="rp-password" placeholder="min 8 characters">
+    <div class="btn-row">
+      <button class="nw-btn" onclick="closeModal('resetPassModal')">Cancel</button>
+      <button class="nw-btn nw-btn-primary" style="flex:1;" onclick="resetPassword()">Reset Password</button>
+    </div>
+    <div id="rp-result" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;font-size:0.82rem;"></div>
+  </div>
+</div>
+
+<!-- Create/Edit Role -->
+<div class="modal-overlay" id="roleModal">
+  <div class="modal-box">
+    <div class="modal-title" id="role-modal-title">Create Role</div>
+    <input type="hidden" id="role-id">
+    <label class="f-label">Role Name</label>
+    <input class="f-input" type="text" id="role-name">
+    <label class="f-label">Description</label>
+    <input class="f-input" type="text" id="role-desc">
+    <label class="f-label" style="margin-top:16px;">Permissions</label>
+    <div class="perm-grid">
+      <label class="perm-item"><input type="checkbox" id="perm-logs"> View Logs</label>
+      <label class="perm-item"><input type="checkbox" id="perm-controls"> Use Controls</label>
+      <label class="perm-item"><input type="checkbox" id="perm-admin"> Admin Panel</label>
+      <label class="perm-item"><input type="checkbox" id="perm-users"> Manage Users</label>
+    </div>
+    <label class="f-label">Session Timeout</label>
+    <select class="f-input" id="role-timeout">
+      <option value="15">15 minutes</option>
+      <option value="60">1 hour</option>
+      <option value="480" selected>8 hours</option>
+      <option value="1440">24 hours</option>
+      <option value="0">Never</option>
+    </select>
+    <div class="btn-row">
+      <button class="nw-btn" onclick="closeModal('roleModal')">Cancel</button>
+      <button class="nw-btn nw-btn-primary" style="flex:1;" onclick="saveRole()">Save Role</button>
+    </div>
+    <div id="role-result" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;font-size:0.82rem;"></div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function showTabByName(name) {
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("tab-" + name).classList.add("active");
+  const btn = document.querySelector(`.tab-btn[onclick*="'${name}'"]`);
+  if (btn) btn.classList.add("active");
+}
+function showTab(name) {
+  showTabByName(name);
+}
+
+// ── Modal helpers ─────────────────────────────────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add("open"); }
+function closeModal(id) { document.getElementById(id).classList.remove("open"); }
+
+// Close modal on overlay click
+document.querySelectorAll(".modal-overlay").forEach(o => {
+  o.addEventListener("click", e => { if (e.target === o) o.classList.remove("open"); });
+});
+
+// ── API helper ────────────────────────────────────────────────────────────────
+async function api(url, method = "GET", body = null) {
+  const opts = { method, headers: { "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  const res  = await fetch(url, opts);
+  return res.json();
+}
+
+function showResult(id, msg, ok) {
+  const el = document.getElementById(id);
+  el.style.display    = "block";
+  el.style.background = ok ? "var(--ok-glow)"   : "var(--fail-glow)";
+  el.style.border     = ok ? "1px solid var(--ok)" : "1px solid var(--fail)";
+  el.textContent      = msg;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// USERS
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function loadUsers() {
+  const [users, roles] = await Promise.all([
+    api("/api/auth/users"),
+    api("/api/auth/roles")
+  ]);
+
+  // Populate role selects
+  const roleOpts = roles.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
+  document.getElementById("cu-role").innerHTML    = roleOpts;
+  document.getElementById("edit-role-id").innerHTML = roleOpts;
+
+  const tb = document.getElementById("users-tbody");
+  if (!users.length) {
+    tb.innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);text-align:center;">No users</td></tr>`;
+    return;
+  }
+
+  tb.innerHTML = users.map(u => `
+    <tr>
+      <td>
+        <strong>${u.username}</strong>
+        ${u.must_change_pass ? `<span style="font-size:0.68rem;color:var(--warn);margin-left:6px;">⚠ must change password</span>` : ""}
+      </td>
+      <td><span class="role-badge">${u.role_name}</span></td>
+      <td>
+        ${!u.is_active
+          ? `<span style="color:var(--fail);font-weight:600;">Disabled</span>`
+          : u.is_locked
+            ? `<span style="color:var(--warn);">🔒 Locked <small>(${u.minutes_remaining}m)</small></span>`
+            : `<span style="color:var(--ok);">Active</span>`}
+      </td>
+      <td style="color:var(--text-muted);font-size:0.78rem;">
+        ${u.last_login ? new Date(u.last_login).toLocaleString() : "Never"}
+      </td>
+      <td>
+        <button class="range-btn" onclick="openEditUser(${u.id},'${u.username}',${u.role_id},${u.is_active},${u.must_change_pass})">Edit</button>
+        <button class="range-btn" onclick="openResetPass(${u.id},'${u.username}')">Reset PW</button>
+        ${u.is_locked ? `<button class="range-btn" style="color:var(--warn);" onclick="unlockUser(${u.id},'${u.username}')">Unlock</button>` : ""}
+        ${u.is_active
+          ? `<button class="range-btn" style="color:var(--warn);" onclick="setUserActive(${u.id},'${u.username}',false)">Disable</button>`
+          : `<button class="range-btn" style="color:var(--ok);" onclick="setUserActive(${u.id},'${u.username}',true)">Enable</button>`}
+        <button class="range-btn" style="color:var(--fail);" onclick="deleteUser(${u.id},'${u.username}')">Delete</button>
+      </td>
+    </tr>`).join("");
+}
+
+async function openCreateUser() {
+  document.getElementById("cu-username").value   = "";
+  document.getElementById("cu-password").value   = "";
+  document.getElementById("cu-must-change").checked = true;
+  document.getElementById("cu-result").style.display = "none";
+  // Always refresh role dropdown so it's never stale or empty
+  try {
+    const roles = await api("/api/auth/roles");
+    const sorted = [...roles].sort((a,b) => {
+      const order = {Admin:0, Operator:1, Monitor:2};
+      const ai = order[a.name] ?? 99, bi = order[b.name] ?? 99;
+      return ai !== bi ? ai - bi : a.name.localeCompare(b.name);
+    });
+    document.getElementById("cu-role").innerHTML =
+      sorted.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
+  } catch(e) {}
+  openModal("createUserModal");
+}
+
+async function createUser() {
+  const username     = document.getElementById("cu-username").value.trim();
+  const password     = document.getElementById("cu-password").value;
+  const must_change  = document.getElementById("cu-must-change").checked;
+  const role_id_val  = document.getElementById("cu-role").value;
+  const role_id      = parseInt(role_id_val);
+
+  if (!username) { showResult("cu-result", "Username is required", false); return; }
+  if (password.length < 8) { showResult("cu-result", "Password must be at least 8 characters", false); return; }
+  if (!role_id_val) { showResult("cu-result", "Please select a role", false); return; }
+
+  const res = await api("/api/auth/users", "POST", { username, password, role_id, must_change_pass: must_change });
+  showResult("cu-result", res.message || (res.status === "ok" ? "User created" : "Failed"), res.status === "ok");
+  if (res.status === "ok") { setTimeout(() => { closeModal("createUserModal"); loadUsers(); }, 800); }
+}
+
+function openEditUser(id, username, roleId, isActive, mustChange) {
+  document.getElementById("edit-user-id").value      = id;
+  document.getElementById("edit-username").value     = username;
+  document.getElementById("edit-role-id").value      = roleId;
+  document.getElementById("edit-is-active").checked  = Boolean(isActive);
+  document.getElementById("edit-must-change").checked = Boolean(mustChange);
+  document.getElementById("eu-result").style.display = "none";
+  openModal("editUserModal");
+}
+
+async function saveEditUser() {
+  const id           = parseInt(document.getElementById("edit-user-id").value);
+  const new_username = document.getElementById("edit-username").value.trim();
+  const role_id      = parseInt(document.getElementById("edit-role-id").value);
+  const is_active    = document.getElementById("edit-is-active").checked;
+  const must_change  = document.getElementById("edit-must-change").checked;
+
+  if (!new_username) {
+    showResult("eu-result", "Username cannot be empty", false);
+    return;
+  }
+
+  const res = await api(`/api/auth/users/${id}`, "PATCH", {
+    username: new_username, role_id, is_active, must_change_pass: must_change
+  });
+  showResult("eu-result", res.message || (res.status === "ok" ? "Saved" : "Failed"), res.status === "ok");
+  if (res.status === "ok") { setTimeout(() => { closeModal("editUserModal"); loadUsers(); }, 800); }
+}
+
+function openResetPass(id, username) {
+  document.getElementById("rp-user-id").value        = id;
+  document.getElementById("rp-username").textContent = username;
+  document.getElementById("rp-password").value       = "";
+  document.getElementById("rp-result").style.display = "none";
+  openModal("resetPassModal");
+}
+
+async function resetPassword() {
+  const id       = parseInt(document.getElementById("rp-user-id").value);
+  const password = document.getElementById("rp-password").value;
+
+  if (password.length < 8) {
+    showResult("rp-result", "Password must be at least 8 characters", false);
+    return;
+  }
+
+  const res = await api(`/api/auth/users/${id}/password`, "POST", { new_password: password, force_change: true });
+  showResult("rp-result", res.message || (res.status === "ok" ? "Password reset" : "Failed"), res.status === "ok");
+  if (res.status === "ok") { setTimeout(() => closeModal("resetPassModal"), 800); }
+}
+
+async function deleteUser(id, username) {
+  // Show dialog asking about subscription
+  const hasSub = await fetch('/api/alerts/subscribers').then(r => r.json())
+    .then(subs => subs.some(s => s.user_id === id)).catch(() => false);
+
+  let deleteSub = true;
+  if (hasSub) {
+    const choice = await showDeleteUserDialog(username);
+    if (choice === null) return; // cancelled
+    deleteSub = choice; // true = delete sub, false = keep as standalone
+  } else {
+    if (!confirm(`Delete user '${username}'? This cannot be undone.`)) return;
+  }
+
+  const res = await fetch(`/api/auth/users/${id}`, {
+    method: 'DELETE',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ delete_subscription: deleteSub })
+  }).then(r => r.json());
+  showToast(res.message || (res.status === 'ok' ? 'User deleted' : 'Failed'),
+            res.status === 'ok' ? 'success' : 'error');
+  if (res.status === 'ok') loadUsers();
+}
+
+function showDeleteUserDialog(username) {
+  return new Promise(resolve => {
+    // Create modal
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:2000;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:var(--bg-card);border-radius:12px;padding:28px;max-width:420px;width:90%;border:1px solid var(--fail);">
+        <div style="font-family:var(--font-mono);color:var(--fail);font-size:0.9rem;font-weight:600;margin-bottom:12px;">
+          DELETE ACCOUNT: ${username}
+        </div>
+        <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:18px;">
+          This account has an active alert subscription. What would you like to do with it?
+        </p>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <button id="del-and-sub" class="nw-btn" style="border-color:var(--fail);color:var(--fail);text-align:left;padding:10px 14px;">
+            <strong>Delete account &amp; subscription</strong><br>
+            <span style="font-size:0.75rem;color:var(--text-muted);">Removes everything. They will no longer receive alerts.</span>
+          </button>
+          <button id="del-keep-sub" class="nw-btn" style="text-align:left;padding:10px 14px;">
+            <strong>Delete account, keep subscription</strong><br>
+            <span style="font-size:0.75rem;color:var(--text-muted);">Their email/phone stays subscribed as a standalone subscriber.</span>
+          </button>
+          <button id="del-cancel" class="nw-btn" style="margin-top:4px;">
+            Cancel
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('#del-and-sub').onclick  = () => { document.body.removeChild(modal); resolve(true); };
+    modal.querySelector('#del-keep-sub').onclick = () => { document.body.removeChild(modal); resolve(false); };
+    modal.querySelector('#del-cancel').onclick   = () => { document.body.removeChild(modal); resolve(null); };
+    modal.addEventListener('click', e => { if (e.target === modal) { document.body.removeChild(modal); resolve(null); } });
+  });
+}
+
+async function unlockUser(id, username) {
+  if (!confirm(`Remove temporary lock from '${username}'?`)) return;
+  const res = await api(`/api/admin/users/${id}/unlock`, "POST");
+  showToast(res.status === "ok" ? `${username} unlocked` : (res.message || "Failed"),
+            res.status === "ok" ? "success" : "error");
+  if (res.status === "ok") loadUsers();
+}
+
+async function setUserActive(id, username, active) {
+  const action = active ? "enable" : "disable";
+  if (!confirm(`${action.charAt(0).toUpperCase()+action.slice(1)} account '${username}'?`)) return;
+  const res = await api(`/api/admin/users/${id}/set_active`, "POST", { is_active: active });
+  showToast(res.status === "ok" ? `${username} ${action}d` : (res.message || "Failed"),
+            res.status === "ok" ? "success" : "error");
+  if (res.status === "ok") loadUsers();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ROLES
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function loadRoles() {
+  const roles = await api("/api/auth/roles");
+  const tb    = document.getElementById("roles-tbody");
+
+  const tick = v => v
+    ? `<span style="color:var(--ok);">✓</span>`
+    : `<span style="color:var(--text-muted);">—</span>`;
+
+  const timeout = m => m === 0 ? "Never" : m >= 1440
+    ? `${m/1440}d` : m >= 60 ? `${m/60}h` : `${m}m`;
+
+  tb.innerHTML = roles.map(r => `
+    <tr>
+      <td>
+        <strong>${r.name}</strong>
+        ${r.is_system ? `<span style="font-size:0.68rem;color:var(--text-muted);margin-left:4px;">(system)</span>` : ""}
+        ${r.description ? `<div style="font-size:0.72rem;color:var(--text-muted);">${r.description}</div>` : ""}
+      </td>
+      <td>${tick(r.view_logs)}</td>
+      <td>${tick(r.use_controls)}</td>
+      <td>${tick(r.manage_admin)}</td>
+      <td>${tick(r.manage_users)}</td>
+      <td style="color:var(--text-muted);">${timeout(r.session_minutes)}</td>
+      <td style="color:var(--text-muted);">${r.user_count ?? "—"}</td>
+      <td>
+        <button class="range-btn" onclick="openEditRole(${r.id},'${r.name.replace(/'/g,"\\'")}','${(r.description||"").replace(/'/g,"\\'")}',${r.view_logs},${r.use_controls},${r.manage_admin},${r.manage_users},${r.session_minutes})">Edit</button>
+        ${!r.is_system ? `<button class="range-btn" style="color:var(--fail);" onclick="deleteRole(${r.id},'${r.name}')">Delete</button>` : ""}
+      </td>
+    </tr>`).join("");
+}
+
+function openCreateRole() {
+  document.getElementById("role-id").value      = "";
+  document.getElementById("role-name").value    = "";
+  document.getElementById("role-desc").value    = "";
+  document.getElementById("perm-logs").checked     = true;
+  document.getElementById("perm-controls").checked = false;
+  document.getElementById("perm-admin").checked    = false;
+  document.getElementById("perm-users").checked    = false;
+  document.getElementById("role-timeout").value = "480";
+  document.getElementById("role-result").style.display = "none";
+  document.getElementById("role-modal-title").textContent = "Create Role";
+  openModal("roleModal");
+}
+
+function openEditRole(id, name, desc, logs, controls, admin, users, timeout) {
+  document.getElementById("role-id").value      = id;
+  document.getElementById("role-name").value    = name;
+  document.getElementById("role-desc").value    = desc;
+  document.getElementById("perm-logs").checked     = Boolean(logs);
+  document.getElementById("perm-controls").checked = Boolean(controls);
+  document.getElementById("perm-admin").checked    = Boolean(admin);
+  document.getElementById("perm-users").checked    = Boolean(users);
+  document.getElementById("role-timeout").value = String(timeout);
+  document.getElementById("role-result").style.display = "none";
+  document.getElementById("role-modal-title").textContent = "Edit Role";
+  openModal("roleModal");
+}
+
+async function saveRole() {
+  const id      = document.getElementById("role-id").value;
+  const payload = {
+    name:            document.getElementById("role-name").value.trim(),
+    description:     document.getElementById("role-desc").value.trim(),
+    view_logs:       document.getElementById("perm-logs").checked,
+    use_controls:    document.getElementById("perm-controls").checked,
+    manage_admin:    document.getElementById("perm-admin").checked,
+    manage_users:    document.getElementById("perm-users").checked,
+    session_minutes: parseInt(document.getElementById("role-timeout").value),
+  };
+
+  if (!payload.name) { showResult("role-result", "Role name is required", false); return; }
+
+  const res = id
+    ? await api(`/api/auth/roles/${id}`, "PATCH", payload)
+    : await api("/api/auth/roles", "POST", payload);
+
+  showResult("role-result", res.message || (res.status === "ok" ? "Saved" : "Failed"), res.status === "ok");
+  if (res.status === "ok") {
+    setTimeout(() => {
+      closeModal("roleModal");
+      loadRoles();
+      loadUsers();
+      showTabByName('roles');
+      // Refresh role alert defaults if panel is open
+      const panel = document.getElementById('role-defaults-panel');
+      if (panel && panel.style.display !== 'none') loadRoleDefaults();
+    }, 800);
+  }
+}
+
+async function deleteRole(id, name) {
+  const res = await fetch(`/api/auth/roles/${id}`, { method: 'DELETE' }).then(r => r.json());
+  if (res.status === 'ok') {
+    showToast(`Role '${name}' deleted`, 'success');
+    loadRoles(); loadUsers();
+    const dp = document.getElementById('role-defaults-panel');
+    if (dp && dp.style.display !== 'none') loadRoleDefaults();
+    return;
+  }
+  if (res.status === 'has_users') {
+    showRoleReassignDialog(id, name, res.affected_users, res.available_roles, res.deleted_role);
+    return;
+  }
+  showToast(res.message || 'Delete failed', 'error');
+}
+
+function showRoleReassignDialog(roleId, roleName, affectedUsers, availableRoles, deletedRole) {
+  const modal = document.createElement('div');
+  modal.id = 'reassign-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:2000;display:flex;align-items:center;justify-content:center;';
+
+  // Score each role by permission level (higher = more permissions)
+  function permScore(r) {
+    return (r.view_logs?1:0) + (r.use_controls?2:0) + (r.manage_admin?4:0) + (r.manage_users?8:0);
+  }
+
+  const deletedScore = deletedRole ? permScore(deletedRole) : 0;
+  const sortedRoles  = [...availableRoles].sort((a,b) => permScore(a) - permScore(b));
+
+  // Best match: highest-scoring role with score <= deleted, or lowest available if none
+  function bestMatch() {
+    const candidates = sortedRoles.filter(r => permScore(r) <= deletedScore);
+    return candidates.length
+      ? candidates[candidates.length - 1]   // highest of those ≤ deleted
+      : sortedRoles[0];                      // fallback: lowest available
+  }
+  const defaultRole = bestMatch();
+
+  const userRows = affectedUsers.map(u => {
+    const options = sortedRoles.map(r =>
+      `<option value="${r.id}" ${r.id === defaultRole.id ? 'selected' : ''}>${r.name}</option>`
+    ).join('');
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-color);">
+      <div style="flex:1;font-size:0.85rem;">
+        <strong>${u.username}</strong>
+        ${u.first_name || u.last_name ? `<span style="color:var(--text-muted);font-size:0.78rem;"> (${[u.first_name,u.last_name].filter(Boolean).join(' ')})</span>` : ''}
+        <div style="font-size:0.72rem;color:var(--text-muted);">Currently: ${u.role_name}</div>
+      </div>
+      <select class="nw-input reassign-select" data-user="${u.id}"
+              style="width:140px;font-size:0.78rem;">${options}</select>
+    </div>`;
+  }).join('');
+
+  modal.innerHTML = `
+    <div style="background:var(--bg-card);border-radius:12px;padding:28px;max-width:480px;width:92%;
+                max-height:85vh;overflow-y:auto;border:1px solid var(--fail);">
+      <div style="font-family:var(--font-mono);color:var(--fail);font-size:0.88rem;font-weight:600;margin-bottom:8px;">
+        DELETE ROLE: ${roleName}
+      </div>
+      <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:16px;">
+        ${affectedUsers.length} user(s) are assigned to this role. Reassign each to a new role before deleting.
+      </p>
+      <div style="margin-bottom:16px;">${userRows}</div>
+      <div id="reassign-msg" style="display:none;font-size:0.8rem;margin-bottom:10px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button class="nw-btn" style="border-color:var(--fail);color:var(--fail);flex:1;"
+                onclick="confirmRoleDelete(${roleId})">
+          Delete Role &amp; Reassign
+        </button>
+        <button class="nw-btn" style="flex:1;"
+                onclick="document.body.removeChild(document.getElementById('reassign-modal'))">
+          Cancel
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) document.body.removeChild(modal); });
+}
+
+async function confirmRoleDelete(roleId) {
+  const modal    = document.getElementById('reassign-modal');
+  const selects  = modal.querySelectorAll('.reassign-select');
+  const userRoleMap = {};
+  selects.forEach(s => { userRoleMap[s.dataset.user] = s.value; });
+
+  const res = await fetch(`/api/auth/roles/${roleId}/delete-with-reassignment`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ user_role_map: userRoleMap })
+  }).then(r => r.json());
+
+  if (res.status === 'ok') {
+    document.body.removeChild(modal);
+    showToast('Role deleted and users reassigned', 'success');
+    loadRoles(); loadUsers();
+    const dp2 = document.getElementById('role-defaults-panel');
+    if (dp2 && dp2.style.display !== 'none') loadRoleDefaults();
+  } else {
+    const msg = modal.querySelector('#reassign-msg');
+    msg.style.display = 'block'; msg.style.color = 'var(--fail)';
+    msg.textContent = res.message || 'Delete failed';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MY ACCOUNT
+// ══════════════════════════════════════════════════════════════════════════════
+// ROLE ALERT DEFAULTS
+// ══════════════════════════════════════════════════════════════════════════════
+let _roleDefaults = {};
+let _alertTypeKeys = [];
+
+function toggleRoleDefaults() {
+  const panel   = document.getElementById('role-defaults-panel');
+  const chevron = document.getElementById('role-defaults-chevron');
+  const open = panel.style.display === 'none';
+  panel.style.display = open ? 'block' : 'none';
+  chevron.style.transform = open ? 'rotate(90deg)' : '';
+  if (open && !_alertTypeKeys.length) loadRoleDefaults();
+}
+
+async function loadRoleDefaults() {
+  const [roles, defs, typeSettings] = await Promise.all([
+    api('/api/auth/roles'),
+    fetch('/api/alerts/role_defaults').then(r => r.json()),
+    fetch('/api/alerts/type_settings').then(r => r.json()),
+  ]);
+  _roleDefaults  = defs;
+  _alertTypeKeys = Object.keys(typeSettings);
+  renderRoleDefaultsAdmin(roles, defs, typeSettings);
+}
+
+function roleCardHtml(role, rd, atypes) {
+  const rows = atypes.map(([key, global]) => {
+    const d      = rd[key] || {};
+    const emailOn = d.email_enabled !== undefined ? !!d.email_enabled : !!global.email_enabled;
+    const smsOn   = d.sms_enabled   !== undefined ? !!d.sms_enabled   : !!global.sms_enabled;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;
+                        padding:5px 0;border-bottom:1px solid var(--border-color);font-size:0.78rem;">
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:6px;">${global.label || key}</span>
+      <label style="display:flex;align-items:center;gap:3px;margin-right:8px;cursor:pointer;font-size:0.72rem;" title="Email">
+        <input type="checkbox" class="rdadmin-email" data-role="${role.id}" data-key="${key}"
+               style="width:13px;height:13px;" ${emailOn ? 'checked' : ''}> ✉
+      </label>
+      <label style="display:flex;align-items:center;gap:3px;cursor:pointer;font-size:0.72rem;" title="SMS">
+        <input type="checkbox" class="rdadmin-sms" data-role="${role.id}" data-key="${key}"
+               style="width:13px;height:13px;" ${smsOn ? 'checked' : ''}> 📱
+      </label>
+    </div>`;
+  }).join('');
+
+  const isSystem = !!role.is_system;
+  const label = isSystem
+    ? `<span style="font-size:0.78rem;font-weight:600;color:var(--accent);letter-spacing:1px;text-transform:uppercase;">${role.name}</span>`
+    : `<span style="font-size:0.78rem;font-weight:600;color:var(--accent);letter-spacing:1px;text-transform:uppercase;">${role.name}</span>
+       <span style="font-size:0.62rem;color:var(--text-muted);margin-left:6px;font-weight:normal;
+                    text-transform:none;letter-spacing:0;background:var(--bg-card);
+                    padding:1px 5px;border-radius:3px;border:1px solid var(--border-color);">custom</span>`;
+
+  // cardFlex is passed in by the caller based on context
+  const cardBase = 'background:var(--bg-input);border-radius:8px;padding:14px;border:1px solid var(--border-color);box-sizing:border-box;';
+  return `<div style="${cardBase}${role._cardFlex || 'flex:1;'}">
+    <div style="display:flex;align-items:baseline;margin-bottom:10px;">${label}</div>
+    ${rows}
+    <button class="nw-btn nw-btn-primary mt-2" style="width:100%;font-size:0.75rem;"
+            onclick="saveRoleDefaultsAdmin(${role.id})">✓ Save</button>
+  </div>`;
+}
+
+function renderRoleDefaultsAdmin(roles, defs, typeSettings) {
+  const grid   = document.getElementById('role-defaults-grid-admin');
+  const atypes = Object.entries(typeSettings);
+
+  // Coerce is_system — SQLite returns 0/1 integers
+  const SYSTEM_ORDER = {Admin: 0, Operator: 1, Monitor: 2};
+  const systemRoles = roles
+    .filter(r => r.is_system === 1 || r.is_system === true)
+    .sort((a, b) => {
+      const ai = SYSTEM_ORDER[a.name] ?? 99, bi = SYSTEM_ORDER[b.name] ?? 99;
+      return ai !== bi ? ai - bi : a.name.localeCompare(b.name);
+    });
+  const customRoles = roles.filter(r => r.is_system !== 1 && r.is_system !== true);
+
+  // System roles — always fill full width equally
+  systemRoles.forEach(r => r._cardFlex = 'flex:1;min-width:calc(20% - 10px);');
+  let html = `<div style="display:flex;flex-wrap:nowrap;gap:12px;width:100%;${customRoles.length ? 'padding-bottom:16px;border-bottom:1px solid var(--border-color);' : ''}">`;
+  html += systemRoles.map(r => roleCardHtml(r, defs[r.id] || {}, atypes)).join('');
+  html += '</div>';
+
+  // Custom roles — width depends on count:
+  // 1-2: same individual width as a system role (≈33% - gap), centered
+  // 3-4: fill full width (flex:1), same as system roles
+  if (customRoles.length) {
+    const perRow = 5;  // max cards per row
+    const fillRow = customRoles.length >= 3;
+    if (fillRow) {
+      // flex:1 fills row; max-width caps at 1/5 so 6+ cards wrap at 5 per row
+      // flex:0 1 = won't grow beyond natural width, can shrink; centering handles lone remainder card
+      customRoles.forEach(r => r._cardFlex = 'flex:0 1 calc(20% - 10px);min-width:calc(20% - 10px);');
+    } else {
+      // Match system role width: (100% - 2*gap) / 3 per card
+      customRoles.forEach(r => r._cardFlex = 'flex:0 0 calc(33.333% - 8px);max-width:calc(33.333% - 8px);');
+    }
+
+    html += `<div style="width:100%;margin-top:16px;">
+      <div style="font-size:0.7rem;color:var(--text-muted);letter-spacing:1.5px;
+                  text-transform:uppercase;margin-bottom:10px;padding-left:2px;">Custom Roles</div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;">`;
+    html += customRoles.map(r => roleCardHtml(r, defs[r.id] || {}, atypes)).join('');
+    html += '</div></div>';
+  }
+
+  grid.innerHTML = html;
+}
+
+async function saveRoleDefaultsAdmin(roleId) {
+  const settings = {};
+  document.querySelectorAll(`.rdadmin-email[data-role="${roleId}"]`).forEach(cb => {
+    const key = cb.dataset.key;
+    if (!settings[key]) settings[key] = {};
+    settings[key].email_enabled = cb.checked ? 1 : 0;
+  });
+  document.querySelectorAll(`.rdadmin-sms[data-role="${roleId}"]`).forEach(cb => {
+    const key = cb.dataset.key;
+    if (!settings[key]) settings[key] = {};
+    settings[key].sms_enabled = cb.checked ? 1 : 0;
+  });
+  const res = await fetch(`/api/alerts/role_defaults/${roleId}`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(settings)
+  }).then(r => r.json());
+  const msg = document.getElementById('role-defaults-msg');
+  msg.style.display = 'block';
+  msg.style.color   = res.status === 'ok' ? 'var(--ok)' : 'var(--fail)';
+  msg.textContent   = res.status === 'ok' ? 'Defaults saved.' : (res.message || 'Save failed');
+  setTimeout(() => msg.style.display = 'none', 2500);
+}
+
+// ── Initial load ──────────────────────────────────────────────────────────────
+loadUsers();
+loadRoles();
+</script>
+{% endblock %}

@@ -1,0 +1,96 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: INITIAL CODEBASE AND DEPLOYMENT
+======================================================================
+Name: Initial Code Generation and Pi Deployment
+Type: Feature
+Date: 2026-02-28
+Sessions: Session 1.1
+Final outcome: Complete — codebase generated and deployed; services running
+
+
+BACKGROUND
+----------
+After architecture selection (see Feature_Architecture_Decisions.txt), the session
+proceeded to generate the full NetWatch codebase. This arc went through three cycles
+due to context compaction events losing generated code, and a user disagreement about
+file structure, before reaching a clean deployed state.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+First generation attempt (lost to context compaction):
+The initial code generation attempt produced files that were then lost when the context
+was compacted. The user's opening message in the 09:00 transcript is "not again, we have
+already done that, we were going in circles and then you finally generated the code, now
+it's gone." This confirms at least one prior generation was completed and lost.
+
+Second generation — consolidated structure (rejected by user):
+After the first loss, a second attempt produced a consolidated (single-file or
+non-modular) structure rather than the original modular design. The user reviewed the
+options and selected "Rebuild with the original modular structure (recommended)."
+
+File download/paste failure:
+Early attempts to provide files via code blocks for copy-paste to Pi via nano had mixed
+results. Some files downloaded incorrectly (missing comments). The user correctly noted:
+"so i was able to download that one and it doesn't look the same, it is missing all the
+notes. if they aren't going to be the same I would prefer to have the actual files."
+The solution was to provide full files with complete comments preserved.
+
+GPIO edge detection error on first service start:
+After deployment, netwatch-monitor failed to start. journalctl showed: "Failed to add
+edge detection" on the button GPIO pin. Root cause: GPIO.setup() for the button pin was
+being called after relay.py had already initialized GPIO in a conflicting state. Fixed by
+reordering GPIO initialization in the service startup sequence / button.py.
+
+
+WHAT WORKED
+-----------
+Third generation — clean modular rebuild (14:21 transcript):
+User selected the modular structure. Full 16-file codebase regenerated with complete
+comments. All files created at /home/claude/netwatch/ during generation.
+
+DEPLOYMENT WORKFLOW:
+1. Files packaged as netwatch_v2.zip
+2. SCP transfer from Windows to Pi:
+   scp netwatch_v2.zip mboynton@192.168.100.10:~/
+   (Note: must be in a separate PowerShell window, not inside the SSH session)
+3. SSH to Pi, unzip:
+   cd ~ && unzip netwatch_v2.zip
+4. Install Python dependencies in venv:
+   cd ~/netwatch && python3 -m venv venv && source venv/bin/activate
+   pip install flask sqlalchemy speedtest-cli RPi.GPIO
+5. Configure: nano ~/netwatch/config.py (set IPs, credentials, keys)
+6. Install systemd services:
+   sudo cp netwatch-monitor.service /etc/systemd/system/
+   sudo cp netwatch-web.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable netwatch-monitor netwatch-web
+   sudo systemctl start netwatch-monitor netwatch-web
+7. Verify: sudo journalctl -fu netwatch-monitor
+   (Should show check results every 30 seconds)
+
+INITIAL DASHBOARD STATE:
+- Web served on port 5000 (HTTP)
+- Accessible at http://192.168.110.10:5000 from .110 WiFi subnet
+- First access showed "network issue detected" — correct behavior, eth0 was down
+  initially. Once eth0 came up, dashboard showed correct status.
+- No authentication at this stage — that was added in the same sub-session
+
+INITIAL CONFIG.PY KEYS SET:
+- LAN_GATEWAY = "192.168.100.254"
+- WAN_PRIMARY = "8.8.8.8"
+- WAN_SECONDARY = "8.8.4.4"
+- CHECK_INTERVAL = 30 (seconds between health checks)
+- SPEEDTEST_INTERVAL = 3600 (1 hour between speedtests)
+- RELAY_MODEM_PIN / RELAY_ROUTER_PIN (GPIO pin numbers)
+- ROUTER_BOOT_DELAY (seconds to wait after modem reset before resetting router)
+- MAX_RESETS_PER_DAY (circuit breaker on auto-reset)
+- ALERTS_ENABLED = False (email disabled at deployment, enabled later)
+- SECRET_KEY = "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY" (sentinel for first-run check)
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- No authentication at initial deployment. Auth added in the same sub-session
+  immediately after. [COMPLETED — see Feature_AuthAndRoles.txt]
+- HTTP only at this stage. HTTPS/CA added in sub-session 1.2.
+  [COMPLETED — see Feature_HTTPSAndCA.txt]
+- SD card rather than SSD for initial deployment. SSD migration noted as future task.

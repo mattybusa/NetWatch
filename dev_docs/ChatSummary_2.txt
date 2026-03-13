@@ -1,0 +1,291 @@
+ChatSummary_2.txt
+=================
+SESSION HEADER
+--------------
+Session: 2
+Date: 2026-03-07
+Starting version: v3.2.51e (from context doc pasted at session start)
+Ending version: v3.2.88
+Summary: Large session covering alert system review + themed emails, email icon arc,
+package installer restart feedback fix, hardware context / AI context doc work,
+backfill bug + webapp logging fix, SERVICE_MAP fix, gunicorn migration, security log
+IP geo popover + period selector, password reset via email+SMS (with a significant
+self-introduced regression arc), SMS change detection, delivery history friendly labels
++ pagination + time-range filtering, metrics crosshair tooltip, bucketed averaging
++ zoom, tooltip sizing fix, metrics data gap investigation arc (with a self-introduced
+regression), and config editor export/import with diff modal. End-of-session context
+doc update at v3.2.88.
+
+SCOPE NOTE: This session covered 16+ distinct features and bug arcs. Expanded summaries
+produced for all major items. Minor items grouped as noted.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+v3.2.52 — Alert system full review: six fixes in one package. /api/alerts restricted
+to view_logs (was guest-accessible). Themed emails added (per-recipient theme
+resolution). Broadcast channel selector honoured. History type filter shows friendly
+labels. Owner subscriber double-write removed. Raw sqlite3 replaced in
+api_test_alert_my.
+
+v3.2.53 — Email favicon PNG (base64 embedded in alerts.py). Did not render in
+Gmail (root cause: web service not restarting — see v3.2.57/58 arc below).
+
+v3.2.54–v3.2.56 — Emoji substitution attempts (📡→🛜→📶→UTF-8 fix). All failed to
+show change because web service was not included in restart actions.
+
+v3.2.57 — Package installer restart feedback fixed. Monitor-only restarts produced no
+UI feedback. Fix: always restart both services so the polling/reload sequence runs.
+Also first package where the correct emoji rendered in Gmail.
+
+v3.2.58 — Final emoji settled on 🛜. Confirmed working after web restart included.
+Embedded PNG retry (v3.2.59) also confirmed working once restart issue resolved, but
+Gmail rendering was poor — reverted to emoji (v3.2.60). Alert system review closed.
+
+v3.2.61 — backfill_account_subscribers() missing created_at column in INSERT fixed.
+(Testing revealed backfill is called from web service, not monitor — important context.)
+
+v3.2.62 — webapp.py logging.basicConfig() added so startup messages visible in
+journald. Confirmed: "Backfilled 1 account subscriber record(s)" now appears in log.
+
+v3.2.63 — SERVICE_MAP in updater.py comprehensively fixed. alerts.py corrected to
+"both". alert_subscribers.py, security_log.py, patcher.py, certmanager.py,
+config_validator.py added. auth.py corrected. Both services restarted at correct times.
+
+v3.2.64–v3.2.65 — Gunicorn migration. Flask dev server replaced with gunicorn (2
+workers, preload_app=True, SSL via cert/key). wsgi.py entry point created.
+gunicorn.conf.py config file. gunicorn_upgrade.sh for one-time migration. install.sh
+updated for future installs. HTTP-hang bug resolved. SD card wear reduced.
+gunicorn.ctl Unix socket added to EXCLUDE_FILES in export routes (Gotchas.txt entry
+exists for v3.2.94, but the pattern was first encountered and handled here — see Open
+Questions).
+
+v3.2.66 — Security log IP geo popover. Unique IPs card becomes clickable → IP
+summary modal showing event counts, first/last seen, local/external tag. Each IP row
+has a 🔍 Lookup button calling ip-api.com. IPs in event table also clickable.
+
+v3.2.67 — Security log period selector (24H / 7D / 30D segmented buttons). All four
+summary cards, IP modal, and event table recalculate for selected period.
+
+v3.2.68–v3.2.70 — Password reset via email + SMS. (See Feature_PasswordReset.txt for
+full arc including regression.) Final confirmed behavior: temp password stored in
+reset_token_hash only; real password never touched; authenticate() checks both;
+must_change_pass cleared when real password used; reset sends to both email and SMS
+when both verified.
+
+v3.2.71 — SMS change detection in preferences.html. origEmail/origPhone baselines
+captured on page load. Save now diffs against baselines and only sends verification
+when the relevant field actually changed.
+
+v3.2.72 — Delivery history friendly labels in alert_settings.html. Type column now
+shows "Network Outage", "Brute Force Attempt" etc. instead of raw snake_case keys.
+
+v3.2.73 — Delivery history time-range selector and pagination. Dropdown for 1hr/6hr/
+24hr/7day/30day/All. Client-side pagination at 20 rows/page with navigation. Both
+backend (database.py, webapp route) and frontend updated.
+
+v3.2.74 — Delivery history logging for transactional sends (password reset, email
+verification). force_email path previously skipped log_delivery. Now logs with correct
+subscriber_id so filter-by-subscriber works for these sends.
+
+v3.2.75–v3.2.77 — Self-introduced regression arc on password reset (see
+Feature_PasswordReset.txt). Net result: v3.2.77 is functionally equivalent to v3.2.70
+via a different internal mechanism. Confirmed working by user at end of arc.
+
+v3.2.78 — Metrics crosshair tooltip. Custom Chart.js plugin (CrosshairPlugin)
+registered once, applies to all 4 charts. Vertical dashed line + floating box per
+dataset. Native tooltip disabled.
+
+v3.2.79 — Crosshair tooltip timestamp fix. _rawLabels stored per chart to provide
+full timestamps (makeLabels() has sparse display labels, not suitable for tooltip).
+
+v3.2.80 — Bucketed averaging + zoom-by-drag. sample() replaced with bucketAvg().
+Time-anchored buckets so historical data stable on refresh. ZoomDragPlugin for
+drag-select zoom on any chart with Reset Zoom button. Tooltip shows bucket range.
+Backend: database.py and routes updated to accept start/end ISO params.
+
+v3.2.81 — Tooltip box dynamic width. ctx.measureText() used to size box to widest
+text element instead of hardcoded 160px.
+
+v3.2.82–v3.2.86 — Metrics data gap investigation arc (see Bug_MetricsDataGap.txt
+for full detail including self-introduced regression). Resolution: data gap is real
+(monitor was not writing during that window). Original datetime('now') queries correct.
+bucketAvg startMs/endMs anchored to full requested range, not oldest data point.
+Database.py reverted to original state.
+
+v3.2.87 — Config editor export/import. Export button in save bar → passphrase modal
+→ .nwcfg file (AES-GCM 256-bit, PBKDF2 200k iterations). Import → decrypt → diff
+modal (only changed fields shown, click to choose per field, Apply Selected).
+WebCrypto / SubtleCrypto — all crypto in browser, passphrase never touches server.
+
+v3.2.88 — Import diff review enhancement. Bottom Export button removed (was
+erroneously added in v3.2.87). Diff modal improved with bulk keep-current/use-imported
+buttons and per-field toggle.
+
+End-of-session context doc update at v3.2.88. Updated from v3.2.65 to v3.2.88
+covering all session work.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+Email PNG icon (v3.2.53, v3.2.59): Base64 PNG embedded in email HTML. Not rendered
+by Gmail (Gmail strips data:image/png base64 src attributes). Confirmed this is a
+Gmail policy — emoji is the correct solution.
+
+Emoji icon ghost (v3.2.53–v3.2.57): Several packages updated the emoji but email
+showed no change. Root cause: alerts.py is imported by both services; packages were
+only restarting the monitor. Web service had old cached module. Resolved by always
+restarting both services.
+
+HTTP-hang bug (pre-gunicorn): Flask dev server hangs on HTTP requests to HTTPS port
+and blocks all requests temporarily. Workaround: always use https://. Fixed by
+gunicorn migration.
+
+Self-introduced regression — Password reset (v3.2.75–v3.2.77): While adding SMS send
+to password reset, an incorrect read of the code concluded that password_hash was
+still being overwritten (it was not — v3.2.70 had already fixed it). This "fix"
+removed the dual-hash write. Then v3.2.76 was needed because must_change_pass was not
+cleared on real-password login. Then v3.2.77 was needed because the temp password
+stopped working (reset_token_hash now not checked in authenticate()). ~1 hour wasted.
+User pushed back correctly each time. v3.2.77 is functionally equivalent to v3.2.70.
+
+Self-introduced regression — Metrics datetime queries (v3.2.85): While investigating
+the 24H data gap, concluded (incorrectly) that datetime('now') in SQLite was timezone-
+affected. Rewrote all datetime queries in database.py to use Python timedelta cutoffs.
+This was unnecessary and wrong — the original queries were correct. Reverted in
+v3.2.86 alongside the bucket anchoring fix.
+
+Metrics data gap anchoring (v3.2.82–v3.2.83): Two failed attempts to fix the apparent
+24H data gap by expanding startMs to match oldest data. Both were wrong approaches.
+Correct fix (v3.2.86): always anchor startMs to now - requestedHours so the x-axis
+spans the full window; gaps in data show as breaks in the line.
+
+Google Voice SMS gateway: Researched — @txt.voice.google.com is not a static inbound
+gateway. Addresses are per-conversation with random keys. Not added to carrier list.
+
+
+DECISIONS MADE
+--------------
+- Always restart both services in package manifests for alerts.py changes (web service
+  imports alerts.py for test email sends). Codified in SERVICE_MAP fix (v3.2.63).
+- Gunicorn migration treated as elevated priority given NetWatch is live production.
+  Not a dev environment — this Pi IS NetWatch.
+- Email header icon: emoji only. Gmail blocks base64 PNG. 🛜 selected and confirmed.
+- Google Voice SMS not added to carrier list — gateway does not work reliably.
+- Config export/import: all fields including passwords, passphrase-protected,
+  WebCrypto client-side crypto (passphrase never leaves browser), diff modal on import.
+- Speedtest chart label overlap: marked resolved. Labels adjust angle on resize to
+  avoid overlap — this appears to be intentional behavior.
+- AI context doc updated end-of-session (standalone housekeeping update, not paired
+  with a specific package — no gotcha applies).
+- Gunicorn preload_app = True: decided to implement immediately rather than defer.
+  init() runs once in master process before forking.
+- SMS API (Textbelt et al.): user chose to continue researching, not implement now.
+  Email-to-SMS carrier gateway approach remains in use.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+[COMPLETED IN LATER SESSIONS — v3.2.89–v3.2.95 visible in context doc but not present
+in this transcript. Belongs to other sessions. Context doc shows Dev Documents system
+(Deployed Files page rework, Dev Docs section, export fixes), additional patcher fixes
+(dev_docs/ prefix support, gunicorn.ctl exclusion), and backlog changes. Do not
+enumerate or detail this work from this transcript.]
+
+gunicorn.ctl socket exclusion: The context doc Gotchas.txt entry for this is dated
+2026-03-08 v3.2.94, suggesting it was first properly documented after this session.
+Gunicorn was installed in v3.2.64 this session. The gotcha may have been first
+encountered in a later session. No incident in this transcript confirms the OSError —
+the gunicorn.ctl entry in Gotchas.txt is likely from Session 3 or later. Not added
+to Gotchas_Append_Session2.txt to avoid duplication with the existing Gotchas.txt
+entry dated later.
+
+webapp.py logging.basicConfig() change (v3.2.62): log source shows "netwatch.subscribers"
+not "netwatch.webapp" — naming discrepancy. Low priority but worth noting.
+
+[UNVERIFIED] v3.2.75 SMS delivery logging: the transcript confirms the code was
+written to log both email and SMS sends to delivery history, but User123 did not have
+a verified phone. The SMS logging path was not explicitly tested with an account that
+had both verified. The email logging path was verified.
+
+Patch manager step display: context doc backlog notes "Patch manager: explicit restart
+actions not always showing as step rows in result UI." Not mentioned in this session
+transcript — likely a later discovery.
+
+About/system info popover in navbar: raised in this session (v3.2.67 milestone
+discussion) but deferred. Still open in context doc backlog.
+
+
+BACKLOG CHANGES
+---------------
+COMPLETED THIS SESSION:
+- Alert history restrict to Admin/Operator (v3.2.52)
+- Security log IP geo popover (v3.2.66–v3.2.67)
+- Password reset via email+SMS (v3.2.68–v3.2.77)
+- SMS change detection (v3.2.71)
+- Delivery history friendly labels (v3.2.72)
+- Config editor encrypted export/import (v3.2.87–v3.2.88)
+- Speedtest chart label overlap (marked resolved — rotate-on-resize behavior confirmed)
+- Replace Flask dev server with gunicorn (v3.2.64–v3.2.65)
+- HTTP requests to HTTPS port hang bug (resolved by gunicorn)
+- backfill_account_subscribers() NOT NULL bug (v3.2.61)
+- webapp.py logging silent in journald (v3.2.62)
+- SERVICE_MAP comprehensively corrected (v3.2.63)
+
+ADDED TO BACKLOG THIS SESSION (then resolved in later session per context doc):
+- Dev Documents system / Deployed Files page rework
+  [COMPLETED IN LATER SESSION — see context doc v3.2.89–3.2.95]
+
+ADDED TO BACKLOG THIS SESSION (still open):
+- About/system info popover in navbar (raised at v3.2.67 milestone, deferred)
+- Patch manager: explicit restart actions not always showing as step rows in result UI
+  (discovered later — may be Session 3+)
+- SSD migration (hardware ordered, still on SD card)
+- Metrics: delivery history added time range and pagination (completed v3.2.73 — same
+  session, listed once here under completed)
+
+Note: Context doc is at v3.2.95, roughly 7 versions ahead of this session end. Items
+visible in context doc that do not appear in this transcript are referenced collectively
+in OPEN QUESTIONS above and not enumerated individually here.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_AlertSystemReview.txt — Full arc: alert system review, themed emails, email
+  icon investigation, package installer restart feedback fix (v3.2.52–v3.2.60).
+Feature_EmailIconArc.txt — Focused detail on email icon debugging arc and installer
+  feedback fix (from-session summary; supplements Feature_AlertSystemReview.txt).
+Bug_BackfillSubscribers.txt — backfill_account_subscribers() NOT NULL constraint,
+  SQLite prompt debugging incident (v3.2.61).
+Feature_GunicornMigration.txt — Gunicorn migration from Flask dev server, wsgi.py,
+  config file, preload_app, two-worker setup (v3.2.64–v3.2.65).
+Feature_SecurityLog.txt — IP geo popover with ip-api.com, IP summary modal, period
+  selector (v3.2.66–v3.2.67).
+Feature_PasswordReset.txt — Full arc including SMS, self-introduced regression
+  (v3.2.75–v3.2.77), and resolution (v3.2.68–v3.2.77).
+Feature_DeliveryHistory.txt — Friendly labels, pagination, time-range filter,
+  transactional send logging (v3.2.72–v3.2.74).
+Feature_MetricsCharts.txt — Crosshair tooltip, bucketed averaging, zoom-by-drag,
+  tooltip sizing, data gap arc including database.py regression (v3.2.78–v3.2.86).
+Feature_ConfigEditorExportImport.txt — Encrypted export/import, WebCrypto, diff
+  modal (v3.2.87–v3.2.88).
+Feature_MinorFixesSession_2.txt — backfill created_at fix, webapp.py logging,
+  SERVICE_MAP fix, SMS change detection (v3.2.61–v3.2.63, v3.2.71).
+
+NOTE ON SOURCES: This summary was reconstructed from two sources — a from-session
+summary (covering v3.2.50f–v3.2.65) and a text-dump summary (covering v3.2.51e–v3.2.88).
+The dump summary is the primary source. From-session files retained where they provide
+additional standalone detail (Bug_BackfillSubscribers.txt, Feature_EmailIconArc.txt).
+
+
+NEW GOTCHAS ADDED
+-----------------
+Gotchas_Append_Session2.txt produced with the following entries:
+- ALERTS.PY REQUIRES BOTH SERVICES TO RESTART (new entry)
+- AMENDMENT TO: DO NOT DIAGNOSE FROM SURFACE CODE READS (self-introduced regression
+  incidents from this session)
+- PACKAGE INSTALLER FEEDBACK ONLY TRIGGERS ON WEB SERVICE RESTART (new entry,
+  from from-session summary — not present in text-dump append file)
+
+Note: The gunicorn.ctl gotcha (v3.2.94) already exists in the provided Gotchas.txt
+with a later date — omitted from append file to avoid duplication.

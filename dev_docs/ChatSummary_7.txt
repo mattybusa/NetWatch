@@ -1,0 +1,168 @@
+NETWATCH SESSION SUMMARY
+========================
+Session: 7 | Date: 2026-03-12
+Starting version: v3.3.10 (context doc); zip labeled v3.3.11 (VERSION file)
+Ending version: v3.3.12
+Summary: Pi package update scheduling feature — weekly apt-get upgrade cron,
+  detailed package list in completion alert, new Maintenance alert category,
+  My Account maintenance toggle, daily backup enabled UI consistency fix.
+  Rollback DB restore confirmed functional between sessions (user report).
+  Two new backlog items added: system log viewer, dedicated service account.
+
+SCOPE NOTE: Single focused feature arc with design discussion up front,
+  one package shipped. No expanded summary required — full detail fits here.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- Rollback DB restore verification: user confirmed rollback script functional
+  between Session 6 and Session 7. Long-standing "unverified" backlog item
+  cleared. No code changes required.
+
+- v3.3.12 — Pi package update scheduling. Full feature:
+
+  alert_subscribers.py: added pkg_update alert type under new "maintenance"
+  group. Maintenance is a third group alongside network and security.
+
+  alerts.py: added SUBJECTS entry ("🔧  NetWatch: Pi Package Update Complete"),
+  COLORS entry (green #1a7f4b), and SMS_LABELS entry ("PKG UPDATE") for
+  pkg_update type.
+
+  alert_settings.html: added pkg_update to FRIENDLY_LABELS dict so delivery
+  history shows "Pi Package Update" instead of raw key.
+
+  preferences.html: updated buildAlertTypeGrids() to initialize groups with
+  network/security/maintenance, and added a Maintenance section header
+  rendering block. New sectionHeader() helper extracted to avoid duplicated
+  inline HTML string.
+
+  webapp.py: added /api/admin/pkg_update_schedule GET/POST route. GET returns
+  current schedule state parsed from crontab. POST saves cron line tagged
+  # netwatch-pkg-update. Schedule state: enabled, dow, hour, send_alert.
+  Last-run time derived from pkg_update.log mtime if file exists.
+
+  admin.html: (1) fixed daily backup "Enabled" from <select> dropdown to
+  <input type="checkbox"> toggle, matching the weekly backup's UI pattern.
+  Updated loadSchedule() and saveSchedule() JS accordingly.
+  (2) Added "Scheduled Pi Updates" section with day/time/enabled/alert toggles
+  and Save button. Added loadPkgSchedule() and savePkgSchedule() JS functions.
+  loadPkgSchedule() called at page init alongside existing loadSchedule().
+
+  pkg_update.sh: new shell script (pure ASCII, no heredocs). Runs apt-get
+  update then apt-get upgrade --dry-run to capture package list, then
+  apt-get upgrade -y. Passes raw dry-run output to pkg_update_alert.py for
+  parsing and alert firing. Logs all activity to pkg_update.log. Supports
+  --alert and --quiet flags for cron use.
+
+  pkg_update_alert.py: new Python helper invoked by pkg_update.sh. Three
+  modes: LOG (parse dry-run output, print package list to stdout for log
+  capture), OK (fire pkg_update alert with summary + package detail), FAILED
+  (fire pkg_update alert with failure message). parse_dry_run() extracts
+  package name, old version, new version from apt Inst lines using regex.
+  Alert message includes full per-package version delta list.
+
+  Sudoers entry (manual, one-time): three lines in /etc/sudoers.d/netwatch-apt
+  covering apt-get update, apt-get upgrade -y, and apt-get upgrade --dry-run.
+  chmod 440 required. Must be done before enabling the schedule.
+
+  Cron verification command: crontab -l | grep netwatch-pkg-update
+
+  (see Feature_PkgUpdateScheduling.txt)
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- pkg_update.sh first draft used python3 - << PYEOF heredoc for dry-run
+  parsing inline in the shell script. Caught and removed before shipping —
+  NEVER USE BASH HEREDOCS rule applies. Replaced with pkg_update_alert.py
+  helper invoked via python3 path args instead.
+
+- pkg_update.sh second draft used a while-read loop fed by a heredoc on a
+  variable (<<DRYEOF). Technically different from the python3 heredoc but
+  still a heredoc pattern on the Pi. Removed in favour of writing dry-run
+  output to a temp file and passing the file path to the Python helper.
+
+
+DECISIONS MADE
+--------------
+- apt-get upgrade -y (not dist-upgrade): conservative choice for a live
+  production Pi. Will not remove packages or pull in unexpected new
+  dependencies. Kernel updates are included and require manual reboot to
+  take effect — this is acceptable behaviour.
+
+- Narrow sudoers entry: three specific apt-get commands only, not blanket
+  NOPASSWD: ALL. Appropriate for home network Pi on trusted LAN.
+
+- Service account (netwatch-svc) deferred to backlog: the narrow sudoers
+  entry is the important protection. Service account refactor is a full
+  session of its own and does not belong bolted onto this feature.
+
+- All Python logic in pkg_update_alert.py, not inline in shell: keeps the
+  shell script free of heredocs and avoids multi-line quoting problems.
+
+- pkg_update.log is disk-only with no UI viewer: alert email covers the
+  normal case. Log viewer added to backlog as a future UI item.
+
+- Label for schedule alert toggle: "Send alert on completion" rather than
+  "Email" — distinguishes it clearly from the backup email toggle which
+  sends a file attachment.
+
+- Daily backup Enabled UI fix: changed from dropdown (Yes/No) to checkbox
+  toggle in the same package, since we were already touching admin.html.
+  Consistency fix, no functional change.
+
+- Two new backlog items added:
+  UI: System log viewer (pkg_update.log tail in Admin page)
+  Infrastructure: Dedicated service account (netwatch-svc)
+
+- End-of-session context doc update at v3.3.12. Backlog version tag updated,
+  duplicate "Pi package update scheduling" entry removed, rollback verification
+  cleared, service account and log viewer added.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+-----------------------------------
+- [PENDING VERIFICATION] Weekly update cron: user configured the schedule
+  after install. Has not yet run. Verification deferred — user will confirm
+  after scheduled run. Cron line can be verified immediately with:
+    crontab -l | grep netwatch-pkg-update
+
+- Web service silent-exit after delayed restart: gunicorn may exit cleanly
+  (status=0) after a package install restart, causing systemd Restart=always
+  not to trigger. Not confirmed as a bug. Watch on future installs.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Rollback DB restore verification (confirmed functional, user report)
+- Pi package update scheduling (v3.3.12)
+- Daily backup enabled UI fix — dropdown to toggle (v3.3.12)
+
+Added this session:
+- UI: System log viewer for pkg_update.log (and potentially other runtime logs)
+- Infrastructure: Dedicated service account (netwatch-svc) with full reasoning
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_PkgUpdateScheduling.txt — Full detail on pkg_update.sh, pkg_update_alert.py,
+  webapp route, admin.html schedule UI, alert type additions, sudoers setup.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None. No new hard-learned lessons this session. The heredoc near-miss was caught
+before shipping and is documented in WHAT WAS ATTEMPTED BUT FAILED above.
+The existing NEVER USE BASH HEREDOCS gotcha covered it correctly.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.12
+- All services running normally
+- Weekly Pi update schedule configured, not yet verified (pending first run)
+- Next task: open for discussion. Top candidates:
+    Config editor: visual indicator for newly added keys with valid defaults
+    Host monitoring
+    System log viewer (newly added)

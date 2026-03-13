@@ -1,0 +1,69 @@
+Feature_ConfigEditorExportImport.txt
+=====================================
+FEATURE/BUG HEADER
+------------------
+Name: Config Editor Export/Import (encrypted)
+Type: Feature
+Date worked on: 2026-03-07
+Sessions: Session 2
+Final outcome: Complete (confirmed working by user after v3.2.88)
+
+
+BACKGROUND
+----------
+Config editor at /admin/config allows editing all fields in config.py. User wanted
+ability to export the full config (including passwords/credentials) and re-import it
+on a new installation or after a reset. Three design questions resolved up-front:
+- Export: all fields including passwords — yes
+- Encryption: passphrase-protected — yes
+- On import: load into form for review, not save immediately — yes
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+v3.2.87 bottom Export button: An Export button was erroneously added to the bottom
+save bar in v3.2.87 alongside the existing Restore Backup and Save buttons. This did
+not fit the UI style (import has no bottom button, so export shouldn't either). Removed
+in v3.2.88, restoring the bottom to Restore Backup + Save only.
+
+
+WHAT WORKED
+-----------
+Package v3.2.87 — webapp.py, config_editor.html:
+- New /api/config/export endpoint (webapp.py): returns all config values as plain JSON
+  (no passphrase involvement server-side — all crypto in browser).
+- config_editor.html: Export button added to save bar (top area only, not bottom).
+  Clicking opens passphrase modal. On confirm, calls /api/config/export, receives JSON,
+  encrypts client-side with WebCrypto SubtleCrypto AES-GCM 256-bit.
+  Key derived via PBKDF2 with 200,000 iterations and SHA-256.
+  Result downloaded as .nwcfg file.
+- Import button in save bar. Clicking opens passphrase modal. After entering passphrase,
+  user selects .nwcfg file. Browser decrypts using same PBKDF2+AES-GCM. On success,
+  populates all form fields. Blue banner: "Values loaded from backup — not saved yet."
+- Import with identical values: modal says so and closes without changes.
+- Password fields in diff view show "••••••••" — actual values still written correctly
+  to form fields on Apply.
+
+Package v3.2.88 — config_editor.html only:
+- Removed bottom Export button.
+- Enhanced import flow: after decryption, instead of silently populating all fields,
+  opens a diff modal showing only fields that differ between current and imported.
+  Each row: current value on left, imported on right. Click to select which to keep
+  (highlights green). Bulk "Keep All Current" / "Use All Imported" buttons.
+  "Apply Selected" writes chosen values to the form. No config.py change until user
+  hits Save & Restart as usual.
+- If import has no differences from current form values: modal says "No differences
+  found" and closes.
+
+Security notes:
+- Passphrase never sent to server. All crypto in browser via WebCrypto API.
+- PBKDF2 200k iterations: resistant to offline brute force of .nwcfg file.
+- AES-GCM provides authenticated encryption (tampering is detectable).
+- /api/config/export requires @auth.login_required + @auth.requires_permission("manage_admin")
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+The .nwcfg file format is not versioned. If config schema changes significantly in
+future, imported files from older exports may populate some fields incorrectly or miss
+new fields. A future enhancement could add a schema version field to the export JSON.

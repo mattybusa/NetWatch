@@ -1,0 +1,81 @@
+NETWATCH EXPANDED SUMMARY — BUG: CONFIG EDITOR SAVE
+====================================================
+Name: Config Editor Save Failures — Three Root Causes + Boolean Toggle Double-Fire
+Type: Bug
+Date: 2026-03-05 (v3.2.8–v3.2.10); final fix v3.2.37; toggle fix v3.2.38–v3.2.41
+Sessions: Session 1.3
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+The config editor was built in sub-session 1.2. The core "save" functionality had
+persistent failures that were traced to three sequential root causes, each masking
+the next. A fourth issue (boolean toggle double-fire) appeared separately at v3.2.38.
+The config editor save was not fully working until v3.2.37.
+
+
+WHAT WAS TRIED AND FAILED (AND WHY)
+-------------------------------------
+
+ROOT CAUSE 1 — Path resolution (v3.2.8–v3.2.9):
+configeditor.py used os.path.expanduser("~/netwatch/config.py") to find config.py.
+When the web service runs under systemd with a specific working directory, ~ expands
+to the service user's home dir, which was correct on this Pi but fragile. The actual
+failure was that in some restart conditions the expanded path resolved to the wrong
+location. Fix: change to os.path.dirname(os.path.abspath(__file__)) to get the path
+relative to configeditor.py itself. This is always correct regardless of CWD.
+
+ROOT CAUSE 2 — UTF-8 encoding (v3.2.9–v3.2.10):
+config.py contains comments with characters like em-dashes (—) and other non-ASCII.
+open(CONFIG_PATH, "r") without encoding='utf-8' raised UnicodeDecodeError on Python 3
+when the system locale didn't default to UTF-8. The pyc cache often masked whether
+the fix had taken effect (service ran old compiled version). Fix: always open config.py
+with encoding='utf-8' for both read and write.
+
+Pyc cache masking (recurring, v3.2.8–v3.2.37):
+After each fix to configeditor.py, the service continued running the old compiled
+version from __pycache__. Required after every configeditor.py change:
+  rm ~/netwatch/__pycache__/configeditor*.pyc
+  sudo systemctl restart netwatch-web
+Without this, fixes appeared deployed but old behavior persisted. Added to Gotchas.
+
+ROOT CAUSE 3 — Service restart before file flush (v3.2.37):
+Even with correct path and encoding, the save handler called subprocess to restart
+netwatch-web as part of handling the save request. The restart killed the process
+mid-response, before the file write was fully flushed to disk. Result: config.py
+was sometimes written correctly, sometimes not — depended on timing. Diagnostic
+route confirmed: in_memory value was False even though write_test said True.
+The in-memory reload after the write was also never happening (config module not
+reimported after save).
+Fix: (1) call f.flush() + f.close() before any subprocess call, (2) use importlib
+to reload the config module after writing so in-memory values update immediately,
+(3) send the HTTP response before triggering the restart (use threading.Timer or
+a deferred callback).
+
+ADDITIONAL ROOT CAUSE — Inline comment breaking regex (found during diagnostics):
+Config line: ALERTS_ENABLED = False  # Flip to True once credentials are set
+The save regex matched on "ALERTS_ENABLED = False" but the replacement produced
+"ALERTS_ENABLED = True" without the comment, then later the comment was re-added
+differently. The regex was not anchored to end-of-line and the comment caused
+"Could not find/replace" errors for adjacent keys.
+Fix: regex uses r'^(\s*KEY\s*=\s*).*$' with re.MULTILINE, replacing the whole line
+value portion while preserving the key= prefix. Comment stripped on save (by design —
+config editor manages key-value pairs, not prose).
+
+BOOLEAN TOGGLE DOUBLE-FIRE (v3.2.38–v3.2.41):
+ALERTS_ENABLED toggle was firing twice on every change. Diagnostic: change event
+fired by both the native checkbox change event AND a separate JavaScript listener
+added by the config editor initialization. The second fire sent the opposite value,
+leaving the config in the pre-change state. Fix: removed the duplicate JavaScript
+event listener. Only the native change event handler remains.
+Diagnostic /api/config/debug route was added to expose in_memory vs on_disk values —
+this route was cleaned up after the fix was confirmed.
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Comments on config.py lines are stripped when the config editor saves a key.
+  This is by design — the editor manages key-value pairs. The comment "# Flip to
+  True once credentials are set" on ALERTS_ENABLED was removed on first save.
+  Some informational comments in config.py will be lost after first use of the editor.
+  [This is acceptable behavior, documented here for future reference.]

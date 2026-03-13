@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Controls{% endblock %}
+
+{% block content %}
+
+<div style="max-width:640px;">
+
+  <!-- Manual Resets -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-1">Manual Reset Controls</div>
+    <p style="font-size:0.82rem; color:var(--text-muted); margin:8px 0 20px;">
+      These actions queue immediately and bypass the cooldown timer.
+      All manual resets are logged. Allow 2–3 minutes for a full reset to complete.
+    </p>
+
+    <button class="nw-btn w-100 mb-2" style="border-color:var(--fail);color:var(--fail);"
+            onclick="doAction('/api/control/reset_full','Full reset queued — modem + router will cycle')">
+      <i class="bi bi-arrow-counterclockwise me-2"></i>Full Reset (Modem + Router)
+    </button>
+
+    <button class="nw-btn w-100 mb-2" style="border-color:var(--warn);color:var(--warn);"
+            onclick="doAction('/api/control/reset_modem','Modem reset queued')">
+      <i class="bi bi-box-arrow-in-up-right me-2"></i>Reset Modem Only
+    </button>
+
+    <button class="nw-btn w-100 mb-2" style="border-color:var(--accent);color:var(--accent);"
+            onclick="doAction('/api/control/reset_router','Router/AP reset queued')">
+      <i class="bi bi-wifi me-2"></i>Reset Router / AP Only
+    </button>
+  </div>
+
+  <!-- Lockout -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-1">Automatic Reset Control</div>
+    <p style="font-size:0.82rem; color:var(--text-muted); margin:8px 0 14px;">
+      Lockout mode disables automatic resets while you troubleshoot.
+      Manual resets above still work. Triple-press the physical button to also toggle this.
+    </p>
+    <div id="lockout-status" class="mb-3 p-3"
+         style="border-radius:6px; background:var(--bg-input); border:1px solid var(--border-color);
+                font-size:0.83rem;">
+      Loading...
+    </div>
+    <button class="nw-btn w-100" id="lockout-btn" onclick="toggleLockout()">
+      <i class="bi bi-lock me-2"></i>Toggle Lockout Mode
+    </button>
+  </div>
+
+  <!-- Diagnostics -->
+  <div class="nw-card p-4">
+    <div class="nw-label mb-1">Diagnostics</div>
+    <p style="font-size:0.82rem; color:var(--text-muted); margin:8px 0 16px;">
+      Run a speedtest on demand. To test alert delivery, visit <a href="/admin/alerts" style="color:var(--accent);">Alerts</a>.
+    </p>
+    <button class="nw-btn w-100" onclick="doAction('/api/control/run_speedtest','Speedtest queued — check Metrics in ~60 seconds')">
+      <i class="bi bi-speedometer2 me-2"></i>Run Speedtest Now
+    </button>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function doAction(url, successMsg) {
+  try {
+    const res  = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"} });
+    const data = await res.json();
+    showToast(data.message || successMsg, data.status === "ok" ? "success" : "error");
+  } catch(e) {
+    showToast("Request failed: " + e.message, "error");
+  }
+}
+
+async function toggleLockout() {
+  const res  = await fetch("/api/control/lockout", { method:"POST" });
+  const data = await res.json();
+  updateLockout(data.lockout);
+  showToast(data.lockout ? "Lockout ENABLED" : "Lockout DISABLED",
+            data.lockout ? "warning" : "success");
+}
+
+function updateLockout(lockout) {
+  const el  = document.getElementById("lockout-status");
+  const btn = document.getElementById("lockout-btn");
+  if (lockout) {
+    el.innerHTML  = `<span style="color:var(--fail);">🔒 Lockout is <strong>ACTIVE</strong> — automatic resets are disabled</span>`;
+    el.style.borderColor = "var(--fail)";
+    btn.style.borderColor = "var(--fail)";
+    btn.style.color = "var(--fail)";
+  } else {
+    el.innerHTML  = `<span style="color:var(--ok);">✓ Lockout is <strong>OFF</strong> — automatic resets are enabled</span>`;
+    el.style.borderColor = "var(--border-color)";
+    btn.style.borderColor = "var(--border-color)";
+    btn.style.color = "var(--text-primary)";
+  }
+}
+
+fetch("/api/status").then(r => r.json()).then(s => updateLockout(s.lockout));
+</script>
+{% endblock %}

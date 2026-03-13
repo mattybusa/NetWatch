@@ -1,0 +1,113 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: ALERT SUBSCRIPTIONS AND NOTIFICATION CENTER
+==================================================================================
+Name: Multi-Channel Alert Subscription System and Notification Center
+Type: Feature
+Date: 2026-03-02 (v3.0.0–v3.0.3); extended through v3.2.22 (Notification Center)
+Sessions: Session 1.3
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+The old alert system used a single global ALERT_TO email address. The user wanted
+per-user subscriptions with email and SMS options, granular per-alert-type control,
+and admin management of all subscribers. Designed in v2.9.8, implemented at v3.0.0.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+cleanup_duplicate_owner() not deployed with webapp.py (v3.0.0–v3.0.2):
+webapp.py was patched to call alert_subscribers.cleanup_duplicate_owner() at startup,
+but alert_subscribers.py from v3.0.0 was never installed (v3.0.2 package was skipped).
+The web service crashed immediately: AttributeError on module. Fixed by SSH line removal
+of the call from webapp.py, then a proper catch-up package with both files together.
+Rule: never ship webapp.py calling a new module function without including that module.
+
+Jinja2 syntax error in base.html (v3.0.0–v3.0.1):
+Adding the Alerts nav link in base.html created an orphaned {% endif %} — the insertion
+replaced the opening {% if current_user and current_user.manage_admin %} block start that
+was already wrapping the Admin link. Service crash on startup: Jinja2 TemplateSyntaxError.
+Fixed in v3.0.1 by correcting the conditional block nesting.
+
+Alert type settings API key format mismatch (v3.1.0):
+get_alert_type_settings() returned DB rows keyed one way; new preferences.html JS
+expected them keyed differently. Alert subscription checkboxes didn't load.
+Fixed by normalizing the API response format to match what the client expected.
+
+Sidebar missing new nav items after rebuild (v3.1.0):
+Security, Alerts, and My Account links were added to base.html for top-nav only.
+The sidebar layout template was a separate code path that hadn't been updated.
+Fixed by ensuring all nav links are in both the top-nav and sidebar sections.
+
+
+WHAT WORKED
+-----------
+ALERT_SUBSCRIBERS TABLE (database.py):
+Columns: id, user_id (nullable — NULL for standalone subscribers without accounts),
+  name, email, phone, carrier, is_active, first_name, last_name (added v3.2.16)
+
+Per-alert-type subscriptions in alert_subscriptions table:
+  subscriber_id, alert_type, channel (email|sms), enabled
+
+ALERT TYPES:
+- WAN_DOWN — internet unreachable
+- LAN_DOWN — LAN gateway unreachable
+- DEGRADED — latency/packet loss above threshold for configured duration
+- RESET_TRIGGERED — auto power cycle executed
+- SECURITY — brute force, account lock events (admin-targeted)
+
+ROLE DEFAULTS (v3.2.21):
+Admin can set default alert subscriptions per role. New users get their role's defaults
+applied at account creation. Users can override their individual subscriptions.
+
+DELIVERY:
+alerts.py send_alert(alert_type, message) iterates subscribers:
+  - For each subscriber with that type + channel enabled:
+    - Email: send via SMTP to subscriber.email
+    - SMS: send via SMTP to f"{subscriber.phone}@{carrier_gateway}"
+  - Delivery logged to alert_delivery_log table with status, timestamp, subscriber_id
+
+ADMIN SUBSCRIBER MANAGEMENT (/admin/alerts):
+- Lists all subscribers (account-linked and standalone)
+- Add standalone subscriber (name, email, phone, carrier)
+- Edit/delete subscriber
+- Cannot delete account-linked subscriber (account holder controls their own)
+- Account deletion with "keep subscription" option leaves subscriber as standalone
+
+ACCOUNT HOLDERS ALWAYS HAVE SUBSCRIBER RECORD (v3.2.17):
+Previously created only when account holder saves preferences. Changed: subscriber
+record created at account creation time (empty — no email/phone, not subscribed to
+anything). This ensures all users appear in the Alerts page subscriber list even if
+they've never configured preferences.
+
+NOTIFICATION CENTER (v3.2.22):
+The /admin/alerts page renamed and extended to "Notification Center."
+Added:
+- Test Alert button: sends test delivery to current user's configured channels
+- Delivery History: per-subscriber history of all sent alerts with status
+  (delivered, failed, [TEST] tagged)
+- Alert history temp password redaction (v3.2.43): temp passwords in delivery
+  history shown as [REDACTED]
+
+SUBSCRIBER INTEGRITY RULES (v3.2.17–v3.2.20):
+- Duplicate detection: adding a subscriber with email/phone matching an existing
+  account shows "An account already exists: username 'X'" and blocks the add
+- Merge: if a standalone subscriber is later linked to an account (account created
+  with same email), the standalone record is merged into the account subscriber record
+- SMS verification: subscriber can verify their phone number receives SMS
+- Admin cannot delete account-linked subscribers (only account holder can)
+
+FILES:
+- alert_subscribers.py — subscriber CRUD, duplicate check, merge logic
+- alerts.py — delivery logic (imported by BOTH services — restart both when changed)
+- templates/alert_settings.html — admin subscriber management
+- templates/preferences.html — user subscription preferences, email/phone fields
+- webapp.py — all alert-related API routes
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- No delivery retry on failure. If SMTP fails for a subscriber, that delivery is lost.
+- SMS delivery depends on carrier gateway availability. No delivery confirmation.
+- Per-alert-type granularity is per-channel (email or SMS separately). Can't currently
+  subscribe to email for WAN_DOWN but SMS for RESET_TRIGGERED in one action — requires
+  separate checkbox selections.

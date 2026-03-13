@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetWatch — First Run Setup</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+  <style>
+    :root {
+      --bg-primary:   #0d1117;
+      --bg-card:      #161b22;
+      --bg-input:     #0d1117;
+      --border:       #30363d;
+      --text-primary: #e6edf3;
+      --text-muted:   #8b949e;
+      --accent:       #58a6ff;
+      --ok:           #3fb950;
+      --warn:         #d29922;
+      --fail:         #f85149;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg-primary); color: var(--text-primary); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    .wizard-wrap { max-width: 640px; margin: 0 auto; padding: 40px 20px 80px; }
+
+    .wizard-header { text-align: center; margin-bottom: 40px; }
+    .wizard-header h1 { font-size: 1.8rem; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+    .wizard-header p  { color: var(--text-muted); font-size: 0.9rem; }
+
+    /* Progress bar */
+    .progress-wrap { display: flex; align-items: center; margin-bottom: 36px; }
+    .progress-step { display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; }
+    .progress-step:not(:last-child)::after {
+      content: ''; position: absolute; top: 14px; left: 50%; width: 100%;
+      height: 2px; background: var(--border); z-index: 0;
+    }
+    .progress-step.done::after  { background: var(--ok); }
+    .progress-step.active::after { background: var(--border); }
+    .step-dot {
+      width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border);
+      background: var(--bg-primary); display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: 600; z-index: 1; position: relative;
+      color: var(--text-muted);
+    }
+    .progress-step.done  .step-dot { background: var(--ok); border-color: var(--ok); color: #fff; }
+    .progress-step.active .step-dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .step-label { font-size: 0.68rem; color: var(--text-muted); margin-top: 6px; text-align: center; }
+    .progress-step.active .step-label { color: var(--accent); }
+    .progress-step.done  .step-label  { color: var(--ok); }
+
+    /* Cards */
+    .wizard-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 20px; }
+    .wizard-card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 6px; }
+    .wizard-card .subtitle { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 22px; }
+
+    /* Form fields */
+    .f-group { margin-bottom: 16px; }
+    .f-label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .f-input {
+      width: 100%; background: var(--bg-input); border: 1px solid var(--border);
+      border-radius: 7px; padding: 9px 12px; color: var(--text-primary);
+      font-size: 0.88rem; outline: none; transition: border-color 0.2s;
+    }
+    .f-input:focus { border-color: var(--accent); }
+    .f-hint { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+    .f-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    /* Buttons */
+    .btn-primary-nw {
+      background: var(--accent); color: #fff; border: none; border-radius: 8px;
+      padding: 11px 24px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+      width: 100%; transition: opacity 0.15s;
+    }
+    .btn-primary-nw:hover { opacity: 0.85; }
+    .btn-ghost {
+      background: transparent; color: var(--text-muted); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 24px; font-size: 0.9rem; cursor: pointer;
+      width: 100%; transition: border-color 0.2s;
+    }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-row { display: flex; gap: 12px; margin-top: 24px; }
+    .btn-row .btn-ghost { flex: 1; }
+    .btn-row .btn-primary-nw { flex: 2; }
+
+    /* Summary */
+    .summary-group { margin-bottom: 20px; }
+    .summary-group h3 { font-size: 0.78rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+    .summary-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 0.85rem; }
+    .summary-row .k { color: var(--text-muted); }
+    .summary-row .v { color: var(--text-primary); font-weight: 500; }
+    .summary-row .v.masked { color: var(--text-muted); letter-spacing: 0.1em; }
+
+    .alert-box { border-radius: 8px; padding: 12px 16px; font-size: 0.83rem; margin-bottom: 16px; }
+    .alert-warn { background: rgba(210,153,34,0.1); border: 1px solid var(--warn); color: var(--warn); }
+    .alert-ok   { background: rgba(63,185,80,0.1);  border: 1px solid var(--ok);   color: var(--ok); }
+
+    .skip-link { text-align: center; margin-top: 16px; }
+    .skip-link a { color: var(--text-muted); font-size: 0.8rem; text-decoration: none; }
+    .skip-link a:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+<div class="wizard-wrap">
+
+  <div class="wizard-header">
+    <h1><i class="bi bi-router me-2"></i>NetWatch Setup</h1>
+    <p>Let's get your network monitor configured. This takes about 2 minutes.</p>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap" id="progress-bar">
+    <div class="progress-step active" id="ps-1"><div class="step-dot">1</div><div class="step-label">Network</div></div>
+    <div class="progress-step" id="ps-2"><div class="step-dot">2</div><div class="step-label">Relays</div></div>
+    <div class="progress-step" id="ps-3"><div class="step-dot">3</div><div class="step-label">Email</div></div>
+    <div class="progress-step" id="ps-4"><div class="step-dot">4</div><div class="step-label">Account</div></div>
+    <div class="progress-step" id="ps-5"><div class="step-dot">5</div><div class="step-label">Review</div></div>
+  </div>
+
+  <!-- Step 1: Network -->
+  <div id="step-1">
+    <div class="wizard-card">
+      <h2><i class="bi bi-diagram-3 me-2"></i>Network Configuration</h2>
+      <p class="subtitle">Enter the IP addresses for your network devices. These are used to monitor connectivity.</p>
+
+      <div class="f-group">
+        <label class="f-label">Network Setup Type</label>
+        <select class="f-input" id="network-type" onchange="toggleWifiGateway()">
+          <option value="simple">Simple — one router, everything on the same network</option>
+          <option value="advanced">Advanced — separate subnets or VLANs for wired and WiFi</option>
+        </select>
+        <div class="f-hint">Most home setups are Simple. Choose Advanced if your wired and WiFi devices are on different subnets.</div>
+      </div>
+      <div class="f-group">
+        <label class="f-label">Site Name</label>
+        <input type="text" class="f-input" id="site-name" placeholder="e.g. Home Network" value="Home Network">
+        <div class="f-hint">Displayed in the dashboard header</div>
+      </div>
+      <div class="f-group">
+        <label class="f-label">Router / LAN Gateway</label>
+        <input type="text" class="f-input" id="lan-gateway" placeholder="e.g. 192.168.1.1">
+        <div class="f-hint">Your router's IP address</div>
+      </div>
+      <div class="f-group" id="wifi-gateway-group" style="display:none;">
+        <label class="f-label">WiFi Gateway <span style="color:var(--text-muted);font-weight:400;">(separate subnet)</span></label>
+        <input type="text" class="f-input" id="wifi-gateway" placeholder="e.g. 192.168.2.1">
+        <div class="f-hint">Gateway IP for your WiFi subnet — only needed if WiFi is on a different VLAN/subnet</div>
+      </div>
+      <div class="f-row">
+        <div class="f-group">
+          <label class="f-label">WAN Check IP (Primary)</label>
+          <input type="text" class="f-input" id="wan-primary" value="8.8.8.8">
+        </div>
+        <div class="f-group">
+          <label class="f-label">WAN Check IP (Secondary)</label>
+          <input type="text" class="f-input" id="wan-secondary" value="8.8.4.4">
+        </div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-primary-nw" onclick="goTo(2)"><i class="bi bi-arrow-right me-2"></i>Next — Relay Setup</button>
+    </div>
+    <div class="skip-link"><a href="/setup/skip">Skip wizard — I'll configure manually</a></div>
+  </div>
+
+  <!-- Step 2: Relays -->
+  <div id="step-2" style="display:none;">
+    <div class="wizard-card">
+      <h2><i class="bi bi-lightning-charge me-2"></i>Relay Configuration</h2>
+      <p class="subtitle">Configure the GPIO pins connected to your relay board. Uses BCM (Broadcom) pin numbering.</p>
+
+      <div class="f-row">
+        <div class="f-group">
+          <label class="f-label">Modem Relay GPIO Pin</label>
+          <input type="number" class="f-input" id="relay-modem" value="17" min="1" max="27">
+          <div class="f-hint">BCM pin → Relay 1 → Modem</div>
+        </div>
+        <div class="f-group">
+          <label class="f-label">Router Relay GPIO Pin</label>
+          <input type="number" class="f-input" id="relay-router" value="27" min="1" max="27">
+          <div class="f-hint">BCM pin → Relay 2 → Router</div>
+        </div>
+      </div>
+      <div class="f-group">
+        <label class="f-label">Button GPIO Pin <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="number" class="f-input" id="button-pin" value="22" min="1" max="27">
+        <div class="f-hint">BCM pin for manual reset pushbutton</div>
+      </div>
+      <div class="f-group">
+        <label class="f-label">Relay Wiring Type</label>
+        <select class="f-input" id="relay-active-low">
+          <option value="true">Active HIGH — relay fires when GPIO is HIGH (most boards)</option>
+          <option value="false">Active LOW — relay fires when GPIO is LOW (some boards)</option>
+        </select>
+        <div class="f-hint">Check your relay board datasheet. Most common boards are active HIGH.</div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-ghost" onclick="goTo(1)"><i class="bi bi-arrow-left me-2"></i>Back</button>
+      <button class="btn-primary-nw" onclick="goTo(3)"><i class="bi bi-arrow-right me-2"></i>Next — Email Setup</button>
+    </div>
+  </div>
+
+  <!-- Step 3: Email -->
+  <div id="step-3" style="display:none;">
+    <div class="wizard-card">
+      <h2><i class="bi bi-envelope me-2"></i>Email Alerts</h2>
+      <p class="subtitle">NetWatch can email you when the network goes down or resets. Uses Gmail with an App Password.</p>
+
+      <div class="alert-box alert-warn">
+        <i class="bi bi-info-circle me-2"></i>
+        You'll need a Gmail App Password — not your regular Gmail password.
+        Go to <strong>myaccount.google.com → Security → App Passwords</strong> to create one.
+      </div>
+
+      <div class="f-group">
+        <label class="f-label">Gmail Address</label>
+        <input type="email" class="f-input" id="gmail-user" placeholder="you@gmail.com">
+      </div>
+      <div class="f-group">
+        <label class="f-label">Gmail App Password</label>
+        <input type="password" class="f-input" id="gmail-pass" placeholder="xxxx xxxx xxxx xxxx">
+        <div class="f-hint">16-character app password from Google Account settings</div>
+      </div>
+      <div class="f-group">
+        <label class="f-label">Send Alerts To</label>
+        <input type="email" class="f-input" id="alert-to" placeholder="you@gmail.com">
+        <div class="f-hint">Where alert emails are delivered (can be any email address)</div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-ghost" onclick="goTo(2)"><i class="bi bi-arrow-left me-2"></i>Back</button>
+      <button class="btn-primary-nw" onclick="goTo(4)"><i class="bi bi-arrow-right me-2"></i>Next — Admin Account</button>
+    </div>
+    <div class="skip-link"><a href="#" onclick="skipEmail()">Skip email setup for now</a></div>
+  </div>
+
+  <!-- Step 4: Admin Account -->
+  <div id="step-4" style="display:none;">
+    <div class="wizard-card">
+      <h2><i class="bi bi-person-lock me-2"></i>Admin Account</h2>
+      <p class="subtitle">Set the password for the admin account. You'll use this to log into the dashboard.</p>
+
+      <div class="f-group">
+        <label class="f-label">Admin Username</label>
+        <input type="text" class="f-input" id="admin-user" value="admin">
+      </div>
+      <div class="f-group">
+        <label class="f-label">Admin Password</label>
+        <input type="password" class="f-input" id="admin-pass" placeholder="Choose a strong password">
+      </div>
+      <div class="f-group">
+        <label class="f-label">Confirm Password</label>
+        <input type="password" class="f-input" id="admin-pass2" placeholder="Repeat password">
+      </div>
+      <div id="pass-error" style="display:none;color:var(--fail);font-size:0.82rem;margin-top:8px;"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-ghost" onclick="goTo(3)"><i class="bi bi-arrow-left me-2"></i>Back</button>
+      <button class="btn-primary-nw" onclick="goToReview()"><i class="bi bi-arrow-right me-2"></i>Review Settings</button>
+    </div>
+  </div>
+
+  <!-- Step 5: Review & Apply -->
+  <div id="step-5" style="display:none;">
+    <div class="wizard-card">
+      <h2><i class="bi bi-check2-circle me-2"></i>Review Your Settings</h2>
+      <p class="subtitle">Everything looks good? Click Apply to write your configuration and start NetWatch.</p>
+
+      <div class="summary-group">
+        <h3>Network</h3>
+        <div class="summary-row"><span class="k">Site Name</span><span class="v" id="s-site"></span></div>
+        <div class="summary-row"><span class="k">LAN Gateway</span><span class="v" id="s-lan"></span></div>
+        <div class="summary-row"><span class="k">WiFi Gateway</span><span class="v" id="s-wifi"></span></div>
+        <div class="summary-row"><span class="k">WAN Primary</span><span class="v" id="s-wan1"></span></div>
+        <div class="summary-row"><span class="k">WAN Secondary</span><span class="v" id="s-wan2"></span></div>
+      </div>
+
+      <div class="summary-group">
+        <h3>Relays</h3>
+        <div class="summary-row"><span class="k">Modem GPIO</span><span class="v" id="s-modem"></span></div>
+        <div class="summary-row"><span class="k">Router GPIO</span><span class="v" id="s-router"></span></div>
+        <div class="summary-row"><span class="k">Button GPIO</span><span class="v" id="s-button"></span></div>
+        <div class="summary-row"><span class="k">Wiring</span><span class="v" id="s-wiring"></span></div>
+      </div>
+
+      <div class="summary-group">
+        <h3>Email</h3>
+        <div class="summary-row"><span class="k">Gmail Account</span><span class="v" id="s-gmail"></span></div>
+        <div class="summary-row"><span class="k">Alert Recipient</span><span class="v" id="s-alert-to"></span></div>
+        <div class="summary-row"><span class="k">Alerts Enabled</span><span class="v" id="s-alerts"></span></div>
+      </div>
+
+      <div class="summary-group">
+        <h3>Admin Account</h3>
+        <div class="summary-row"><span class="k">Username</span><span class="v" id="s-admin-user"></span></div>
+        <div class="summary-row"><span class="k">Password</span><span class="v masked">••••••••</span></div>
+      </div>
+    </div>
+
+    <div id="apply-msg" style="display:none;" class="alert-box alert-ok">
+      <i class="bi bi-check-circle me-2"></i><span id="apply-msg-text"></span>
+    </div>
+    <div id="apply-err" style="display:none;" class="alert-box" style="background:rgba(248,81,73,0.1);border:1px solid var(--fail);color:var(--fail);">
+      <i class="bi bi-exclamation-circle me-2"></i><span id="apply-err-text"></span>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-ghost" onclick="goTo(4)"><i class="bi bi-arrow-left me-2"></i>Back</button>
+      <button class="btn-primary-nw" id="apply-btn" onclick="applyConfig()">
+        <i class="bi bi-rocket-takeoff me-2"></i>Apply &amp; Launch NetWatch
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+let emailSkipped = false;
+
+function toggleWifiGateway() {
+  const type = document.getElementById('network-type').value;
+  document.getElementById('wifi-gateway-group').style.display = type === 'advanced' ? '' : 'none';
+  if (type === 'simple') {
+    document.getElementById('wifi-gateway').value = '';
+  }
+}
+
+function goTo(step) {
+  for (let i = 1; i <= 5; i++) {
+    document.getElementById(`step-${i}`).style.display = i === step ? '' : 'none';
+    const ps = document.getElementById(`ps-${i}`);
+    ps.className = 'progress-step' + (i < step ? ' done' : i === step ? ' active' : '');
+    if (i < step) ps.querySelector('.step-dot').innerHTML = '<i class="bi bi-check"></i>';
+    else ps.querySelector('.step-dot').textContent = i;
+  }
+  window.scrollTo(0, 0);
+}
+
+function skipEmail() {
+  emailSkipped = true;
+  document.getElementById('gmail-user').value = '';
+  document.getElementById('gmail-pass').value = '';
+  document.getElementById('alert-to').value   = '';
+  goTo(4);
+}
+
+function goToReview() {
+  const pass  = document.getElementById('admin-pass').value;
+  const pass2 = document.getElementById('admin-pass2').value;
+  const errEl = document.getElementById('pass-error');
+  if (pass.length < 8) {
+    errEl.textContent = 'Password must be at least 8 characters'; errEl.style.display = 'block'; return;
+  }
+  if (pass !== pass2) {
+    errEl.textContent = 'Passwords do not match'; errEl.style.display = 'block'; return;
+  }
+  errEl.style.display = 'none';
+
+  // Populate summary
+  const gmail = document.getElementById('gmail-user').value;
+  const networkType = document.getElementById('network-type').value;
+  const wifiGw = networkType === 'advanced' ? (document.getElementById('wifi-gateway').value || 'Not set') : 'Same as LAN (simple setup)';
+  document.getElementById('s-site').textContent    = document.getElementById('site-name').value || '—';
+  document.getElementById('s-lan').textContent     = document.getElementById('lan-gateway').value || '—';
+  document.getElementById('s-wifi').textContent    = wifiGw;
+  document.getElementById('s-wan1').textContent    = document.getElementById('wan-primary').value;
+  document.getElementById('s-wan2').textContent    = document.getElementById('wan-secondary').value;
+  document.getElementById('s-modem').textContent   = document.getElementById('relay-modem').value;
+  document.getElementById('s-router').textContent  = document.getElementById('relay-router').value;
+  document.getElementById('s-button').textContent  = document.getElementById('button-pin').value;
+  const wiring = document.getElementById('relay-active-low').value === 'true' ? 'Active HIGH' : 'Active LOW';
+  document.getElementById('s-wiring').textContent      = wiring;
+  document.getElementById('s-gmail').textContent       = emailSkipped ? 'Not configured' : (gmail || 'Not configured');
+  document.getElementById('s-alert-to').textContent    = emailSkipped ? 'Not configured' : (document.getElementById('alert-to').value || 'Not configured');
+  document.getElementById('s-alerts').textContent      = (!emailSkipped && gmail) ? 'Yes' : 'No';
+  document.getElementById('s-admin-user').textContent  = document.getElementById('admin-user').value;
+
+  goTo(5);
+}
+
+async function applyConfig() {
+  const btn = document.getElementById('apply-btn');
+  const msgEl = document.getElementById('apply-msg');
+  const errEl = document.getElementById('apply-err');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split me-2"></i>Applying...';
+
+  const payload = {
+    site_name:       document.getElementById('site-name').value,
+    lan_gateway:     document.getElementById('lan-gateway').value,
+    wifi_gateway:    document.getElementById('wifi-gateway').value,
+    wan_primary:     document.getElementById('wan-primary').value,
+    wan_secondary:   document.getElementById('wan-secondary').value,
+    relay_modem:     parseInt(document.getElementById('relay-modem').value),
+    relay_router:    parseInt(document.getElementById('relay-router').value),
+    button_pin:      parseInt(document.getElementById('button-pin').value),
+    relay_active_low: document.getElementById('relay-active-low').value === 'true',
+    gmail_user:      emailSkipped ? '' : document.getElementById('gmail-user').value,
+    gmail_pass:      emailSkipped ? '' : document.getElementById('gmail-pass').value,
+    alert_to:        emailSkipped ? '' : document.getElementById('alert-to').value,
+    alerts_enabled:  !emailSkipped && !!document.getElementById('gmail-user').value,
+    admin_username:  document.getElementById('admin-user').value,
+    admin_password:  document.getElementById('admin-pass').value,
+  };
+
+  try {
+    const res = await fetch('/setup/apply', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(r => r.json());
+
+    if (res.status === 'ok') {
+      msgEl.style.display = 'block';
+      document.getElementById('apply-msg-text').textContent = 'Configuration applied! Restarting services...';
+      btn.innerHTML = '<i class="bi bi-check-circle me-2"></i>Done!';
+      setTimeout(() => { window.location.href = '/'; }, 4000);
+    } else {
+      errEl.style.display = 'block';
+      document.getElementById('apply-err-text').textContent = res.message || 'Apply failed';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-rocket-takeoff me-2"></i>Apply &amp; Launch NetWatch';
+    }
+  } catch(e) {
+    errEl.style.display = 'block';
+    document.getElementById('apply-err-text').textContent = 'Request failed — check logs';
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-rocket-takeoff me-2"></i>Apply &amp; Launch NetWatch';
+  }
+}
+</script>
+</body>
+</html>

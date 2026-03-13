@@ -1,0 +1,923 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Admin{% endblock %}
+
+{% block content %}
+
+<div style="max-width:760px;">
+
+  {% if current_user and current_user.manage_users %}
+  <!-- User & Role Management -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('users')">
+      <div class="nw-label" style="margin:0;">User &amp; Role Management</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-users"></i>
+    </div>
+    <div id="section-users" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Create and manage user accounts, define roles with custom permissions,
+        and set session timeouts per role.
+      </p>
+      <a href="/admin/users" class="nw-btn nw-btn-primary" style="display:inline-block;">
+        <i class="bi bi-people me-2"></i>Manage Users &amp; Roles
+      </a>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if current_user and current_user.manage_admin %}
+
+  <!-- Deployed Files -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('updater')">
+      <div class="nw-label" style="margin:0;">Deployed Files</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-updater"></i>
+    </div>
+    <div id="section-updater" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Upload new versions of any NetWatch file directly from your browser.
+        Python files are syntax-checked before applying. Previous versions are
+        automatically backed up and can be rolled back instantly.
+        Also manage Dev Documents — AI context files and session transcripts
+        used to resume development sessions.
+      </p>
+      <a href="/admin/update" class="nw-btn nw-btn-primary" style="display:inline-block;">
+        <i class="bi bi-files me-2"></i>Open Deployed Files
+      </a>
+    </div>
+  </div>
+
+  <!-- Package Installer -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('patcher')">
+      <div class="nw-label" style="margin:0;">Package Installer</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-patcher"></i>
+    </div>
+    <div id="section-patcher" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Install update packages (.zip) containing multiple files, patches,
+        database migrations, and automated service restarts. Drop a zip and
+        review the full installation plan before applying.
+      </p>
+      <a href="/admin/patch" class="nw-btn nw-btn-primary" style="display:inline-block;">
+        <i class="bi bi-box-arrow-in-down me-2"></i>Open Package Installer
+      </a>
+
+    </div>
+  </div>
+
+  <!-- Config Editor -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('config')">
+      <div class="nw-label" style="margin:0;">Configuration Editor</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-config"></i>
+    </div>
+    <div id="section-config" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Edit all NetWatch settings from the browser — no SSH, no nano.
+        Changes are validated, backed up, and applied immediately.
+        The monitor service restarts automatically after saving.
+      </p>
+      <a href="/admin/config" class="nw-btn nw-btn-primary" style="display:inline-block;">
+        <i class="bi bi-sliders me-2"></i>Open Config Editor
+      </a>
+    </div>
+  </div>
+
+  <!-- Certificate Management -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('certs')">
+      <div class="nw-label" style="margin:0;">Certificate Management</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-certs"></i>
+    </div>
+    <div id="section-certs" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Install the CA certificate on your devices for trusted HTTPS with no browser warnings.
+        Download an encrypted backup of your CA private key, and regenerate the server
+        certificate if needed.
+      </p>
+      <a href="/admin/certs" class="nw-btn nw-btn-primary" style="display:inline-block;">
+        <i class="bi bi-shield-lock me-2"></i>Certificate Management
+      </a>
+    </div>
+  </div>
+
+  {% endif %}
+
+  <!-- Database Stats -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('db-status')">
+      <div class="nw-label" style="margin:0;">Database Status</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-db-status"></i>
+    </div>
+    <div id="section-db-status" class="nw-collapse-body">
+      <div class="row text-center" style="margin-top:12px;">
+        <div class="col-6 col-md-3">
+          <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
+            <div class="nw-big-stat" id="st-health">—</div>
+            <div class="nw-label mt-1">Health Checks</div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
+            <div class="nw-big-stat" id="st-resets">—</div>
+            <div class="nw-label mt-1">Reset Events</div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
+            <div class="nw-big-stat" id="st-speed">—</div>
+            <div class="nw-label mt-1">Speedtests</div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
+            <div class="nw-big-stat" id="st-size">—</div>
+            <div class="nw-label mt-1">DB Size (KB)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export Data -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('export')">
+      <div class="nw-label" style="margin:0;">Export Data</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-export"></i>
+    </div>
+    <div id="section-export" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Download records as CSV files. Health exports cover 30 days; reset exports cover 90 days.
+      </p>
+      <a href="/api/admin/export_health" class="nw-btn w-100 mb-2" style="display:block;text-align:center;">
+        <i class="bi bi-download me-2"></i>Export Health Log (CSV)
+      </a>
+      <a href="/api/admin/export_resets" class="nw-btn w-100 mb-2" style="display:block;text-align:center;">
+        <i class="bi bi-download me-2"></i>Export Reset Events (CSV)
+      </a>
+      <hr class="nw-hr">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Download a zip of the current code and Dev Documents. Excludes config.py (contains credentials),
+        database, certs, logs, and venv. Use this to resume a development session in a new chat.
+      </p>
+      <a href="/api/admin/export_code_full" class="nw-btn w-100" style="display:block;text-align:center;">
+        <i class="bi bi-file-zip me-2"></i>Download Current Code (.zip)
+      </a>
+    </div>
+  </div>
+
+  <!-- Database Backup & Restore -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('db-backup')">
+      <div class="nw-label" style="margin:0;">Database Backup &amp; Restore</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-db-backup"></i>
+    </div>
+    <div id="section-db-backup" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Download a complete backup of all historical data (health checks, resets, speedtests).
+        Restore from a previously downloaded backup file. A safety copy is made before any restore.
+      </p>
+      <a href="/api/admin/backup_db" class="nw-btn nw-btn-primary w-100 mb-3" style="display:block;text-align:center;">
+        <i class="bi bi-database-down me-2"></i>Download Database Backup (.db)
+      </a>
+      <div class="nw-label mb-2">Restore from Backup</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="file" id="restore-file" accept=".db"
+               style="flex:1;background:var(--bg-input);border:1px solid var(--border-color);
+                      border-radius:6px;padding:6px 10px;color:var(--text-primary);font-size:0.82rem;">
+        <button class="nw-btn" style="border-color:var(--warn);color:var(--warn);white-space:nowrap;"
+                onclick="doRestore()">
+          <i class="bi bi-database-up me-1"></i>Restore
+        </button>
+      </div>
+      <div id="restore-msg" style="display:none;margin-top:10px;font-size:0.82rem;"></div>
+    </div>
+  </div>
+
+  <!-- Full System Backup -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('sys-backup')">
+      <div class="nw-label" style="margin:0;">Full System Backup</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-sys-backup"></i>
+    </div>
+    <div id="section-sys-backup" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Download a complete encrypted backup of everything — code, config, certificates, and database.
+        Use this to restore to a new Pi or recover from hardware failure.
+        Backups are encrypted with your GPG public key and can only be decrypted on your PC.
+      </p>
+      <button class="nw-btn nw-btn-primary w-100 mb-2" onclick="doFullBackup()"
+              style="display:block;text-align:center;" id="full-backup-btn">
+        <i class="bi bi-archive me-2"></i>Download Full System Backup (.tar.gz.gpg)
+      </button>
+      <div id="full-backup-msg" style="display:none;margin-bottom:12px;font-size:0.82rem;"></div>
+
+      <hr class="nw-hr">
+      <div class="nw-label mb-3">Scheduled Backups</div>
+
+      <!-- Daily DB backup -->
+      <div style="background:var(--bg-input);border-radius:8px;padding:14px;margin-bottom:12px;">
+        <div style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">
+          <i class="bi bi-database me-1"></i> Daily — Database Only
+        </div>
+        <div id="schedule-db-status" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:10px;">Loading...</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div>
+            <label class="f-label">Time (24h)</label>
+            <select id="sched-db-hour" class="f-input">
+              {% for h in range(24) %}
+              <option value="{{ h }}">{{ '%02d:00'|format(h) }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <input type="checkbox" id="sched-db-enabled" style="width:16px;height:16px;">
+          <label for="sched-db-enabled" style="font-size:0.8rem;color:var(--text-secondary);">Enable daily database backup</label>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <input type="checkbox" id="sched-db-email" style="width:16px;height:16px;">
+          <label for="sched-db-email" style="font-size:0.8rem;color:var(--text-secondary);">Email backup after each run</label>
+        </div>
+        <button class="nw-btn w-100" onclick="saveSchedule('db')" style="font-size:0.82rem;">
+          <i class="bi bi-save me-1"></i>Save Daily Schedule
+        </button>
+      </div>
+
+      <!-- Weekly full backup -->
+      <div style="background:var(--bg-input);border-radius:8px;padding:14px;margin-bottom:12px;">
+        <div style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">
+          <i class="bi bi-archive me-1"></i> Weekly — Full System
+        </div>
+        <div id="schedule-full-status" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:10px;">Loading...</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div>
+            <label class="f-label">Day</label>
+            <select id="sched-full-dow" class="f-input">
+              <option value="0">Sunday</option>
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5">Friday</option>
+              <option value="6">Saturday</option>
+            </select>
+          </div>
+          <div>
+            <label class="f-label">Time (24h)</label>
+            <select id="sched-full-hour" class="f-input">
+              {% for h in range(24) %}
+              <option value="{{ h }}">{{ '%02d:00'|format(h) }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <input type="checkbox" id="sched-full-enabled" style="width:16px;height:16px;">
+          <label for="sched-full-enabled" style="font-size:0.8rem;color:var(--text-secondary);">Enable weekly full backup</label>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <input type="checkbox" id="sched-full-email" style="width:16px;height:16px;">
+          <label for="sched-full-email" style="font-size:0.8rem;color:var(--text-secondary);">Email backup after each run</label>
+        </div>
+        <button class="nw-btn w-100" onclick="saveSchedule('full')" style="font-size:0.82rem;">
+          <i class="bi bi-save me-1"></i>Save Weekly Schedule
+        </button>
+      </div>
+
+      <div id="schedule-msg" style="display:none;margin-top:10px;font-size:0.82rem;"></div>
+
+      <hr class="nw-hr">
+      <div class="nw-label mb-3">Scheduled Pi Updates</div>
+
+      <!-- Pi package update schedule -->
+      <div style="background:var(--bg-input);border-radius:8px;padding:14px;margin-bottom:12px;">
+        <div style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">
+          <i class="bi bi-arrow-repeat me-1"></i> Weekly — Pi Package Update
+        </div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:10px;">
+          Runs <code>apt-get upgrade -y</code> on the Pi. Packages are updated but the Pi is not rebooted automatically.
+        </div>
+        <div id="schedule-pkg-status" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:10px;">Loading...</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div>
+            <label class="f-label">Day</label>
+            <select id="sched-pkg-dow" class="f-input">
+              <option value="0">Sunday</option>
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5">Friday</option>
+              <option value="6">Saturday</option>
+            </select>
+          </div>
+          <div>
+            <label class="f-label">Time (24h)</label>
+            <select id="sched-pkg-hour" class="f-input">
+              {% for h in range(24) %}
+              <option value="{{ h }}">{{ '%02d:00'|format(h) }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <input type="checkbox" id="sched-pkg-enabled" style="width:16px;height:16px;">
+          <label for="sched-pkg-enabled" style="font-size:0.8rem;color:var(--text-secondary);">Enable weekly Pi package update</label>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <input type="checkbox" id="sched-pkg-alert" style="width:16px;height:16px;">
+          <label for="sched-pkg-alert" style="font-size:0.8rem;color:var(--text-secondary);">Send alert on completion</label>
+        </div>
+        <button class="nw-btn w-100" onclick="savePkgSchedule()" style="font-size:0.82rem;">
+          <i class="bi bi-save me-1"></i>Save Update Schedule
+        </button>
+      </div>
+
+      <div id="schedule-pkg-msg" style="display:none;margin-top:10px;font-size:0.82rem;"></div>
+    </div>
+  </div>
+
+  <!-- Share NetWatch -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('share')">
+      <div class="nw-label" style="margin:0;">Share NetWatch</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-share"></i>
+    </div>
+    <div id="section-share" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Share NetWatch with others or push updates to existing installations.
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+        <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
+          <div style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">
+            <i class="bi bi-box-arrow-up me-1"></i> Fresh Install
+          </div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:10px;">
+            For someone new to NetWatch. Blank config, empty database, setup wizard on first visit.
+          </div>
+          <button class="nw-btn nw-btn-primary w-100" onclick="doGenerateDistrib()" id="distrib-btn" style="font-size:0.82rem;">
+            <i class="bi bi-person-plus me-1"></i>New User Package
+          </button>
+        </div>
+        <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
+          <div style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">
+            <i class="bi bi-arrow-up-circle me-1"></i> Update Existing
+          </div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:10px;">
+            For someone already running NetWatch. Updates all code, preserves their config and data.
+          </div>
+          <button class="nw-btn nw-btn-primary w-100" onclick="doGenerateUpdate()" id="update-pkg-btn" style="font-size:0.82rem;">
+            <i class="bi bi-cloud-arrow-up me-1"></i>Update Package
+          </button>
+        </div>
+      </div>
+      <div style="font-size:0.75rem;color:var(--text-muted);padding:8px 10px;background:var(--bg-input);border-radius:6px;border:1px solid var(--border-color);">
+        <i class="bi bi-shield-check me-1" style="color:var(--ok);"></i>
+        Neither package contains your personal data — IPs, email, passwords, certs, and database are always stripped.
+      </div>
+      <div id="distrib-msg" style="display:none;margin-top:10px;font-size:0.82rem;"></div>
+    </div>
+  </div>
+
+  <!-- Theme Manager -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('themes')">
+      <div class="nw-label" style="margin:0;">Theme Manager</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-themes"></i>
+    </div>
+    <div id="section-themes" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Import and manage custom <code>.nwtheme</code> files. Once installed, any user can select a
+        custom color scheme or layout from their appearance settings.
+      </p>
+
+      <!-- Import row -->
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;">
+        <label class="nw-btn nw-btn-primary" style="cursor:pointer;margin:0;">
+          <i class="bi bi-upload me-2"></i>Import .nwtheme
+          <input type="file" accept=".nwtheme,application/json" style="display:none;"
+                 onchange="doThemeImport(this)">
+        </label>
+        <a href="/admin/themes/kit" class="nw-btn" style="font-size:0.82rem;">
+          <i class="bi bi-file-earmark-code me-2"></i>Download Theme Kit
+        </a>
+        <span id="theme-import-msg" style="font-size:0.82rem;"></span>
+      </div>
+
+      <!-- Installed themes table -->
+      <div id="theme-list-wrap">
+        <div style="font-size:0.82rem;color:var(--text-muted);">Loading themes…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Cleanup -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('cleanup')">
+      <div class="nw-label" style="margin:0;">Data Cleanup</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-cleanup"></i>
+    </div>
+    <div id="section-cleanup" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
+        Health checks accumulate quickly (one row every 30s = ~2,880/day).
+        Prune old records to keep the database lean.
+      </p>
+      <div class="d-flex gap-2 align-items-center mb-3 flex-wrap">
+        <span style="font-size:0.83rem;color:var(--text-muted);">Delete health checks older than</span>
+        <input type="number" id="cleanup-days" value="30" min="1" max="365"
+               class="nw-input" style="width:70px;">
+        <span style="font-size:0.83rem;color:var(--text-muted);">days</span>
+      </div>
+      <button class="nw-btn w-100" style="border-color:var(--warn);color:var(--warn);"
+              onclick="doCleanup()">
+        <i class="bi bi-trash me-2"></i>Delete Old Records
+      </button>
+    </div>
+  </div>
+
+  <!-- System Info -->
+  <div class="nw-card p-4">
+    <div class="nw-collapse-header" onclick="toggleSection('sysinfo')">
+      <div class="nw-label" style="margin:0;">System Information</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-sysinfo"></i>
+    </div>
+    <div id="section-sysinfo" class="nw-collapse-body">
+      <div class="log-box" id="sys-info" style="margin-top:12px;">Loading...</div>
+    </div>
+  </div>
+
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>/* v1772383470 */
+
+// ── Collapsible sections ───────────────────────────────────────────────────────
+const STORAGE_KEY = 'nw-admin-collapsed';
+
+function getCollapsed() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function setCollapsed(list) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
+
+function toggleSection(slug) {
+  const body    = document.getElementById('section-' + slug);
+  const chevron = document.getElementById('chevron-' + slug);
+  if (!body) return;
+  const collapsed = getCollapsed();
+  const isCollapsed = collapsed.includes(slug);
+
+  if (isCollapsed) {
+    body.style.maxHeight = body.scrollHeight + 'px';
+    body.style.opacity = '1';
+    chevron.style.transform = 'rotate(0deg)';
+    setTimeout(() => { body.style.maxHeight = 'none'; }, 300);
+    setCollapsed(collapsed.filter(s => s !== slug));
+  } else {
+    body.style.maxHeight = body.scrollHeight + 'px';
+    requestAnimationFrame(() => {
+      body.style.maxHeight = '0';
+      body.style.opacity = '0';
+    });
+    chevron.style.transform = 'rotate(-90deg)';
+    setCollapsed([...collapsed, slug]);
+  }
+}
+
+function initSections() {
+  const collapsed = getCollapsed();
+  document.querySelectorAll('.nw-collapse-body').forEach(body => {
+    const slug = body.id.replace('section-', '');
+    const chevron = document.getElementById('chevron-' + slug);
+    if (collapsed.includes(slug)) {
+      body.style.maxHeight = '0';
+      body.style.opacity = '0';
+      if (chevron) chevron.style.transform = 'rotate(-90deg)';
+    } else {
+      body.style.maxHeight = 'none';
+      body.style.opacity = '1';
+    }
+  });
+}
+
+// ── Page functions ─────────────────────────────────────────────────────────────
+async function doRestore() {
+  const fileInput = document.getElementById("restore-file");
+  const msgEl     = document.getElementById("restore-msg");
+  if (!fileInput.files.length) {
+    showToast("Please select a .db backup file first", "warning"); return;
+  }
+  if (!confirm("Restore database from this backup?\n\nAll current data will be replaced. A safety copy will be saved as netwatch.db.pre_restore.")) return;
+  msgEl.style.display = "block";
+  msgEl.style.color = "var(--text-muted)";
+  msgEl.textContent = "Uploading and restoring...";
+  const form = new FormData();
+  form.append("file", fileInput.files[0]);
+  try {
+    const res = await fetch("/api/admin/restore_db", { method:"POST", body:form }).then(r => r.json());
+    if (res.status === "ok") {
+      msgEl.style.color = "var(--ok)";
+      msgEl.textContent = res.message;
+      showToast("Database restored successfully", "success");
+    } else {
+      msgEl.style.color = "var(--fail)";
+      msgEl.textContent = res.message;
+    }
+  } catch(e) {
+    msgEl.style.color = "var(--fail)";
+    msgEl.textContent = "Restore failed — check logs";
+  }
+}
+
+async function loadStats() {
+  const data = await fetch("/api/admin/db_stats").then(r => r.json());
+  document.getElementById("st-health").textContent = (data.network_health || 0).toLocaleString();
+  document.getElementById("st-resets").textContent = (data.reset_events   || 0).toLocaleString();
+  document.getElementById("st-speed").textContent  = (data.speedtest_results || 0).toLocaleString();
+  document.getElementById("st-size").textContent   = data.db_size_kb || "—";
+}
+
+async function doGenerateDistrib() {
+  const btn = document.getElementById("distrib-btn");
+  const msg = document.getElementById("distrib-msg");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Building...';
+  msg.style.display = "block";
+  msg.style.color = "var(--text-muted)";
+  msg.textContent = "Building new user package — stripping personal data...";
+  try {
+    const res = await fetch("/api/admin/generate_distrib", { method: "POST" }).then(r => r.json());
+    if (res.status === "ok") {
+      window.location.href = "/api/admin/distrib_download?file=" + encodeURIComponent(res.filename);
+      msg.style.color = "var(--ok)";
+      msg.textContent = `Ready: ${res.filename} (${res.size_mb}MB)`;
+    } else {
+      msg.style.color = "var(--fail)";
+      msg.textContent = res.message;
+    }
+  } catch(e) {
+    msg.style.color = "var(--fail)";
+    msg.textContent = "Generation failed — check logs";
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-person-plus me-1"></i>New User Package';
+}
+
+async function doGenerateUpdate() {
+  const btn = document.getElementById("update-pkg-btn");
+  const msg = document.getElementById("distrib-msg");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Building...';
+  msg.style.display = "block";
+  msg.style.color = "var(--text-muted)";
+  msg.textContent = "Building update package — preserves recipient config and data...";
+  try {
+    const res = await fetch("/api/admin/generate_update_pkg", { method: "POST" }).then(r => r.json());
+    if (res.status === "ok") {
+      window.location.href = "/api/admin/distrib_download?file=" + encodeURIComponent(res.filename);
+      msg.style.color = "var(--ok)";
+      msg.textContent = `Ready: ${res.filename} (${res.size_mb}MB)`;
+    } else {
+      msg.style.color = "var(--fail)";
+      msg.textContent = res.message;
+    }
+  } catch(e) {
+    msg.style.color = "var(--fail)";
+    msg.textContent = "Generation failed — check logs";
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-cloud-arrow-up me-1"></i>Update Package';
+}
+
+async function doCleanup() {
+  const days = parseInt(document.getElementById("cleanup-days").value);
+  if (!days || days < 1) { showToast("Enter a valid number of days", "warning"); return; }
+  const res = await fetch("/api/admin/clear_health", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ older_than_days: days })
+  }).then(r => r.json());
+  showToast(res.message, "success");
+  loadStats();
+}
+
+async function doFullBackup() {
+  const btn = document.getElementById("full-backup-btn");
+  const msg = document.getElementById("full-backup-msg");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split me-2"></i>Generating backup...';
+  msg.style.display = "block";
+  msg.style.color = "var(--text-muted)";
+  msg.textContent = "Creating encrypted backup — this may take a few seconds...";
+  try {
+    const res = await fetch("/api/admin/backup_full", { method: "POST" }).then(r => r.json());
+    if (res.status === "ok") {
+      window.location.href = "/api/admin/backup_full_download?file=" + encodeURIComponent(res.filename);
+      msg.style.color = "var(--ok)";
+      msg.textContent = `Backup ready: ${res.filename} (${res.size_mb}MB)`;
+    } else {
+      msg.style.color = "var(--fail)";
+      msg.textContent = res.message;
+    }
+  } catch(e) {
+    msg.style.color = "var(--fail)";
+    msg.textContent = "Backup failed — check logs";
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-archive me-2"></i>Download Full System Backup (.tar.gz.gpg)';
+}
+
+async function loadSchedule() {
+  const res = await fetch("/api/admin/backup_schedule").then(r => r.json());
+  if (res.status !== "ok") return;
+  const db = res.db;
+  document.getElementById("sched-db-hour").value    = db.hour;
+  document.getElementById("sched-db-enabled").checked = db.enabled;
+  document.getElementById("sched-db-email").checked  = db.email;
+  const dbStatus = document.getElementById("schedule-db-status");
+  dbStatus.innerHTML = db.enabled
+    ? `<span style="color:var(--ok);">●</span> Daily at ${String(db.hour).padStart(2,'0')}:00${db.email ? ' · Email on' : ''}${db.last_run ? '<br>Last run: ' + db.last_run : ''}`
+    : `<span style="color:var(--text-muted);">○</span> Disabled`;
+  const full = res.full;
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  document.getElementById("sched-full-dow").value       = full.dow;
+  document.getElementById("sched-full-hour").value      = full.hour;
+  document.getElementById("sched-full-enabled").checked  = full.enabled;
+  document.getElementById("sched-full-email").checked    = full.email;
+  const fullStatus = document.getElementById("schedule-full-status");
+  fullStatus.innerHTML = full.enabled
+    ? `<span style="color:var(--ok);">●</span> Every ${days[full.dow]} at ${String(full.hour).padStart(2,'0')}:00${full.email ? ' · Email on' : ''}${full.last_run ? '<br>Last run: ' + full.last_run : ''}`
+    : `<span style="color:var(--text-muted);">○</span> Disabled`;
+}
+
+async function loadPkgSchedule() {
+  const res = await fetch("/api/admin/pkg_update_schedule").then(r => r.json());
+  if (res.status !== "ok") return;
+  const s = res.schedule;
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  document.getElementById("sched-pkg-dow").value       = s.dow;
+  document.getElementById("sched-pkg-hour").value      = s.hour;
+  document.getElementById("sched-pkg-enabled").checked  = s.enabled;
+  document.getElementById("sched-pkg-alert").checked    = s.send_alert;
+  const el = document.getElementById("schedule-pkg-status");
+  el.innerHTML = s.enabled
+    ? `<span style="color:var(--ok);">●</span> Every ${days[s.dow]} at ${String(s.hour).padStart(2,'0')}:00${s.send_alert ? ' · Alert on' : ''}${s.last_run ? '<br>Last run: ' + s.last_run : ''}`
+    : `<span style="color:var(--text-muted);">○</span> Disabled`;
+}
+
+async function savePkgSchedule() {
+  const msg = document.getElementById("schedule-pkg-msg");
+  const payload = {
+    enabled:    document.getElementById("sched-pkg-enabled").checked,
+    dow:        parseInt(document.getElementById("sched-pkg-dow").value),
+    hour:       parseInt(document.getElementById("sched-pkg-hour").value),
+    send_alert: document.getElementById("sched-pkg-alert").checked
+  };
+  const res = await fetch("/api/admin/pkg_update_schedule", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)
+  }).then(r => r.json());
+  msg.style.display = "block";
+  msg.style.color = res.status === "ok" ? "var(--ok)" : "var(--fail)";
+  msg.textContent = res.message;
+  if (res.status === "ok") loadPkgSchedule();
+  setTimeout(() => msg.style.display = "none", 4000);
+}
+
+async function saveSchedule(type) {
+  const msg = document.getElementById("schedule-msg");
+  let payload = {};
+  if (type === 'db') {
+    payload = {
+      type:    'db',
+      hour:    parseInt(document.getElementById("sched-db-hour").value),
+      enabled: document.getElementById("sched-db-enabled").checked,
+      email:   document.getElementById("sched-db-email").checked
+    };
+  } else {
+    payload = {
+      type:    'full',
+      dow:     parseInt(document.getElementById("sched-full-dow").value),
+      hour:    parseInt(document.getElementById("sched-full-hour").value),
+      enabled: document.getElementById("sched-full-enabled").checked,
+      email:   document.getElementById("sched-full-email").checked
+    };
+  }
+  const res = await fetch("/api/admin/backup_schedule", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)
+  }).then(r => r.json());
+  msg.style.display = "block";
+  msg.style.color = res.status === "ok" ? "var(--ok)" : "var(--fail)";
+  msg.textContent = res.message;
+  if (res.status === "ok") loadSchedule();
+  setTimeout(() => msg.style.display = "none", 4000);
+}
+
+async function loadSysInfo() {
+  const [uptime, status] = await Promise.all([
+    fetch("/api/uptime_stats").then(r => r.json()),
+    fetch("/api/status").then(r => r.json())
+  ]);
+  const ts = status.timestamp ? new Date(status.timestamp).toLocaleString() : "—";
+  document.getElementById("sys-info").textContent =
+    `Dashboard: ${window.location.protocol}//${window.location.host}\n` +
+    `Last check: ${ts}\n` +
+    `Uptime 1h:  ${uptime["1h"]}%\n` +
+    `Uptime 24h: ${uptime["24h"]}%\n` +
+    `Uptime 7d:  ${uptime["7d"]}%\n` +
+    `Uptime 30d: ${uptime["30d"]}%`;
+}
+
+loadStats();
+loadSysInfo();
+loadSchedule();
+loadPkgSchedule();
+loadThemes();
+initSections();
+
+// ── Changelog ─────────────────────────────────────────────────────────────────
+
+// ── Theme Manager ─────────────────────────────────────────────────────────────
+async function loadThemes() {
+  const wrap = document.getElementById("theme-list-wrap");
+  if (!wrap) return;
+
+  try {
+    const res  = await fetch("/api/themes");
+    const data = await res.json();
+    const themes = data.themes || [];
+
+    if (!themes.length) {
+      wrap.innerHTML = `<div style="font-size:0.82rem;color:var(--text-muted);padding:10px 0;">
+        No custom themes installed. Import a <code>.nwtheme</code> file to get started,
+        or download the Theme Kit to create your own.
+      </div>`;
+      return;
+    }
+
+    wrap.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border-color);">
+            <th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-weight:600;">Name</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-weight:600;">Contains</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-weight:600;">Author</th>
+            <th style="text-align:right;padding:6px 8px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${themes.map(t => `
+          <tr style="border-bottom:1px solid var(--border-color);opacity:${t.disabled ? '0.55' : '1'};">
+            <td style="padding:8px;">
+              <strong style="color:var(--text-primary);">${escHtml(t.name)}</strong>
+              ${t.disabled ? `<span style="font-size:0.72rem;color:var(--warn);margin-left:6px;">disabled</span>` : ""}
+              ${t.description ? `<div style="font-size:0.75rem;color:var(--text-muted);">${escHtml(t.description)}</div>` : ""}
+            </td>
+            <td style="padding:8px;">
+              ${t.has_color_scheme ? `<span style="background:rgba(79,195,247,0.1);color:var(--accent);border-radius:4px;padding:2px 7px;font-size:0.75rem;margin-right:4px;">Color Scheme</span>` : ""}
+              ${t.has_layout      ? `<span style="background:rgba(102,187,106,0.1);color:var(--ok);border-radius:4px;padding:2px 7px;font-size:0.75rem;">Layout</span>` : ""}
+            </td>
+            <td style="padding:8px;color:var(--text-muted);">${escHtml(t.author || "—")}</td>
+            <td style="padding:8px;text-align:right;white-space:nowrap;">
+              <button class="nw-btn" style="font-size:0.75rem;padding:4px 10px;margin-right:4px;${t.disabled ? 'border-color:var(--ok);color:var(--ok);' : 'border-color:var(--text-muted);color:var(--text-muted);'}"
+                      onclick="doThemeToggleDisabled('${escHtml(t.name).replace(/'/g,"\\'")}', ${!t.disabled})">
+                ${t.disabled ? '<i class="bi bi-eye"></i> Enable' : '<i class="bi bi-eye-slash"></i> Disable'}
+              </button>
+              <a href="/api/themes/export/${encodeURIComponent(t.name)}"
+                 class="nw-btn" style="font-size:0.75rem;padding:4px 10px;margin-right:4px;"
+                 download="${escHtml(t.name)}.nwtheme">
+                <i class="bi bi-download"></i> Export
+              </a>
+              <button class="nw-btn" style="font-size:0.75rem;padding:4px 10px;border-color:var(--fail);color:var(--fail);"
+                      onclick="doThemeDelete('${escHtml(t.name).replace(/'/g,"\\'")}')">
+                <i class="bi bi-trash"></i> Delete
+              </button>
+            </td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`;
+  } catch (e) {
+    wrap.innerHTML = `<div style="color:var(--fail);font-size:0.82rem;">Failed to load themes: ${e.message}</div>`;
+  }
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+async function doThemeImport(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = "";
+
+  const msg = document.getElementById("theme-import-msg");
+  msg.style.color = "var(--text-muted)";
+  msg.textContent = "Importing…";
+
+  const form = new FormData();
+  form.append("file", file);
+
+  try {
+    const res  = await fetch("/api/themes/import", { method: "POST", body: form });
+    const data = await res.json();
+    if (data.status === "ok") {
+      msg.style.color = "var(--ok)";
+      msg.textContent = `✓ Imported "${data.name}"`;
+      loadThemes();
+    } else {
+      msg.style.color = "var(--fail)";
+      msg.textContent = `✗ ${data.message || "Import failed"}`;
+    }
+  } catch (e) {
+    msg.style.color = "var(--fail)";
+    msg.textContent = `✗ ${e.message}`;
+  }
+}
+
+async function doThemeToggleDisabled(name, disable) {
+  const msg = document.getElementById("theme-import-msg");
+  msg.style.color = "var(--text-muted)";
+  msg.textContent = disable ? "Disabling…" : "Enabling…";
+
+  try {
+    const res  = await fetch("/api/themes/toggle_disabled", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, disabled: disable })
+    });
+    const data = await res.json();
+    if (data.status === "ok") {
+      msg.style.color = "var(--ok)";
+      msg.textContent = disable ? `✓ "${name}" disabled` : `✓ "${name}" enabled`;
+      loadThemes();
+    } else {
+      msg.style.color = "var(--fail)";
+      msg.textContent = `✗ ${data.message || "Failed"}`;
+    }
+  } catch (e) {
+    msg.style.color = "var(--fail)";
+    msg.textContent = `✗ ${e.message}`;
+  }
+}
+
+async function doThemeDelete(name) {
+  if (!confirm(`Delete theme "${name}"? Users with this theme active will fall back to their system scheme.`)) return;
+
+  const msg = document.getElementById("theme-import-msg");
+  msg.style.color = "var(--text-muted)";
+  msg.textContent = "Deleting…";
+
+  try {
+    const res  = await fetch("/api/themes/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+    const data = await res.json();
+    if (data.status === "ok") {
+      msg.style.color = "var(--ok)";
+      msg.textContent = `✓ Deleted "${name}"`;
+      loadThemes();
+    } else {
+      msg.style.color = "var(--fail)";
+      msg.textContent = `✗ ${data.message || "Delete failed"}`;
+    }
+  } catch (e) {
+    msg.style.color = "var(--fail)";
+    msg.textContent = `✗ ${e.message}`;
+  }
+}
+
+</script>
+
+<style>
+.nw-collapse-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  padding-bottom: 2px;
+}
+.nw-collapse-header:hover .nw-label { color: var(--accent); }
+.nw-collapse-header .nw-chevron {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  transition: transform 0.25s;
+}
+.nw-collapse-header:hover .nw-chevron { color: var(--accent); }
+.nw-collapse-body {
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.25s ease;
+}
+</style>
+{% endblock %}

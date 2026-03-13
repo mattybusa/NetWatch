@@ -1,0 +1,246 @@
+NETWATCH AI SESSION PROCESS
+============================
+Version: 1.4 | Created: 2026-03-08 | Revised: 2026-03-13
+
+PURPOSE
+-------
+This document tells a new Claude instance exactly how to start a NetWatch development
+session, what to read, in what order, and how to maintain the documentation as work
+progresses. Follow this every time without exception.
+
+
+WHAT NETWATCH IS
+----------------
+NetWatch is a self-hosted home network monitoring and automation platform running on a
+Raspberry Pi. It monitors network health, automates recovery, and gives homeowners
+visibility and control they wouldn't otherwise have. The current focus is the internet
+connection and the equipment behind it — but the platform is designed to grow. The
+long-term vision is full home infrastructure monitoring: connected devices, network
+interfaces, telemetry, and intelligent alerting, all managed through a single interface
+that anyone in the household can use. NetWatch is built to be shared — starting with a
+friend, but designed with a wider future in mind.
+
+The project is actively developed in collaboration between the user and Claude. The user
+is technically proficient but not a programmer. Claude handles all code. The user handles
+deployment, testing, and feedback.
+
+The project will grow significantly in complexity. Host monitoring, device telemetry,
+kiosk display, and Cisco integration are all planned. This documentation infrastructure
+exists to make that growth manageable across session boundaries.
+
+
+SESSION START — READ IN THIS ORDER
+-----------------------------------
+1. NetWatch_AI_Context_latest.txt
+   Architecture, current version, backlog, critical working rules. Read completely.
+   Do not proceed until this is fully absorbed.
+
+2. Gotchas.txt
+   Hard-learned lessons. Read completely. These are non-negotiable constraints.
+   After reading Gotchas.txt, check dev_docs for any Gotchas_Append_SessionN.txt
+   files. If found, read them in session number order before proceeding. These
+   contain entries not yet merged into Gotchas.txt and are equally binding.
+
+3. ChatSummary_1.txt through ChatSummary_N.txt (all base summaries, in order)
+   Historical context. Read all of them. Note the progression.
+
+4. CurrentTask.txt
+   What was being worked on when the last session ended. This is where to start.
+
+5. Expanded summaries (Feature_*.txt, Bug_*.txt) — ONLY if directly relevant to CurrentTask
+   DO NOT load these unless you are about to work on that specific feature or bug.
+   Do not load them speculatively "to get context." They are loaded on demand only.
+   If mid-session a new task requires a different expanded summary, load it then.
+
+6. Code files — only as needed for the specific task at hand
+   Do not load the entire codebase. Read what you need when you need it.
+
+7. Changelog — available on demand from NetWatch, do not load speculatively
+   The Pi maintains a detailed changelog with per-package descriptions covering all
+   installed versions. Pull it when:
+   - A feature has murky or truncated history in the base summaries
+   - Something breaks and you need to trace what changed and when
+   - Starting work on a feature that touches a lot of existing code
+   Ask the user to export it from NetWatch if needed. Do not request it by default.
+
+After reading, confirm to the user:
+- Current Pi version understood
+- Current task understood
+- Ready to proceed — state what you understand the next step to be
+
+
+CONTEXT WINDOW MANAGEMENT
+--------------------------
+Claude has a finite context window. As a session grows longer, earlier content is
+silently deprioritized. This does not produce an error — outputs simply get worse
+without warning. The user cannot see this happening.
+
+Claude's responsibility:
+- Flag proactively when a session is getting long. A reasonable trigger is after
+  completing a major feature, or after roughly 2 hours of active work, whichever
+  comes first. The flag is: "This session is getting long. I'd recommend closing
+  out soon to preserve summary quality."
+- Never let a session end without the close-out process completed. If context is
+  running low mid-task, stop the task, complete the close-out, and note where things
+  stand in CurrentTask.txt. The task can resume next session.
+- Expanded summaries loaded mid-session consume significant context. Load them only
+  when needed, and only for the active task.
+
+User's responsibility:
+- Run the close-out process before ending any session with significant work.
+- If a session was short and produced nothing worth documenting, a full close-out
+  is not required — just update CurrentTask.txt.
+- When handing off to a new session: download the current code from NetWatch
+  (Dev Docs > Download Current Code). The zip contains all session docs. Upload
+  that zip to start the new session.
+
+There is no percentage meter for context usage. The best protection is time-boxing
+sessions and closing out after each major feature rather than batching multiple
+features into one long session.
+
+
+DESIGN-FIRST NORM (MANDATORY FOR ALL NEW FEATURES)
+----------------------------------------------------
+Before writing any code for a new feature, Claude must produce a short design brief.
+This is not optional. The user is not a programmer and cannot be expected to know the
+right questions to ask or the alternative approaches that exist. Claude's job is to
+surface those alternatives before any path is committed to.
+
+A design brief includes:
+- What problem we are solving and what success looks like
+- The 2-4 meaningful approaches to solving it (not exhaustive, just the ones worth
+  considering given the project's direction)
+- What each approach costs and buys in plain language (not jargon)
+- A clear recommendation with reasoning
+- Any architecture decisions that will be hard to reverse later
+
+When to produce a design brief:
+- Any new backlog feature before the first line of code is written
+- Any change that affects how data is stored, how services communicate, how users
+  interact with the system, or anything other features will be built on top of
+- Any change that would be painful to undo later
+
+When a design brief is NOT required:
+- Bug fixes with a clear root cause and obvious fix
+- Small UI or copy changes
+- Documentation-only changes
+- Changes explicitly scoped by the user with no meaningful alternatives
+
+After the brief is produced, wait for explicit user approval of the direction before
+writing any code. If the user approves a different approach than recommended, note the
+reason in the session and proceed with the user's choice.
+
+This norm exists because several major redesigns in NetWatch history were caused by
+building the wrong thing first. The design brief prevents that by making the decision
+explicit before the cost is paid.
+
+
+DURING A SESSION
+----------------
+- Update CurrentTask.txt any time the active task changes
+- Append new gotcha entries directly to Gotchas.txt during a dev session — do not
+  produce a separate append file. You have the full file loaded at session start.
+  Format each entry the same way: DATE | VERSION, TITLE, body, ---
+- Add to Gotchas.txt immediately when a hard-learned lesson is encountered
+- Do not wait until end of session — document gotchas as they happen
+- Follow all rules in NetWatch_AI_Context_latest.txt without exception
+- When a feature or bug is completed, note it — the summary will capture it at session end
+- **Maintain inline documentation standards.** New functions, tables, and non-obvious
+  logic must include comments. Match the style already in the file — column-level
+  comments on CREATE TABLE statements, docstrings on functions, section headers on
+  long files. Code that will be read by a future Claude instance should be
+  self-explanatory without the session transcript.
+- **Keep the context doc current.** When you add a function to any module that is
+  referenced by name in NetWatch_AI_Context_latest.txt (e.g. patcher.py changelog
+  functions, updater.py dev docs functions), update the context doc entry in the
+  same package. A stale function list creates false confidence in a future session.
+
+
+SESSION END — DO THIS BEFORE CLOSING
+--------------------------------------
+1. Write or update the base summary for this session (ChatSummary_N.txt)
+   Follow SummaryInstructions.txt exactly.
+
+2. Write any expanded summaries for features or bugs completed this session
+   Follow SummaryInstructions.txt exactly.
+
+3. Confirm any new gotcha entries are already in Gotchas.txt
+   New entries should have been added directly during the session per the DURING A SESSION
+   rules above. At close-out, verify nothing was missed. Do not produce a separate
+   append file — append directly to Gotchas.txt.
+
+4. Update NetWatch_AI_Context_latest.txt
+   - Current version number
+   - Backlog changes
+   - Any new architecture decisions or patterns
+
+5. Update CurrentTask.txt with exactly where things stand and what the next step is
+
+GETTING SUMMARY FILES ONTO THE PI
+----------------------------------
+Summary files (ChatSummary_N.txt, Feature_*.txt, Bug_*.txt) can be uploaded directly
+via NetWatch > Dev Docs -- no package required.
+
+Gotchas.txt: new entries are appended directly to the file during a dev session and at
+close-out. Upload the updated Gotchas.txt directly via Dev Docs. No separate append file
+is needed for dev sessions.
+Note: summarization sessions (where Claude reads a transcript and produces a summary in
+a separate chat) produce a Gotchas_Append_SessionN.txt for the user to merge, because
+Gotchas.txt is not live in that context.
+
+NetWatch_AI_Context_latest.txt and CurrentTask.txt: upload directly via Dev Docs,
+or include in the next package -- either works.
+
+AI_Session_Process.txt and SummaryInstructions.txt: upload directly via Dev Docs if
+the process itself has been updated.
+
+Never install a package just to update documentation. If there are no code changes,
+use direct upload.
+
+
+PACKAGING RULES (CRITICAL)
+---------------------------
+These rules were learned the hard way. Violating them costs hours.
+
+- Build zips from INSIDE the package directory: cd /package_dir && zip -r output.zip .
+  Never zip from outside — files must be at zip root or manifest won't be found.
+
+- manifest.json actions and path resolution:
+    .html files     -> templates/
+    .css/.js files  -> static/
+    dev_docs/ files -> dev_docs/  (use full prefix: "dev_docs/filename.txt")
+    all others      -> netwatch root
+
+- Always use full relative paths in manifest: "templates/foo.html", "dev_docs/file.txt"
+
+- Every package must include updated context doc as replace action:
+    { "action": "replace", "file": "dev_docs/NetWatch_AI_Context_latest.txt" }
+
+- Syntax check every Python file before packaging:
+    python3 -m py_compile filename.py
+
+- Simulate fixes by tracing through logic or running test code before packaging.
+  Never ship a theory.
+
+- patcher.py creates .bak files for every replaced file. This is expected behavior.
+  The dated summary files serve as the backup mechanism for dev docs — .bak files
+  on dev docs are harmless noise.
+
+
+FILE LOCATIONS ON PI
+--------------------
+NetWatch root:  /home/mboynton/netwatch/
+Dev docs:       /home/mboynton/netwatch/dev_docs/
+Rollback:       bash ~/netwatch/rollback.sh
+Logs:           sudo journalctl -u netwatch-web -n 50 --no-pager
+
+
+DOCUMENT OWNERSHIP
+------------------
+NetWatch_AI_Context_latest.txt  — updated every session, architecture and backlog
+SummaryInstructions.txt         — updated only if the summary process itself changes
+AI_Session_Process.txt          — updated only if the session process itself changes
+ChatSummary_N.txt               — one per session, never modified after creation
+Feature_*.txt / Bug_*.txt       — updated if more work is done on that feature/bug
+Gotchas.txt                     — append only, never rewrite or delete entries
+CurrentTask.txt                 — updated continuously, reflects right now

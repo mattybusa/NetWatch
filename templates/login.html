@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetWatch — Sign In</title>
+  <link rel="stylesheet" href="/static/themes.css">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <style>
+    body { display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+    .login-wrap { width:100%; max-width:400px; padding:24px; }
+    .login-brand { text-align:center; margin-bottom:28px; font-family:var(--font-mono); letter-spacing:3px; color:var(--accent); font-size:1.2rem; font-weight:700; }
+    .tab-row { display:flex; margin-bottom:0; border-bottom:1px solid var(--border-color); }
+    .tab-btn { flex:1; padding:10px; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-1px; color:var(--text-muted); font-size:0.85rem; font-weight:600; cursor:pointer; transition:all 0.15s; font-family:var(--font-body); }
+    .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .tab-panel { display:none; padding-top:20px; }
+    .tab-panel.active { display:block; }
+    .f-label { display:block; font-size:0.7rem; color:var(--text-label); text-transform:uppercase; letter-spacing:1px; margin-bottom:5px; margin-top:14px; }
+    .f-input { width:100%; background:var(--bg-input); border:1px solid var(--border-color); border-radius:6px; padding:10px 12px; color:var(--text-primary); font-family:var(--font-body); font-size:0.9rem; outline:none; transition:border-color 0.2s; box-sizing:border-box; }
+    .f-input:focus { border-color:var(--border-focus); }
+    .submit-btn { width:100%; margin-top:20px; padding:11px; background:var(--accent); color:#000; border:none; border-radius:6px; font-size:0.9rem; font-weight:700; cursor:pointer; transition:opacity 0.2s; font-family:var(--font-body); }
+    .submit-btn:hover { opacity:0.85; }
+    .error-msg { margin-top:12px; padding:10px 14px; border-radius:6px; background:var(--fail-glow); border:1px solid var(--fail); color:var(--text-primary); font-size:0.83rem; display:none; }
+    .success-msg { margin-top:12px; padding:10px 14px; border-radius:6px; background:var(--ok-glow); border:1px solid var(--ok); color:var(--text-primary); font-size:0.83rem; display:none; }
+    .guest-link { display:block; text-align:center; margin-top:20px; font-size:0.78rem; color:var(--text-muted); }
+    .guest-link a { color:var(--accent); }
+    .pass-wrap { position:relative; }
+    .pass-toggle { position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1rem; padding:0; }
+  </style>
+</head>
+<body class="theme-dark-blue">
+<div class="login-wrap">
+  <div class="login-brand"><i class="bi bi-wifi"></i> NETWATCH</div>
+  <div class="nw-card p-4">
+    <div class="tab-row">
+      <button class="tab-btn active" onclick="showTab('login', this)" id="tab-login-btn">Sign In</button>
+      <button class="tab-btn" onclick="showTab('register', this)" id="tab-register-btn">Create Account</button>
+    </div>
+
+    <!-- Login Tab -->
+    <div class="tab-panel active" id="tab-login">
+      {% if error %}
+        <div style="margin-top:16px;padding:10px 14px;border-radius:6px;background:var(--fail-glow);border:1px solid var(--fail);color:var(--text-primary);font-size:0.83rem;">{{ error }}</div>
+      {% endif %}
+      <form method="POST" action="/login">
+        <input type="hidden" name="next" value="{{ next or '' }}">
+        <label class="f-label">Username</label>
+        <input class="f-input" type="text" name="username" autocomplete="username" value="{{ username or '' }}" autofocus required>
+        <label class="f-label">Password</label>
+        <div class="pass-wrap">
+          <input class="f-input" type="password" name="password" id="login-pass" autocomplete="current-password" required style="padding-right:38px;">
+          <button type="button" class="pass-toggle" onclick="togglePass('login-pass', this)"><i class="bi bi-eye"></i></button>
+        </div>
+        <button type="submit" class="submit-btn">Sign In</button>
+        <a href="/forgot-password" style="display:block;text-align:center;margin-top:12px;
+           font-size:0.78rem;color:#607d8b;text-decoration:none;">
+          Forgot password?
+        </a>
+      </form>
+    </div>
+
+    <!-- Register Tab -->
+    <div class="tab-panel" id="tab-register">
+      <div id="reg-error" class="error-msg"></div>
+      <div id="reg-success" class="success-msg"></div>
+      <label class="f-label">Username</label>
+      <input class="f-input" type="text" id="reg-username" placeholder="Choose a username">
+      <label class="f-label">Password</label>
+      <div class="pass-wrap">
+        <input class="f-input" type="password" id="reg-pass" placeholder="Min 8 characters" style="padding-right:38px;">
+        <button type="button" class="pass-toggle" onclick="togglePass('reg-pass', this)"><i class="bi bi-eye"></i></button>
+      </div>
+      <label class="f-label">Confirm Password</label>
+      <div class="pass-wrap">
+        <input class="f-input" type="password" id="reg-confirm" placeholder="Repeat password" style="padding-right:38px;">
+        <button type="button" class="pass-toggle" onclick="togglePass('reg-confirm', this)"><i class="bi bi-eye"></i></button>
+      </div>
+      <div style="margin-top:14px;padding:10px 12px;border-radius:6px;background:var(--bg-input);border:1px solid var(--border-color);font-size:0.78rem;color:var(--text-muted);">
+        <i class="bi bi-info-circle me-1"></i>
+        New accounts are assigned the <strong style="color:var(--text-secondary);">Monitor</strong> role — read-only access to dashboard and metrics.
+      </div>
+      <button class="submit-btn" onclick="register()">Create Account</button>
+    </div>
+  </div>
+
+  <div class="guest-link"><a href="/">← Back to dashboard as guest</a></div>
+</div>
+
+<script>
+function showTab(name, btn) {
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("tab-" + name).classList.add("active");
+  btn.classList.add("active");
+}
+function togglePass(id, btn) {
+  const input = document.getElementById(id);
+  const isPass = input.type === "password";
+  input.type = isPass ? "text" : "password";
+  btn.innerHTML = isPass ? '<i class="bi bi-eye-slash"></i>' : '<i class="bi bi-eye"></i>';
+}
+async function register() {
+  const username = document.getElementById("reg-username").value.trim();
+  const password = document.getElementById("reg-pass").value;
+  const confirm  = document.getElementById("reg-confirm").value;
+  const errEl    = document.getElementById("reg-error");
+  const okEl     = document.getElementById("reg-success");
+  errEl.style.display = okEl.style.display = "none";
+  if (!username) { errEl.textContent = "Please choose a username."; errEl.style.display = "block"; return; }
+  if (password.length < 8) { errEl.textContent = "Password must be at least 8 characters."; errEl.style.display = "block"; return; }
+  if (password !== confirm) { errEl.textContent = "Passwords do not match."; errEl.style.display = "block"; return; }
+  const res = await fetch("/api/auth/register", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ username, password })
+  }).then(r => r.json());
+  if (res.status === "ok") {
+    okEl.textContent = "Account created! Please sign in below.";
+    okEl.style.display = "block";
+    document.getElementById("reg-username").value = document.getElementById("reg-pass").value = document.getElementById("reg-confirm").value = "";
+    setTimeout(() => {
+      showTab("login", document.getElementById("tab-login-btn"));
+      document.querySelector("input[name='username']").value = username;
+      document.querySelector("input[name='password']").focus();
+    }, 1200);
+  } else {
+    errEl.textContent = res.message || "Registration failed.";
+    errEl.style.display = "block";
+  }
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && document.getElementById("tab-register").classList.contains("active")) register();
+});
+</script>
+</body>
+</html>

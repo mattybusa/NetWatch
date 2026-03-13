@@ -1,0 +1,38 @@
+{
+  "name": "Neon Dystopia",
+  "description": "Full-send cyberpunk — hot orange accents, electric blue highlights, aggressive glows on pure black.",
+  "author": "NetWatch Theme Kit",
+  "version": "1.0",
+  "color_scheme": {
+    "--bg-page": "#020408",
+    "--bg-card": "#0a0e14",
+    "--bg-input": "#0f1520",
+    "--bg-nav": "#000000",
+    "--bg-hover": "#1a1000",
+    "--border-color": "#ff6a00",
+    "--border-focus": "#00cfff",
+    "--accent": "#ff6a00",
+    "--accent-dim": "#5a2500",
+    "--accent-glow": "0 0 12px rgba(255,106,0,0.7)",
+    "--text-primary": "#ffe8cc",
+    "--text-secondary": "#ff9944",
+    "--text-muted": "#7a4a20",
+    "--text-label": "#00cfff",
+    "--ok": "#00ff99",
+    "--warn": "#ff6a00",
+    "--fail": "#ff003c",
+    "--ok-glow": "0 0 10px rgba(0,255,153,0.6)",
+    "--fail-glow": "0 0 10px rgba(255,0,60,0.7)",
+    "--font-body": "'Rajdhani', 'Segoe UI', sans-serif",
+    "--font-mono": "'Share Tech Mono', 'Courier New', monospace",
+    "--font-base": "15px",
+    "--nav-border": "1px solid #ff6a00",
+    "--card-radius": "4px",
+    "--shadow": "0 0 16px rgba(255,106,0,0.25), 0 2px 4px rgba(0,0,0,0.8)"
+  },
+  "layout": {
+    "--content-padding": "32px",
+    "--card-padding": "28px",
+    "--gap": "24px"
+  }
+}

@@ -1,0 +1,604 @@
+# NetWatch Developer Reference
+_Upload to every new chat session alongside the code export zip._
+_Keep updated as patterns change._
+
+---
+
+## ⚠️ CRITICAL: How to Work With This Project
+
+### Before proposing ANY fix or change:
+1. **Read everything first.** Read all uploaded transcripts, all referenced files, all context. Do not assume. Do not guess. If something seems like a bug, verify it exists in the actual current code before touching it.
+2. **Do not fix what isn't broken.** Multiple hours were lost fixing auth, database queries, and password reset flows that were working correctly. The v3.2.75 incident (broke working password reset by "fixing" it) and the v3.2.85 incident (unnecessarily rewrote datetime queries) are the canonical examples.
+3. **When the user says something works or is broken — believe them.** Do not tell the user they're mistaken, that they're "not seeing it correctly," or that the logs say otherwise. The user has been right every single time this happened. Acknowledge, investigate, find the real cause.
+4. **Simulate and verify before shipping.** If a fix can be simulated in Python or traced through the code logically, do it before building a package. Never ship a package based on a theory.
+5. **Do not introduce scope creep.** Fix what was asked. Note other things you spotted, but ask before touching them.
+
+**User profile:**
+- Technically proficient, logical thinker, not a programmer, Linux skills are limited
+- Cannot always tell what a code block does or how to adapt it — be explicit
+- Good at describing what they want in plain language
+- Questions and action items must be clearly visible — don't bury them in prose
+- Always flag security risks and realistic mitigations
+
+---
+
+## Current State
+- **Pi version:** v3.3.26
+- **Pi path:** `/home/mboynton/netwatch/`
+- **Canonical matches Pi at v3.3.26**
+
+---
+
+## Hardware & Network
+
+- **Hardware:** Raspberry Pi 3B+ (1GB RAM), two single relay boards, 5V/3A PSU, momentary pushbutton, USB-SATA adapter (SSD ordered, still on SD card)
+- **GPIO:** GPIO 17 → Relay 1 (Modem), GPIO 27 → Relay 2 (Router), GPIO 22 → Pushbutton
+- **Physical:** Modem → Router → AP (AP powered via PoE from router)
+- **Pi eth0:** `192.168.100.10` / gateway `192.168.100.254` (wired, .100 automation subnet)
+- **Pi wlan0:** `192.168.110.x` / gateway `192.168.110.254` (DMAutomation wireless)
+- **Personal devices:** `.17` subnet (DarkMatter SSID) — no intra-VLAN routing yet
+- **Cisco 3750** planned for inter-VLAN routing
+- **OS:** Raspberry Pi OS Lite 64-bit, Python 3, gunicorn (migrated v3.2.64)
+- **Two services:** `netwatch-monitor` (main.py) and `netwatch-web` (wsgi.py via gunicorn)
+- **Web command IPC:** file-based via `~/netwatch/pending_command.json`
+- **Rollback:** `bash ~/netwatch/rollback.sh` — restores most recent snapshot from `~/netwatch/snapshots/` (last 5 kept, excludes config.py)
+
+---
+
+## Route Decorators
+
+```python
+# Public (no auth)
+@app.route("/some/path")
+def my_view():
+
+# Authenticated — any logged-in user
+@app.route("/some/path")
+@auth.login_required
+def my_view():
+
+# Authenticated + permission
+@app.route("/some/path")
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def my_view():
+```
+
+### Permission strings
+| String | Who |
+|---|---|
+| `"manage_admin"` | Admin + Operator |
+| `"manage_users"` | Admin only |
+| `"use_controls"` | Admin + Operator |
+| `"view_logs"` | Admin + Operator |
+
+---
+
+## Getting Config Values
+
+```python
+# From config.py (set at install time)
+site_name = getattr(config, "SITE_NAME", "NetWatch") or "NetWatch"
+check_interval = getattr(config, "CHECK_INTERVAL", 30)
+
+# Theme — always from session
+from flask import session
+theme = session.get("theme", "dark-blue")
+```
+
+### Valid themes
+`"dark-blue"`, `"dark-green"`, `"light"`, `"high-contrast"`
+
+### Config key reference
+**Full list of all config keys, defaults, types, and descriptions:** `config_schema.py` — read this before adding or referencing any config key. The validator uses this as the master schema; new keys added here are automatically detected and written to config.py on next startup.
+
+---
+
+## Current User
+
+```python
+user = auth.get_current_user()  # always returns a dict, never None
+
+user["id"]           # int or None (None = guest)
+user["username"]     # str
+user["role_name"]    # "Admin", "Operator", "Monitor", "Guest"
+user["is_guest"]     # bool
+user["manage_admin"] # bool — permission flags
+user["manage_users"]
+user["use_controls"]
+user["view_logs"]
+user["theme"]        # user's preferred theme string
+```
+
+---
+
+## Response Patterns
+
+```python
+# JSON API
+return jsonify({"status": "ok"})
+return jsonify({"status": "error", "message": str(e)}), 400
+
+# Render template
+return render_template("mypage.html", var=value)
+
+# Raw HTML (e.g. printable pages)
+from flask import Response
+return Response(html_string, mimetype="text/html")
+
+# File download
+return send_file(buf, mimetype="application/zip",
+                 as_attachment=True, download_name="file.zip")
+
+# Redirect
+return redirect(url_for("function_name"))
+```
+
+---
+
+## Database Access
+
+```python
+# Always go through database.py functions — never raw sqlite in webapp.py
+database.get_latest_health()
+database.get_health_history(hours=hours)              # optional: start=ISO, end=ISO for zoom
+database.get_speedtest_history(hours=hours)            # optional: start=ISO, end=ISO
+database.get_reset_history(days=30)
+database.get_alert_history(limit=limit)
+database.get_uptime_stats()
+database.get_db_stats()
+
+# User prefs
+database.get_user_pref(user_id, "pref_key")        # returns value str or None
+database.set_user_pref(user_id, "pref_key", value)  # value=str to set; value=None to DELETE the row
+```
+
+### Database schema — where to find it
+All table definitions are in the source files with inline column comments. Read the relevant file before working with any table.
+- `database.py` — `network_health`, `reset_events`, `speedtest_results`, `alerts`, `user_prefs`
+- `auth.py` — `roles`, `users`, `email_verifications`, `phone_verifications`
+- `alert_subscribers.py` — `alert_type_settings`, `alert_subscribers`, `role_alert_defaults`, `alert_deliveries`
+- `patcher.py` — `patch_log`
+- `security_log.py` — `security_events`
+- `config_validator.py` — `config_notifications`
+
+Note: several tables gain columns via `ALTER TABLE` after initial deploy (auth.py, alert_subscribers.py). The source file is always authoritative — not any cached schema.
+
+### database.py datetime queries — critical rule
+- All timestamps stored as UTC via `datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")`
+- All WHERE clauses use `datetime('now', '-N hours')` — SQLite's `datetime('now')` is UTC on the Pi and correctly matches stored timestamps
+- **Never replace `datetime('now')` with Python-computed cutoffs** — was tried in v3.2.85 and reverted in v3.2.86; the original SQLite approach is correct
+- `timedelta` is not imported in database.py — don't add it unless genuinely needed for non-query logic
+
+---
+
+## Custom Theme System (v3.3.13–v3.3.21)
+
+Custom themes extend the built-in system themes (dark-blue, dark-green, light, high-contrast).
+They are stored as `.nwtheme` files in `~/netwatch/themes/`.
+
+**File format:** JSON with two top-level keys:
+- `"color_scheme"`: dict of 25 CSS variables (REQUIRED_COLOR_KEYS in theme_manager.py)
+- `"layout"`: dict of 3 CSS variables (REQUIRED_LAYOUT_KEYS in theme_manager.py)
+
+**Key module:** `theme_manager.py`
+- `save_theme(name, data)` — validate and write .nwtheme file
+- `load_theme(name)` — read .nwtheme file
+- `list_themes()` — list all themes with enabled/disabled status
+- `delete_theme(name)` — remove .nwtheme and .disabled sidecar
+- `generate_css(theme, part)` — produce CSS block using `body[class]` selector
+- `toggle_theme(name)` — create/remove .disabled sidecar file
+
+**CSS injection:** `base.html` injects a `<style id="custom-theme-css">` block AFTER
+`themes.css` in `<head>`. The system theme class stays on `<body>` always. The custom
+variables override via `body[class] { ... }` — equal specificity to `body.theme-*`,
+wins on source order. No class switching = no flash on load.
+
+**User pref keys:** `custom_color_scheme` and `custom_layout` in `user_prefs` table.
+Setting to `None` via `set_user_pref(id, key, None)` deletes the row (reverts to system default).
+
+**Permissions:**
+- Admin only: import, export, delete, enable/disable
+- All users: select from enabled custom themes in appearance popover and preferences page
+
+**Disabled themes:** `.disabled` sidecar file alongside the `.nwtheme` file.
+Disabled themes are hidden from user selectors but remain on disk.
+
+---
+
+## Top-level Imports Already in webapp.py
+
+```python
+import os, json, csv, io, logging
+from datetime import datetime, timedelta
+from flask import (Flask, render_template, jsonify, request,
+                   send_file, redirect, url_for, flash, session)
+import config
+import database
+import auth
+import updater
+import configeditor
+import patcher
+import certmanager
+import config_validator
+import alert_subscribers
+import security_log
+```
+Do NOT re-import these at module level. Use `from flask import X` inside a function only if needed for a name conflict.
+
+---
+
+## patcher.py — Changelog Functions
+
+```python
+patcher.get_changelog(limit=200)         # list of dicts, newest first
+patcher.get_changelog_entry(entry_id)    # single dict or None
+patcher.update_changelog_notes(id, notes)
+patcher.generate_release_notes_html(entry, site_name, theme)
+patcher.generate_combined_changelog_html(entries, site_name, theme)
+```
+
+---
+
+## updater.py — Dev Docs Functions (v3.2.89+)
+
+```python
+updater.list_dev_docs()                          # list of dicts: filename, size_bytes, modified
+updater.save_dev_doc(filename, content_bytes)    # returns (True, None) or (False, error)
+updater.delete_dev_doc(filename)                 # returns (True, None) or (False, error)
+updater.rename_dev_doc(old_filename, new_filename) # returns (True, None) or (False, error)
+updater.get_dev_doc_path(filename)               # returns full path or None
+updater.DEV_DOCS_DIR                             # ~/netwatch/dev_docs/
+```
+
+Dev docs routes in webapp.py:
+- `GET  /api/devdocs/list` — list all files
+- `POST /api/devdocs/upload` — upload a file (any type, no syntax check, no restart)
+- `POST /api/devdocs/delete` — delete a file
+- `POST /api/devdocs/rename` — rename a file
+- `GET  /api/devdocs/download?filename=X` — download a file
+- `GET  /api/admin/export_code_full` — zip of code + dev_docs/ contents
+
+---
+
+## alerts.py — Key Facts
+
+- `alerts.py` is imported by **both** `monitor.py` and `webapp.py`
+- Test emails triggered from the web call `alerts.send_test()` directly from the web service
+- **Any change to `alerts.py` must restart both services**
+- Email via Gmail SMTP using `GMAIL_USER` + `GMAIL_APP_PASSWORD` from config.py
+- `GMAIL_USER` is the sending credential only — doesn't need to match any user account email
+- Owner subscriber matched by `owner_username` field in `alert_subscribers`, not email
+- MIMEText must specify `"utf-8"` charset: `MIMEText(body, "html", "utf-8")`
+- Gmail blocks `data:image/png;base64,...` src attributes — use emoji instead
+
+### Alert system master lists (in alert_subscribers.py)
+- **`ALERT_TYPES`** — the single source of truth for every alert type in the system. Controls what appears in subscriber preferences, delivery history filters, role defaults, and the DB seed. Adding a new alert type anywhere requires adding it here first.
+- **`CARRIERS`** — master list of SMS carrier gateway domains. Adding a new carrier requires adding it here; `CARRIER_BY_ID` is derived from this list automatically.
+
+---
+
+## configeditor.py — Export/Import
+
+- FIELDS is built dynamically at import time from `config_schema.CONFIG_SCHEMA`, excluding entries
+  where `ui_hidden=True`. Do not add fields to configeditor.py — add them to config_schema.py.
+- `configeditor.read_config()` — returns `{key: value}` dict of all FIELDS, native Python types
+- `configeditor.save_config(new_values, saved_by)` — validates, backs up, writes config.py, returns `(bool, error_or_None)`
+- `configeditor.rollback_config()` — restores from config.py.bak
+- `/api/config/export` — returns all values as JSON for client-side encryption (no passphrase on server)
+- Export/import uses WebCrypto AES-GCM 256-bit + PBKDF2 (200k iterations, SHA-256) — all crypto in browser
+- Import shows a diff modal: only changed fields shown, click to choose current vs imported per field
+
+---
+
+## Metrics Page — Charts (v3.2.78+)
+
+### Architecture
+- All 4 charts use shared Chart.js plugins registered once: `CrosshairPlugin`, `ZoomDragPlugin`
+- Data flow: `loadData(hours, startIso?, endIso?)` → fetch API → `bucketAvg()` → chart update
+- Auto-refresh pauses while zoomed (`isZoomed` flag)
+
+### Key functions
+```javascript
+bucketAvg(arr, fields, numBuckets, startMs, endMs)  // time-anchored bucket averaging
+makeBucketLabels(buckets, hours)    // sparse x-axis labels
+makeBucketRawLabels(buckets)        // full "Avg: Mar 7 06:35 AM – 06:50 AM" tooltip strings
+numBuckets(hours)                   // 1H→60, 6H→72, 24H→96, 7D→168, 30D→240
+loadData(hours, startIso, endIso)   // main data loader
+```
+
+### Bucket window anchoring — critical rule
+- `startMs` is always `Date.now() - hours*3600*1000` (full requested range)
+- `endMs` is always `Date.now()`
+- **Never derive startMs from oldest data point** — was tried in v3.2.82/83, reverted in v3.2.86
+- Gaps in data (monitor restart, Pi reboot) correctly appear as breaks in the line
+- The old `sample()` function is gone — do not reintroduce it
+
+### chart._rawLabels
+- Stored per chart: full timestamp string per bucket point, used by CrosshairPlugin tooltip
+- Set alongside chart data update: `chart._rawLabels = makeBucketRawLabels(buckets)`
+
+### Zoom
+- Drag on any chart to zoom — ZoomDragPlugin computes ISO timestamps from drag bounds
+- Calls `loadData(hours, startIso, endIso)` with explicit window
+- Reset Zoom button appears in toolbar while zoomed
+
+---
+
+## How to Deploy Updates to NetWatch
+
+There are **two methods** for deploying code changes to the Pi. Claude builds the package;
+the user installs it via the NetWatch web UI. No CLI needed.
+
+---
+
+### Method A — Package Installer (preferred for any change)
+
+**When to use:** Any time you are changing one or more files. This is the standard method.
+It takes a snapshot before touching anything, so rollback is always available.
+
+**UI path:** Admin → Package Installer (at `/admin/patch`)
+
+**What Claude does — step by step:**
+
+1. Edit the file(s) in the working directory
+2. Bump the version number (e.g. `3.2.92` → `3.2.93`)
+3. Build a zip containing:
+   - `manifest.json` at the **root** of the zip
+   - All changed files at the **root** of the zip (patcher finds them by basename)
+   - Use `manifest.json` file entries with full relative paths (`templates/foo.html`, `static/bar.css`, `dev_docs/file.txt`)
+4. Provide the zip for download
+
+**CRITICAL — Zip must be built from inside the package directory:**
+```bash
+cd /package_dir && zip -r output.zip .
+```
+Never zip a folder from outside — files must be at the zip root, not inside a subdirectory.
+
+**What the user does:**
+
+1. Download the zip from Claude
+2. Open NetWatch → Admin → Package Installer
+3. Upload the zip — the UI shows a preview of every action before applying
+4. Click Apply
+5. Wait for the restart confirmation
+
+---
+
+### Manifest format
+
+```json
+{
+  "version": "3.2.93",
+  "description": "Brief description of what this package does.",
+  "min_version": "3.2.92",
+  "actions": [
+    { "action": "replace", "file": "webapp.py" },
+    { "action": "replace", "file": "templates/patch_manager.html" },
+    { "action": "replace", "file": "static/themes.css" },
+    { "action": "replace", "file": "dev_docs/NetWatch_AI_Context_latest.txt" },
+    { "action": "restart", "services": ["monitor", "web"] }
+  ]
+}
+```
+
+**Manifest rules (all confirmed from source):**
+
+- `version` — new version string; written to the Pi's VERSION file on success
+- `description` — shown in changelog; be specific
+- `min_version` — optional; prevents install on too-old versions
+- `actions` list is executed **in order**; a failed action stops execution and skips remaining steps
+- `restart` action should always be **last**
+- **Always include the updated context doc** as a `replace` action targeting `dev_docs/NetWatch_AI_Context_latest.txt`
+
+---
+
+### File path rules in manifest
+
+`_resolve_path()` in patcher.py determines where each file lands. The rules are:
+
+| File path in manifest | Where it is written on Pi |
+|---|---|
+| `webapp.py` | `~/netwatch/webapp.py` |
+| `main.py` | `~/netwatch/main.py` |
+| `templates/index.html` | `~/netwatch/templates/index.html` |
+| `index.html` (no prefix) | `~/netwatch/templates/index.html` (auto-placed by `.html` extension) |
+| `static/themes.css` | `~/netwatch/static/themes.css` |
+| `themes.css` (no prefix) | `~/netwatch/static/themes.css` (auto-placed by `.css` extension) |
+| `dev_docs/filename.txt` | `~/netwatch/dev_docs/filename.txt` (v3.2.90+) |
+
+**Best practice:** Always use the full relative path with subdirectory prefix (`templates/`, `static/`, `dev_docs/`)
+for HTML, CSS, JS, and dev doc files. This is unambiguous and immune to future logic changes.
+
+`_find_in_zip()` matches by **basename** anywhere in the zip, so the file can sit at the
+zip root or in a subfolder — patcher finds it either way.
+
+---
+
+### Service restart rules
+
+`_queue_restart()` in patcher.py calls `updater.get_service_for_file()` for each replaced file,
+then also honours explicit `restart` actions. The service map (from `updater.py`) is:
+
+| File | Service(s) restarted |
+|---|---|
+| `main.py`, `monitor.py`, `network.py`, `relay.py`, `button.py` | `netwatch-monitor` only |
+| `webapp.py`, `updater.py`, `configeditor.py`, `patcher.py`, `certmanager.py`, `config_validator.py`, `security_log.py` | `netwatch-web` only |
+| `alerts.py`, `alert_subscribers.py`, `database.py`, `auth.py`, `config.py` | **both** services |
+| `.html`, `.css`, `.js` files | `netwatch-web` only |
+
+**Always include an explicit `restart` action** — do not rely on auto-detection alone.
+The safe default is `"services": ["monitor", "web"]` (restarts both).
+
+**How web restart works (critical):** `netwatch-web` is restarted with a **2-second background delay**
+(`sleep 2 && sudo systemctl restart netwatch-web`) so the HTTP response fully completes first.
+The user will see a brief disconnect (~5 seconds) and then the page reloads. This is normal.
+
+**How monitor restart works:** `netwatch-monitor` is restarted synchronously (no delay).
+The network monitoring loop pauses briefly during restart.
+
+**gunicorn `preload_app = True`:** The app loads once in the master process before forking workers.
+`init()` runs once, not once per worker. A full service restart (`systemctl restart`) is required
+to pick up code changes — a reload signal is not sufficient.
+
+---
+
+### All available action types
+
+| Action | Purpose |
+|---|---|
+| `replace` | Overwrite a file with the version from the zip |
+| `patch` | Apply a unified diff to an existing file |
+| `json_patch` | Apply structured add/remove/replace ops to a JSON or Python file |
+| `mkdir` | Create a directory (skipped if already exists) |
+| `run_sql` | Run a SQL statement against netwatch.db (safe to re-run — duplicate column errors are swallowed) |
+| `restart` | Queue service restarts; `"services"` accepts `"web"`, `"monitor"`, or both |
+
+For most updates, only `replace` and `restart` are needed.
+
+---
+
+### What patcher.py does automatically
+
+- Takes a **full snapshot** of all files + database **before touching anything**
+  (saved to `~/netwatch/snapshots/`, last 5 kept)
+- Creates `.bak` copies of each file it overwrites
+- Runs Python **syntax check** on all `.py` files before replacing them
+- Updates the `VERSION` file on success
+- Logs every step to the `patch_log` table in the database (visible in Admin → Changelog)
+- If any step fails, remaining steps are **skipped** (not rolled back automatically —
+  use Admin → Emergency Rollback or `bash ~/netwatch/rollback.sh` to recover)
+
+---
+
+### Method B — Deployed Files (single file, quick fix)
+
+**When to use:** Replacing one file when you already know exactly what changed.
+No snapshot is taken. Only a `.bak` of the overwritten file is created.
+
+**UI path:** Admin → Deployed Files (at `/admin/update`)
+
+**What Claude does:** Provide the updated file for download.
+
+**What the user does:** Open NetWatch → Admin → Deployed Files → Upload the file.
+The service restart happens automatically based on the file type (see service map above).
+
+**Limitation:** No version bump, no snapshot, no changelog entry. Use Method A for anything
+that matters or that might need to be rolled back.
+
+---
+
+### Version numbering
+
+- Version is stored in `~/netwatch/VERSION` as a plain string (e.g. `3.2.92`)
+- Always bump version when deploying a package via Method A
+- Format: `MAJOR.MINOR.PATCH` — increment PATCH for normal changes
+- patcher.py uses the `packaging` library to compare versions; it tolerates trailing letters
+
+---
+
+### What NOT to include in packages
+
+Never include in a package zip:
+- `config.py` — contains live credentials; would overwrite the user's settings
+- `netwatch.db` — live database
+- `certs/` directory contents
+- `venv/` contents
+- `.bak` files
+- `snapshots/` contents
+
+---
+
+## Web Service — Gunicorn
+
+- **Config file:** `~/netwatch/gunicorn.conf.py`
+- **Entry point:** `~/netwatch/wsgi.py` (calls `init()` then exposes `app`)
+- **Workers:** 2 sync workers
+- **preload_app = True** — app loads once in master before forking; `init()` runs once
+- **SSL:** cert/key paths in gunicorn.conf.py from `~/netwatch/certs/`
+- **Logs:** stdout → journald (`sudo journalctl -u netwatch-web`)
+- `init()` only called from `wsgi.py` — `if __name__ == "__main__"` in webapp.py unused by service
+
+---
+
+## Auth — Password Reset (v3.2.69/70 behaviour, confirmed)
+
+- `request_password_reset()` writes temp hash to `reset_token_hash` only — `password_hash` is never overwritten
+- `authenticate()` checks both `password_hash` AND `reset_token_hash` — either works
+- Both temp password and real password work simultaneously by design
+- v3.2.75 incorrectly "fixed" this (breaking it), v3.2.76/77 repaired the damage — v3.2.77 is equivalent to v3.2.70
+
+---
+
+## Common Gotchas (learned the hard way)
+
+- **No `get_setting()`** — use `getattr(config, "KEY", default)`.
+- **No `@login_required` or `@require_role()`** — use `@auth.login_required` and `@auth.requires_permission("...")`.
+- **`auth.get_current_user()` returns a dict** — access with `["id"]` not `.id`.
+- **`sqlite3.execute()` is single-statement only** — never put two SQL statements in one `c.execute()` call.
+- **`autoSkip:false` in Chart.js** compresses the x-axis — use `autoSkip:true` + `maxTicksLimit`.
+- **`display:none` twice in an inline style** — second one wins; JS `.style.display = 'flex'` won't override it.
+- **Pi runs in a venv** — `/home/mboynton/netwatch/venv/bin/python3`.
+- **webapp.py has no `app.run()`** under gunicorn — `wsgi.py` is the entry point.
+- **Read all transcripts before proposing fixes** — an hour was wasted "fixing" auth that was already working (v3.2.75 incident).
+- **24H data gap after monitor restart is real, not a query bug** — the monitor simply wasn't writing. Don't chase the DB query.
+- **`sample()` is gone from metrics.html** — replaced by `bucketAvg()`. Do not reintroduce it.
+- **Package zip must be built from inside the package directory** — `cd /package_dir && zip -r output.zip .` — never zip from outside or files land in a subdirectory and the manifest won't be found.
+- **`_resolve_path()` only auto-places files it recognises** — `.html` → `templates/`, `.css/.js` → `static/`, `dev_docs/` prefix → `dev_docs/` (v3.2.90+). All other subdirectories must use explicit full paths in the manifest.
+
+---
+
+## Backlog (as of v3.3.26, updated Session 10)
+
+**Security**
+- ✅ About/system info popover in navbar (v3.3.0–v3.3.5)
+- ✅ Security log IP geo popover (confirmed in security_log.html)
+- ✅ Password reset via email+SMS (confirmed in webapp.py /forgot-password)
+- ✅ SMS change detection (confirmed — phone change triggers re-verification, marked Not Verified until confirmed)
+- ✅ Auto-disable after repeated lockouts (confirmed working v3.3.9)
+
+**UI**
+- ✅ Delivery history table: friendly labels (confirmed — friendlyType() in alert_settings.html)
+- ✅ Patch manager: page now reloads after all install outcomes (web restart, monitor restart, no restart)
+- ✅ Config editor: visual indicator for newly added keys that already have valid defaults (v3.3.24; optional keys with blank values no longer show NEEDS SETUP)
+- System log viewer: read-only tail view of pkg_update.log (and potentially other runtime logs)
+  in the Admin page. Needed because pkg_update.log is disk-only with no current UI access.
+  Could be scoped narrowly (pkg_update only) or broadly (all NetWatch runtime logs) — decide at build time.
+
+**Features**
+- ✅ Dev Documents system — Deployed Files page, Dev Docs section, single Download Current Code button (includes dev_docs/), export gunicorn.ctl fix, patcher dev_docs/ path support, DB registry (confirmed complete Session 6/7 — was rollback DB restore verification), transcript upload via Dev Docs (confirmed complete — original need met by existing summary workflow) *(v3.2.89–3.2.95+)*
+- ✅ Configurable snapshot retention (SNAPSHOT_RETENTION, v3.3.2; now visible in Config Editor v3.3.9)
+- ✅ Pi package update scheduling (v3.3.12; weekly cron, maintenance alert category, My Account toggle)
+- ✅ Theme import/export (custom .nwtheme system, v3.3.13–v3.3.21; import/export/enable/disable/apply/popover-select confirmed working Session 9)
+- ✅ Network interface verification rework (v3.3.22; LAN_INTERFACE + WIFI_INTERFACE config keys, ping -I binding, pre-flight IP check)
+- Host monitoring
+- Network interface verification rework
+- Device telemetry tab
+- Kiosk display
+- Package storage + push
+
+**Infrastructure**
+- SSD migration (hardware ordered)
+- Fix patcher.py temp file handling: syntax check writes .pyc files to
+  /tmp/__pycache__/ and never cleans up. After netwatch-svc transition,
+  wrong permissions caused misleading "syntax error" on install. Fix:
+  use tempfile.mkstemp(), clean up in finally block, improve error message.
+
+- [DONE v3.3.25] Dedicated service account (netwatch-svc): services now run as
+  a no-login system account (--no-create-home, home=/nonexistent). netwatch-svc
+  owns ~/netwatch/ files via chown; mboynton retains group access. Narrow sudoers:
+  systemctl + apt only. main.py and theme_manager.py updated to use
+  __file__-relative paths instead of expanduser().
+
+**Testing**
+- Full system backup — needs SD cards
+- Distributable installer — needs second Pi / SD cards
+- Update package installer
+- ✅ Rollback DB restore verified working (confirmed Session 9; script functional confirmed Session 7)
+
+**Documentation**
+- User PDF
+- Admin guide PDF
+- Developer reference
+- Changelog PDF retroactive
+- NetWatch brochure

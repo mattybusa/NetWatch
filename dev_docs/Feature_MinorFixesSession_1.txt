@@ -1,0 +1,83 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: MINOR FIXES AND IMPROVEMENTS (SESSION 1)
+===============================================================================
+Name: Miscellaneous Fixes, UI Improvements, and Small Features (Session 1.3)
+Type: Feature (catch-all for items not covered in dedicated expanded summaries)
+Date: 2026-03-02 through 2026-03-07 (v3.0.9 through v3.2.48)
+Sessions: Session 1.3
+Final outcome: All items complete
+
+
+SPEEDTEST NO-DATA OVERLAY (v3.2.11):
+When speedtest_results table has no entries, the speedtest chart area showed a blank
+canvas. Added a conditional overlay: "No speedtest data yet" with a soft icon.
+Removed automatically on first successful speedtest.
+
+ALERT SUBSCRIBER SAVE TOAST (v3.2.11):
+Added "Preferences saved" toast notification (green, 3-second auto-dismiss, bottom-right)
+after saving alert subscription preferences.
+
+MY ACCOUNT TAB REMOVAL FROM USERS AND ROLES PAGE (v3.2.12):
+Removed a leftover "My Account" tab from the admin Users & Roles page. My Account
+is accessible only via the navbar.
+
+ADMIN COLLAPSIBLE SECTIONS JS DIV CLOSURE BUG (v3.2.14-v3.2.15):
+The collapse state restore code iterated IDs where one collapsible was a child of
+another, causing double-expansion on page load. Fixed: unique stable IDs per
+collapsible, restore logic targets top-level collapsibles only.
+
+CACHE-CONTROL HEADERS (v3.1.1):
+Cache-Control: no-store added to all Flask responses via @app.after_request.
+Addresses stale auth state, stale config after restart, and wizard state caching.
+
+TRANSACTIONAL EMAIL SUBJECTS (v3.2.5):
+Verification and reset emails now use meaningful subjects:
+- "NetWatch: Verify your email address"
+- "NetWatch: Reset your password"
+- "NetWatch: Your temporary password"
+Previously all showed as "NetWatch Alert."
+
+EMAIL VERIFICATION JS EVENT HANDLER TIMING (v3.2.5):
+"Send Verification Code" button click handler was bound before the element existed in
+the DOM. Fixed: wrapped in DOMContentLoaded listener.
+
+LOGIN USERNAME PREFILL FROM RESET LINK (v3.2.44):
+Password reset email link includes a short-lived username token.
+/login?u=<token> prefills the username field. Token is single-use, expires 30 minutes.
+
+TEST ALERTS IN DELIVERY HISTORY (v3.2.45):
+Test alert entries in delivery history now show a [TEST] tag to distinguish from
+real network alert events.
+
+TEMPORARY PASSWORD REDACTION IN HISTORY (v3.2.43):
+Temp password content in alert delivery history display redacted to [REDACTED].
+
+LIVE POLLING (v3.2.45-v3.2.47):
+Dashboard, metrics, and logs pages auto-refresh via AJAX every CHECK_INTERVAL seconds.
+No full page reload. DOM updates only changed elements.
+Polling heartbeat endpoints excluded from extending session timeout.
+
+LATENCY CHART DATA MUTATION FIX (v3.2.46):
+Metrics page latency chart was mutating the shared data array from API response.
+Fixed: deep-copy data before passing to chart update functions.
+
+CODE EXPORT DOWNLOAD (v3.2.47):
+"Export Code" one-click download from admin page. Excludes: *.bak, netwatch.db,
+config.py, __pycache__, certs/, snapshots/. Includes all code, templates, static files.
+
+PACKAGE INSTALLER RESTART POLLING (v3.2.30):
+Fixed-timeout (5s) after package install replaced with active polling: pings /api/status
+every 1 second after install; reloads when service responds. 30-second timeout.
+
+GUNICORN MIGRATION (timing per context doc):
+Flask dev server replaced with gunicorn in netwatch-web.service:
+  gunicorn --workers 2 --bind 0.0.0.0:443 --certfile ... --keyfile ... webapp:app
+Benefits: proper WSGI, multi-worker concurrent request handling for live polling.
+
+IP GEOLOCATION POPOVERS (timing per context doc):
+WAN IP on dashboard shows clickable popover with ISP, country, region.
+Exact version: see context doc v3.2.95.
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Live polling interval is CHECK_INTERVAL — no separate UI polling interval in config.
+- Code Export does not include dev_docs/ files.

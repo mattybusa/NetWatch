@@ -1,0 +1,123 @@
+NETWATCH EXPANDED SUMMARY
+=========================
+Feature_EmailIconArc.txt
+
+FEATURE/BUG HEADER
+------------------
+- Name: Email Header Icon Debugging Arc + Favicon Additions + Installer Feedback Fix
+- Type: Bug (dual-import) + Feature (icon update, favicon) + Bug (installer feedback)
+- Date worked on: 2026-03-07
+- Sessions: Session 2
+- Final outcome: Complete — icon set to 🛜 WiFi emoji with UTF-8 charset; favicons added;
+  installer feedback fixed for monitor-only restarts; dual-import rule documented
+
+
+BACKGROUND
+----------
+During v3.2.52 testing, the user noted the email header icon was showing 📡 (satellite
+dish) when it should be a WiFi/network icon. Also noted: the browser tab and phone home
+screen had no NetWatch favicon. Both items were addressed in this arc.
+
+The email header icon is a Unicode emoji rendered inside an HTML email sent by alerts.py.
+The icon appears in a styled div at the top of the email template.
+
+The package installer feedback issue: when a package was installed that only restarted
+the monitor service, the installer UI showed no "services restarted" confirmation row.
+This was discovered because the email icon packages only restarted the monitor.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+1. Embedded favicon PNG in email header — v3.2.53 (failed email portion):
+   alerts.py was updated to embed a base64-encoded PNG of the favicon directly in the
+   email HTML header as an `<img>` tag. Gmail stripped the embedded image entirely —
+   no icon rendered in the email. The favicon additions to static/ and base.html in this
+   same package succeeded independently (browser tab favicon now works).
+
+2. WiFi emoji 🛜, monitor-only restart — v3.2.54 (failed):
+   Changed email icon to 🛜 WiFi symbol. Installed with monitor-only restart. Icon still
+   appeared as 📡 in emails. Root cause not yet identified — multiple turns spent
+   investigating bytecode cache, venv file paths, and whether a second copy of alerts.py
+   existed. All negative. The actual cause (web service not restarted) was not identified
+   until v3.2.57.
+
+3. Signal bars emoji 📶, monitor-only — v3.2.55 (failed):
+   Changed to 📶 (signal bars). User reported it rendered as satellite dish in Gmail.
+   This is a Gmail emoji substitution issue — Gmail renders its own glyph for 📶 on this
+   user's setup. Additionally, the monitor-only restart problem was still active.
+
+4. UTF-8 charset hypothesis — v3.2.56 (partial):
+   Added explicit `MIMEText(html_body, 'html', 'utf-8')` on the theory the emoji was
+   being corrupted in transit. Icon still appeared wrong in email. The UTF-8 fix was not
+   itself wrong (it was retained in v3.2.60) but it was not the cause of the issue. The
+   web service had still not been restarted.
+
+5. Gmail investigation — multi-turn dead end:
+   Approximately 5 turns investigating whether Gmail was threading emails (showing an
+   older cached email), whether encoding was corrupt in transport, and whether a stale
+   file was being served by the monitor's venv. All were wrong. Gmail's custom emoji
+   rendering cannot be fixed from the sender side.
+
+6. Embedded PNG second attempt — v3.2.59 (failed):
+   To bypass Gmail emoji substitution, tried again to embed a PNG image in the email
+   HTML. Gmail stripped it again. Reverted to emoji in v3.2.60.
+
+Self-introduced regression — monitor-only restart for alerts.py (v3.2.53–v3.2.56):
+   All packages from v3.2.53 through v3.2.56 used `"services": ["monitor"]` only.
+   This was incorrect: webapp.py imports alerts.py for sending test emails from the
+   Alert Settings page. With only the monitor restarted, the web service process kept
+   the old alerts.py bytecode loaded in memory. Every install appeared to change nothing
+   because the web-side module was unchanged.
+   Diagnosis moment: at turn ~22, user said "that worked" only after manually restarting
+   the web service. Claude: "So the web service restart was the key — the email is being
+   built somewhere in the web service path, not just the monitor." All packages from
+   v3.2.57 onward included both services in the restart action.
+   The SERVICE_MAP was flagged as a known bug (alerts.py mapped to "monitor" only) and
+   properly fixed in v3.2.63.
+
+Installer feedback — root cause:
+   The package installer JS polls for restart confirmation and renders a confirmation
+   step row. The polling logic checked whether the response mentioned "web" — if only
+   the monitor restarted, the web key was absent and no row was rendered. This gave the
+   false impression that restart steps were being silently skipped.
+
+
+WHAT WORKED
+-----------
+Favicons and home screen icon (v3.2.53 — successful portions):
+  Files modified: alerts.py (email icon attempt), base.html (favicon links in <head>),
+  static/favicon.png (added), static/manifest.json (web app manifest), plus Apple touch
+  icon link. Browser tab favicon and phone home screen icon now work correctly. The email
+  icon portion of v3.2.53 failed (see above) but these pieces shipped and worked.
+
+v3.2.57 — Package installer feedback fix + cumulative:
+  The installer feedback polling was updated to show a confirmation row for monitor-only
+  restarts (not only web restarts). Also incorporated the UTF-8 charset fix from v3.2.56
+  and changed the icon back to 🛜. Both services restarted in manifest.
+  Note: [UNVERIFIED — installer feedback for monitor-only restarts was not explicitly
+  separately tested by the user in the transcript. "That worked" referred to emoji
+  rendering, not the feedback row.]
+
+v3.2.60 — Final email icon resolution:
+  Reverted from embedded PNG (v3.2.59) back to 🛜 WiFi emoji.
+  File modified: alerts.py
+  Key change: `MIMEText(html_body, 'html', 'utf-8')` — explicit UTF-8 charset retained.
+  Icon: 🛜 (U+1F6DC, WiFi symbol).
+  Manifest restart: both services explicitly — `"services": ["monitor", "web"]`
+  User confirmed this resolved the email icon issue.
+
+Key rules established:
+  1. alerts.py MUST always restart both services. Imported by monitor.py AND webapp.py.
+     A monitor-only restart leaves the web service caching the old module.
+  2. Gmail substitutes its own rendering for many emoji codepoints. Test each codepoint
+     before committing — 📶 renders as satellite dish, 🛜 is acceptable.
+  3. Embedded images in email HTML are stripped by Gmail. Emoji only.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Gmail emoji substitution cannot be prevented. The selected 🛜 emoji was confirmed
+  acceptable by this user but may render differently in other email clients or Gmail
+  versions. No further action needed unless a regression is reported.
+- The installer feedback fix (v3.2.57) was not explicitly separately verified. The
+  behavior should be confirmed in a future session if monitor-only packages are tested.

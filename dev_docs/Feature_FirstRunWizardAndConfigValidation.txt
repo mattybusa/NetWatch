@@ -1,0 +1,107 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: FIRST-RUN WIZARD AND CONFIG VALIDATION
+============================================================================
+Name: First-Run Setup Wizard and Config Validation System
+Type: Feature
+Date: 2026-03-01 (v2.9–v2.9.5)
+Sessions: Session 1.2
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+New installs of NetWatch started with a config.py full of placeholder values. The user
+wanted a guided setup experience rather than having to SSH in and edit config.py manually.
+Also needed a validation system to surface unconfigured keys visually throughout the UI.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+SECRET_KEY set to actual value in transcript:
+User noted that the SECRET_KEY in the context document they shared had been changed to
+an actual value before sending. This was a security reminder: the context doc should
+always use the placeholder CHANGE_THIS_TO_A_RANDOM_SECRET_KEY. The code was corrected
+to use the placeholder as the sentinel value for first-run detection.
+
+Browser caching of wizard state:
+After completing the wizard and restarting services, some browsers showed the
+pre-wizard state. Added Cache-Control: no-store to all Flask responses.
+
+Hardcoded IPs in templates:
+Scan of templates found hardcoded 192.168.100.254 (LAN gateway) and 192.168.110.10
+(Pi WiFi IP) in index.html and admin.html. These were replaced with dynamic values
+via a /api/config/network endpoint that serves the current config.py values.
+
+
+WHAT WORKED
+-----------
+FIRST-RUN DETECTION:
+webapp.py checks at startup: if config.py contains SECRET_KEY = "CHANGE_THIS_TO_A_
+RANDOM_SECRET_KEY" (the sentinel), redirect all requests to /setup (the wizard).
+Wizard is not accessible after setup is complete.
+
+SETUP WIZARD (/setup):
+Multi-step form covering essential configuration:
+1. Site name (SITE_NAME)
+2. Network topology: Simple (one router) or Advanced (multiple subnets)
+   - Simple: enter gateway IP, WAN check target
+   - Advanced: enter each subnet separately (supports user's 17/100/110 topology)
+3. Relay assignment: which relay controls modem, which controls router
+4. Timezone selection
+5. Alert email (optional — can configure later)
+6. SECRET_KEY: generated randomly by wizard, user shown the value and prompted to
+   note it (or regenerated on each wizard visit until saved)
+
+Wizard writes to config.py using key-value line replacement (regex). Schema-driven:
+adding new config keys to the schema means they automatically appear in the wizard
+on fresh installs. POST /setup: validates inputs, writes config.py, restarts services,
+redirects to /login.
+
+NETWORK TOPOLOGY WIZARD:
+Two paths:
+- Simple: user enters one LAN_GATEWAY and one WAN target. Covers most home setups.
+- Advanced: user can add multiple LAN subnets and WAN targets. Covers user's setup
+  with .17, .100, .110 subnets. Each subnet gets a LAN check target.
+
+CONFIG VALIDATION SYSTEM (config_validator.py):
+Schema defines all expected config.py keys with:
+- default_value: what a placeholder/unconfigured value looks like
+- required: True/False
+- category: network, email, security, etc.
+
+validate_config() reads config.py, compares each key to its default_value.
+Returns list of unconfigured_keys (keys still at placeholder value).
+
+INTEGRATION:
+1. Dashboard header banner: "N settings need attention" (orange banner, links to config editor)
+   Shows only when unconfigured_keys is non-empty.
+2. Config editor: each unconfigured field shows an orange badge "⚠ Not configured"
+   Schema-driven: new keys added to config.py schema automatically show as unconfigured
+   when introduced. No manual config editor FIELDS update needed for badge display.
+
+DISTRIBUTABLE PACKAGE GENERATOR:
+Admin → Export Code: generates a fresh-install zip from the current codebase.
+Excludes: netwatch.db, config.py (production credentials), .bak files, __pycache__,
+certs/ (device-specific). Includes everything else.
+The zip, when extracted and deployed to a fresh Pi, goes through the setup wizard.
+This is the mechanism for distributing NetWatch to other users (future) or recovering
+to a fresh Pi.
+
+VERSION FILE:
+~/netwatch/VERSION — plain text file containing current version string.
+Read by patcher for version checking. Displayed in admin page footer.
+Updated automatically by patcher on each package install.
+
+FAVICON + PWA:
+favicon.ico, favicon.svg, favicon-32.png generated and added to static/.
+Web app manifest (manifest.json) added for PWA install prompt on mobile.
+All templates extend base.html which includes the favicon links.
+change_password.html is standalone (does not extend base.html) — favicon links
+added directly to it.
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- The first-run wizard does not cover all config.py keys — only the essential ones.
+  Advanced settings (SPEEDTEST_INTERVAL, LATENCY_WARN_MS, etc.) are configured via
+  the Config Editor after setup.
+- Config validation is read-only check at request time; does not watch for file changes.
+  If config.py is edited outside the Config Editor, the banner updates on next page load.

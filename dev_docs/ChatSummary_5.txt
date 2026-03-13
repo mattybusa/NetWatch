@@ -1,0 +1,149 @@
+NETWATCH SESSION 5 — BASE SUMMARY
+==================================
+
+SESSION HEADER
+--------------
+- Session: 5
+- Date: 2026-03-11
+- Starting version: v3.2.99.1 (context doc authoritative; zip label matched)
+- Ending version: v3.3.5
+- Summary: Added About popover to navbar/sidebar brand, added snapshot selection and
+  configurable retention to rollback script, and fixed a multi-root rollback failure
+  involving a bash heredoc bug and Unicode characters in shell scripts.
+- SCOPE NOTE: This session covered 6 distinct arcs. Expanded summaries produced for
+  all major items.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- v3.3.0 — About/system info popover: clicking the NETWATCH brand text in the top
+  navbar or sidebar opens a popover showing version, project description, author, and
+  a dependency table with licenses. Dashboard nav link behavior unchanged; only the
+  brand text click behavior changed. (see Feature_AboutPopover.txt)
+
+- v3.3.1 — About popover UI fixes: color regression fixed (button inherited wrong
+  color), popover width increased 340px to 400px, dependency table font reduced to
+  0.77rem, header sizes trimmed, navbar anchor adjusted to left:8px.
+  (see Feature_AboutPopover.txt)
+
+- v3.3.2 — Rollback script snapshot selection + configurable retention: rollback.sh
+  now lists all snapshots newest-first with version labels and prompts for numbered
+  selection (Enter defaults to most recent). patcher.py snapshot retention changed from
+  hardcoded 5 to configurable via SNAPSHOT_RETENTION in config.py (default 10, floor 1).
+  config_schema.py updated with new key. Pruning runs on next install only.
+  (see Feature_RollbackImprovement.txt)
+
+- v3.3.4 — Complete rollback fix package (catches up from v3.2.99.2): rollback.sh fully
+  rewritten in pure ASCII with no heredocs; all v3.3.2 changes re-included; base.html
+  About popover at v3.3.1 state; Gotchas.txt updated with Unicode/heredoc lessons.
+  (see Feature_RollbackImprovement.txt)
+
+- v3.3.5 — About popover navbar position: moved popover from top:8px back to top:52px
+  so it appears below the navbar bar rather than overlapping it. Web restart only.
+  (see Feature_AboutPopover.txt)
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- v3.3.3 rollback.sh fix (superseded): heredoc replaced with printf-built temp file —
+  the correct fix for DB restore — but the file still contained Unicode box-drawing
+  characters and arrows from the original script. Bash threw a syntax error on the Pi
+  at runtime. Superseded immediately by v3.3.4 which rewrote the entire script in
+  pure ASCII.
+
+- Rollback attempt during v3.3.2 incident: web service went down after v3.3.2 install.
+  Matt attempted a rollback to v3.2.99.2. Script ran without apparent error but the DB
+  restore did not execute. Root cause: original rollback.sh used a bash heredoc
+  (python3 - << PYEOF) which failed silently on the Pi. Version remained at v3.3.2
+  after rollback. Web service recovered manually: sudo systemctl start netwatch-web.service
+  DB restore was fixed in v3.3.4.
+
+- v3.3.0 About popover initial UI: color rendered incorrectly (button inherited wrong
+  color) and popover was too narrow for the dependency table. Fixed in v3.3.1.
+
+
+DECISIONS MADE
+--------------
+- About popover placement: NETWATCH brand text in navbar and sidebar opens popover instead
+  of navigating to /dashboard. The existing "Dashboard" nav item is preserved unchanged.
+
+- About popover content: trimmed North Star statement as description; Author: M. Boynton;
+  13 dependencies: Flask, flask-session, Gunicorn, bcrypt, cryptography, requests,
+  packaging, RPi.GPIO, lgpio, speedtest-cli, SQLite3, Chart.js, Bootstrap Icons.
+
+- Snapshot retention default changed from 5 to 10. Pruning only on next install.
+
+- Version numbering: never overwrite a version with a fix — always increment.
+  Clarified when v3.3.3 needed to be superseded.
+
+- AI_Session_Process.txt SESSION END step 3 updated during this session: new gotchas now
+  append directly to Gotchas.txt during dev sessions, not to a separate append file.
+  SummaryInstructions.txt was not updated to match — see Open Questions.
+
+- Config editor new-key visual indicator (no badge for keys with valid defaults like
+  SNAPSHOT_RETENTION): deferred to backlog.
+
+- Pure ASCII rule for all .sh files: established and documented. No Unicode in shell
+  scripts, not even in comments or echo statements.
+
+- End-of-session context doc update at v3.3.5 — version bumped to v3.3.5, About popover
+  backlog item marked complete, new backlog item added for config editor key highlighting,
+  rollback notes updated.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] Rollback DB restore not re-verified post-v3.3.4. The fix was shipped and
+  v3.3.5 is running, but a live rollback test confirming DB restore actually works was
+  not performed this session. Recommend verifying before next production rollback is needed.
+
+- [PROCESS NOTE] AI_Session_Process.txt step 3 was updated to append gotchas directly to
+  Gotchas.txt, but SummaryInstructions.txt still says to produce a separate
+  Gotchas_Append_SessionN.txt. The two documents are now inconsistent. A future session
+  should reconcile them. For this session: gotchas were appended to Gotchas.txt directly
+  during the dev session; no Gotchas_Append_Session5.txt is produced here.
+
+- [UNVERIFIED] Web service outage after v3.3.2 install: gunicorn exited cleanly
+  (status=0/SUCCESS) so systemd Restart=always did not trigger. May be a pre-existing
+  behavior in the delayed-restart mechanism. Not confirmed either way.
+
+
+BACKLOG CHANGES
+---------------
+Completed:
+- About/system info popover in navbar (identified and completed this session, v3.3.0-v3.3.5)
+
+Added:
+- Config editor: add visual indicator for newly added config keys that already have valid
+  defaults (e.g. SNAPSHOT_RETENTION shows no NEEDS SETUP badge after first install)
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Feature_AboutPopover.txt — About/system info popover in navbar and sidebar, v3.3.0-v3.3.5,
+  including initial UI fix arc and final position fix
+- Feature_RollbackImprovement.txt — Rollback snapshot selection, configurable retention,
+  DB restore failure and fix, pure ASCII shell script lessons, v3.3.2-v3.3.4
+
+
+NEW GOTCHAS ADDED
+-----------------
+Gotchas were appended directly to Gotchas.txt during this dev session per updated process.
+No separate Gotchas_Append_Session5.txt produced. Entries added:
+
+- PURE ASCII ONLY IN ALL .sh FILES (new) — Unicode in shell scripts causes bash syntax
+  errors on the Pi when transferred via SCP or Dev Docs upload, even in comments
+- NEVER USE BASH HEREDOCS IN SHELL SCRIPTS (new) — bash heredocs (<<) fail silently
+  on the Pi; use printf to build temp files and pass as sys.argv instead
+- ROLLBACK RESTORES .sh FILES FROM SNAPSHOT (new) — installing a fixed rollback.sh
+  then rolling back will restore the old broken version from the snapshot
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.5
+- All services running normally as of session end
+- Next task: No feature work in progress. Recommend confirming rollback DB restore
+  works correctly (live rollback test) before starting new feature work.
+- Known issues: Web service silent-exit mechanism after delayed restart is unverified.
+  Watch on future installs.

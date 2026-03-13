@@ -1,0 +1,82 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: ADMIN COLLAPSE AND HISTORY LIMIT
+======================================================================
+Name: Admin Page Collapsible Sections (server-side) and Package History Row Limit
+Type: Feature
+Date: 2026-03-07 (v3.2.49)
+Sessions: Session 1.3
+Final outcome: Partially reverted — history row limit working; collapse reverted
+  to localStorage. Server-side collapse caused the v3.2.49 monitor crash.
+
+
+BACKGROUND
+----------
+The admin page had collapsible sections that used localStorage for collapse state.
+The user wanted server-side persistence so collapse state follows the account across
+devices. Package History was also extended with a configurable row count selector.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Server-side collapse state broke by dict access bug (v3.2.49):
+The new pref routes in webapp.py used auth.get_current_user().id to get the user ID.
+get_current_user() returns a dict, not an object. .id raises AttributeError; Flask
+catches it and the route returns 500 silently. Every collapse toggle AJAX call failed.
+Admin collapse state never saved. The bug persisted through v3.2.50c which fixed the
+function name (.current_user() to .get_current_user()) but still used .id.
+Fixed in v3.2.50d: auth.get_current_user()["id"].
+
+Admin.html omitted from v3.2.50d package:
+v3.2.50c shipped admin.html with server-side fetch JS.
+v3.2.50d fixed the .id bug in webapp.py but omitted admin.html entirely.
+Pi had working server-side routes but admin.html from v3.2.50c.
+Net result: admin collapse worked after v3.2.50d anyway — routes worked, old JS
+happened to be compatible. But the Pi had inconsistent file state for two packages.
+
+Server-side approach reverted to localStorage in v3.2.50e:
+Multiple failure points in v3.2.49 single package. Decision: revert admin.html to
+localStorage for collapse state. Simpler, zero server round-trips, zero failure modes.
+Server-side approach is architecturally sound but synchronization created too many
+failure points in one package. Deferred for deliberate reimplementation.
+[COMPLETED IN LATER SESSION — see context doc v3.2.95]
+
+MONITOR CRASH introduced by v3.2.49 (see Bug_MetricsChartAndAdminCollapse.txt):
+The user_prefs CREATE TABLE SQL was appended as a second statement inside the same
+c.execute() string as the alerts CREATE TABLE in database.py init_db().
+sqlite3 raises ProgrammingError. No try/except caught it. init_db() crashed on every
+monitor startup → crash loop → no health records written since v3.2.49.
+Fixed in v3.2.50f by splitting into two separate c.execute() calls.
+
+
+WHAT WORKED
+-----------
+USER_PREFS TABLE (database.py):
+user_prefs: user_id, pref_key, pref_value, updated_at
+Routes in webapp.py:
+  GET  /api/prefs/admin_collapsed
+  POST /api/prefs/admin_collapsed
+  GET  /api/prefs/history_limit
+  POST /api/prefs/history_limit
+All use auth.get_current_user()["id"] — dict access, confirmed correct.
+
+PACKAGE HISTORY ROW LIMIT (working, retained):
+Selector: 5 / 10 / 20 / 50 / All. Default 10.
+/api/prefs/history_limit stores per-account in user_prefs.
+patch_manager.html ?limit= query parameter respected by patcher query.
+
+ADMIN COLLAPSE — FINAL STATE (localStorage, v3.2.50e):
+STORAGE_KEY = 'nw-admin-collapsed' in admin.html JavaScript.
+Collapse state stored as comma-separated list of collapsed section IDs.
+State is browser-local. Reliable and zero server dependency.
+
+FILES:
+- database.py — user_prefs table, get_pref/set_pref functions
+- webapp.py — /api/prefs/* routes
+- templates/admin.html — history limit selector, localStorage collapse JS
+- templates/patch_manager.html — Package History limit parameter
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Admin collapse server-side: reverted, deferred.
+  [COMPLETED IN LATER SESSION — check context doc]
+- user_prefs table and routes remain in codebase; ready for additional per-account
+  preferences in future packages.

@@ -1,0 +1,72 @@
+Feature_SecurityLog.txt
+=======================
+FEATURE/BUG HEADER
+------------------
+Name: Security Log — IP Geo Popover + Period Selector
+Type: Feature
+Date worked on: 2026-03-07
+Sessions: Session 2
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+The security log had four summary cards (Unique IPs, Login Attempts, Failed Logins,
+Brute Force Attempts) defaulting to a 24-hour window. The Unique IPs card was
+intentionally designed to be clickable in a prior session but the detail view was
+never built. The backlog item was: "Security log IP detail / geo lookup — click an IP,
+get a popover with geolocation, ISP, whether it's a known bad actor."
+
+The period selector was requested immediately after IP geo was confirmed working.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+No failed approaches.
+
+
+WHAT WORKED
+-----------
+Package v3.2.66 — security_log.html only (no backend changes):
+- Unique IPs card becomes clickable. Opens an IP summary modal.
+- IP summary modal: table of all unique IPs for the selected period with event count,
+  first/last seen timestamps, success vs failure breakdown, LOCAL/EXTERNAL badge
+  (private RFC1918 addresses tagged LOCAL).
+- Each IP row has a 🔍 Lookup button. On click, calls ip-api.com (free, browser-side,
+  CORS allowed) and shows geo results inline: city, region, country, ISP, org, proxy/
+  hosting/mobile flags.
+- IPs in the main event table are also clickable links that trigger the same geo lookup
+  directly (bypassing the summary modal).
+- Private IPs (192.168.x.x etc.) return "private range" from ip-api.com — expected.
+
+ip-api.com notes:
+- Free tier, 45 requests/minute. Fine for manual lookups. Not called on page load.
+- Requests are browser-side. Every IP looked up is sent to ip-api.com. Private IPs
+  are non-routable so no privacy concern for local addresses.
+
+Package v3.2.67 — security_log.html only:
+- Segmented button group added to page header (same style as metrics range selector):
+  24H / 7D / 30D.
+- All four summary card counts recalculate when period changes.
+- Card labels update (e.g. "Logins (7D)").
+- IP modal title updates ("IP Activity (7D)").
+- First/Last Seen in the IP modal switches from HH:MM:SS to MM-DD HH:MM for 7D/30D
+  since time-of-day alone is not useful over multi-day windows.
+- All filtering is client-side — no backend changes needed.
+
+User confirmed v3.2.67: "Glorious."
+
+Original backlog item confirmed matched: geo lookup, ISP, proxy/hosting/mobile flags
+(was described as "known bad actor" indicators in original plan). Two entry paths
+(card modal + event table links) are an enhancement over the original spec.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+External IPs will only be seen if NetWatch is ever exposed beyond the local subnet
+(e.g. VPN access, port forwarding). All current traffic is from local .17/.100/.110
+subnets and will return "private range." The feature is ready when external exposure
+is relevant.
+
+ip-api.com free tier limit (45/min) is fine for manual use. If future sessions add
+auto-geo-lookup on page load, rate limiting will need to be considered.

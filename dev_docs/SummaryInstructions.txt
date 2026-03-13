@@ -1,0 +1,976 @@
+NETWATCH CHAT SUMMARY INSTRUCTIONS
+===================================
+Version: 1.16 | Created: 2026-03-08 | Revised: 2026-03-09
+
+PURPOSE
+-------
+This document tells a Claude instance how to produce properly formatted NetWatch session
+summaries from a chat transcript. Summaries are the primary mechanism for preserving
+context between sessions. They must be accurate, complete, and honest about failures —
+not just a record of successes.
+
+WHAT IS A SESSION
+-----------------
+One chat window = one session. If a chat was split due to context limits and continued
+in a new window, each window is a sub-session (e.g. Session 2.1, Session 2.2). The user
+will tell you the session number when starting a summarization task. If not told, ask.
+Do not infer the session number from the transcript, the context doc, or any other
+source. Even if the transcript content implies a session number, always confirm with
+the user. If the user states the session number when requesting the summary (before
+you ask), that satisfies the confirmation requirement — do not ask again.
+
+WHEN TO CREATE A SUMMARY
+------------------------
+- At the end of every development session before closing the chat
+- When explicitly asked by the user mid-session to capture progress
+- When starting a new session with access to a previous transcript
+
+
+SUMMARY TYPES
+-------------
+Every session produces a base summary. Expanded summaries are also required — not
+optional — for any feature or bug where:
+  - The full file/function detail would not fit comfortably in the base summary, OR
+  - A future session would need more than the base summary to pick up the work cleanly
+
+When in doubt, write the expanded summary. The cost of an unnecessary expanded summary
+is small. The cost of a missing one is a future session starting blind.
+
+1. BASE SUMMARY (ChatSummary_N.txt)
+   One per session. Always loaded at the start of every new session.
+   Must be complete — every important point, no filler. When a session is genuinely
+   large, completeness wins over leanness. Use the SCOPE NOTE to set reader expectations.
+   Never sacrifice completeness for brevity.
+   If a decision was made, it's in here.
+   If something failed, it's in here.
+   If something was deferred, it's in here with the reason.
+   The base summary MUST list all expanded summary filenames produced in that session,
+   with a one-line description of each, in the EXPANDED SUMMARIES PRODUCED section.
+   The filenames listed MUST exactly match the files actually created.
+
+   For large sessions with many intermediate versions, the base summary may compress
+   multi-version arcs: e.g. "v3.2.52–v3.2.60 — Alert system + email icon arc
+   (see Feature_AlertSystem.txt for full detail)" rather than listing each version.
+
+2. EXPANDED SUMMARY (Feature_Name.txt or Bug_Name.txt)
+   One file per named backlog item, unless two items share the same mental model —
+   meaning a reader would need both to work on either. "Same file, same function" is
+   a sufficient condition but not a necessary one.
+   Example of shared mental model: a transactional logging fix that is tightly coupled
+   to an auth feature being tested belongs in the auth feature's expanded summary, not
+   a separate file, because the regression it caused only makes sense in that context.
+
+   Grouping multiple minor arcs into one expanded summary is only acceptable when they
+   genuinely share a mental model. "Too small to warrant their own file" is not a
+   sufficient reason to group unrelated arcs. If minor arcs do not share a mental model
+   but are too small for standalone files, consolidate them into a single file named:
+     Feature_MinorFixesSession_N.txt
+   Label each arc clearly within that file. Do not name the consolidated file after
+   just one of the arcs — the name must signal that it contains multiple items.
+
+   If in doubt, give it its own file.
+   Only loaded when actively working on that specific feature or bug.
+   Failed attempts: summarized briefly — what was tried, why it failed.
+   Successful approach: full detail — every relevant file, function, decision, and gotcha.
+
+   For features where the decision was made in one session but implementation happened
+   in a later session: document the decision and rationale fully in WHAT WAS TRIED AND
+   FAILED or BACKGROUND. In KNOWN LIMITATIONS / DEFERRED ITEMS, note:
+   "[COMPLETED IN LATER SESSION — see context doc / ChatSummary_N.txt]"
+   Do not fabricate implementation detail that is not in the transcript.
+
+UPDATING AN EXISTING EXPANDED SUMMARY
+   If a later session does more work on a feature that already has an expanded summary,
+   update that file rather than creating a new one. Rules for updating:
+   - Do not rewrite or remove existing content. Preserve the original sections intact.
+   - Add a dated revision block at the bottom of the file:
+       UPDATED: YYYY-MM-DD | Session N | vX.X.XX
+       [description of what changed, what was added, what was fixed]
+   - If the update adds new failed attempts, append them to WHAT WAS TRIED AND FAILED
+     under the revision block, not inline with the original content.
+   - If the update resolves a KNOWN LIMITATION, note it in the revision block:
+       "Resolved: [limitation description] — see WHAT WORKED update below"
+     then append the implementation detail to WHAT WORKED.
+   - The FEATURE/BUG HEADER outcome field should be updated to reflect current status.
+
+   If a Feature_MinorFixesSession_N.txt file would contain more than ~5 unrelated arcs,
+   reconsider whether any of them are large enough to warrant their own file. The
+   consolidated file is for genuinely minor items — if it is growing long, split out
+   the largest arc rather than letting the file become unwieldy.
+
+   Within a consolidated file, each arc must open with a standard header:
+     ARC: [Label] (vX.X.XX)
+   The label must be distinct from all other arc labels in the same file. This is what
+   inline pointers in the base summary will reference — the label here and the pointer
+   there must match exactly.
+
+   For features that span many packages and multiple revisits across the same session,
+   write one expanded summary covering the full arc. Organize it chronologically within
+   the WHAT WAS TRIED AND FAILED and WHAT WORKED sections. The feature is the unit,
+   not the package.
+
+   For the expanded summary, instructive churn means: intermediate packages or dead ends
+   that a future session working on this feature would waste time repeating if not warned.
+   The test is: "Would a future Claude working on this feature hit the same dead end?"
+   If yes, document it in WHAT WAS TRIED AND FAILED. If no, omit it.
+
+   Self-introduced regressions that are tightly coupled to a feature (caused by
+   misreading the feature's own code, for example) belong in the same expanded summary
+   as the feature. The test is "same mental model": if understanding the regression
+   requires understanding the feature, keep them together.
+   In all cases, also document the regression in the base summary WHAT WAS ATTEMPTED
+   BUT FAILED with the label "Self-introduced regression:".
+
+MID-SESSION CONTEXT DOC UPDATES
+--------------------------------
+Some sessions produce context doc updates as mid-session deliverables. Two cases:
+
+1. Feature-paired update: Claude generates an updated context doc alongside a feature
+   milestone (e.g. at v3.2.60 after completing alert system work). Note it as part of
+   the feature it accompanied. Not its own arc, not a package.
+
+2. Standalone housekeeping update: Claude generates an updated context doc as an
+   end-of-session or administrative step, not paired with a specific feature. Note it
+   in CURRENT STATE or DECISIONS MADE as "end-of-session context doc update at vX.X.XX."
+   Not its own arc, not a package.
+
+In both cases: these are not packages and the "context doc updates ride with real
+packages" gotcha does not apply. A future session loading ChatSummary_N.txt does not
+need to know these intermediate docs existed — only the final state matters.
+
+
+NAMING CONVENTIONS
+------------------
+Base summaries:      ChatSummary_1.txt, ChatSummary_2.txt, ChatSummary_3.txt
+                     Sub-sessions: ChatSummary_2.1.txt, ChatSummary_2.2.txt
+Expanded summaries:  Feature_DevDocuments.txt, Feature_HostMonitoring.txt
+                     Bug_ExportFix.txt, Bug_PatcherPathResolution.txt
+                     Feature_MinorFixesSession_2.txt  (for consolidated minor arcs)
+Gotchas log:         Gotchas.txt (append only, never rewrite)
+
+
+GOTCHAS.TXT — READ AND WRITE RULES
+------------------------------------
+Before producing any summary:
+- Read Gotchas.txt if available. Note any existing gotchas relevant to this session's work.
+  Reference them in expanded summaries where applicable rather than re-explaining them.
+
+While producing summaries:
+- Identify any new hard-learned lessons from this session — things that wasted time,
+  surprising behavior, rules that must be followed to avoid breakage.
+- Do NOT attempt to produce a merged Gotchas.txt. You may not have the complete
+  existing file during a summarization session — producing a merged file risks
+  overwriting entries you cannot see.
+- Instead, produce a separate file named Gotchas_Append_SessionN.txt containing only
+  the new entries from this session. The user will upload it to dev_docs on the Pi.
+  It will be read automatically at the next dev session start before any work begins.
+  NOTE: Gotchas_Append files are for summarization sessions only. Dev sessions append
+  directly to Gotchas.txt (the full file is always loaded at dev session start).
+- If the provided Gotchas.txt already contains entries from sessions after the one being
+  summarized (identifiable by date or version), do not re-add those entries. Note in
+  the base summary's NEW GOTCHAS ADDED section: "Gotchas.txt already contains entries
+  from later sessions — omitted to avoid duplication."
+- If an existing entry covers the same failure pattern but was written from a
+  later-session perspective that may already include incidents you cannot see: still
+  write the amendment. The date/version header will distinguish your incident from
+  others. Add a note in the append file: "Review for overlap with existing entry
+  before merging — existing entry may already cover related incidents."
+- Each entry format (both new entries and amendments):
+    DATE | VERSION
+    TITLE IN CAPS  (or: AMENDMENT TO: [EXISTING TITLE])
+    One to three sentences describing what happened and what the rule is going forward.
+    ---
+  Amendments must carry a date and version header just like new entries, so the append
+  file is datable when merged. The AMENDMENT TO line replaces the TITLE line only.
+  For non-contiguous incidents sharing the same failure pattern within a session, use a
+  comma-separated list: e.g. DATE | v3.2.75, v3.2.85
+  For cross-session incidents sharing the same failure verb, list both dates and versions:
+  e.g. 2026-03-08, 2026-03-09 | v3.2.75, v3.2.85 — these belong in the same amendment.
+  IMPORTANT: Version numbers alone do not uniquely identify an incident across sessions.
+  The same version number can appear in multiple sessions (e.g. two separate v3.2.75
+  incidents in different sessions). Always include the date in amendment headers so a
+  future reader can distinguish which incident belongs to which session.
+
+- Amendment vs. new entry test:
+  If the failure pattern is the same verb (e.g. "concluded something was broken after a
+  shallow read"), it is an amendment to the existing entry — even if the mechanism differs
+  or the incidents are from different sessions.
+  If the specific rule that prevents recurrence is different, it is a new standalone entry.
+
+- For version numbers in gotcha entries: use only the versions relevant to this session's
+  incident. Do not expand the range to include versions from prior sessions even if a
+  related gotcha entry references them. Each entry documents its own incident independently.
+  Use a range (e.g. DATE | v3.2.85-v3.2.86) for contiguous packages in the same session.
+  Use a comma-separated list for non-contiguous or cross-session incidents.
+  Use DATE | general when no specific version applies.
+
+In the base summary NEW GOTCHAS ADDED section, list the titles of new entries and note
+that they are in Gotchas_Append_SessionN.txt and must be merged into Gotchas.txt.
+
+Examples of what belongs in Gotchas.txt:
+- A fix that broke something that was working
+- A file that cannot be read/written normally (e.g. gunicorn.ctl)
+- A packaging rule that must be followed without exception
+- A behavior of patcher.py, Flask, or the Pi environment that is non-obvious
+- Any "never do this" lesson learned the hard way
+
+GOTCHAS APPEND FILES
+--------------------
+Gotchas_Append_SessionN.txt files are produced during summarization sessions only.
+Upload them to dev_docs via Dev Docs and they will be read automatically at the next
+dev session start in session number order.
+
+To merge into Gotchas.txt (optional, for a clean single file):
+- Download Gotchas.txt from Dev Docs
+- Append the new entries to the bottom
+- Re-upload via Dev Docs
+- The append file can then be deleted
+
+Dev sessions do NOT produce append files — new gotcha entries are appended directly
+to Gotchas.txt during the session (the full file is always loaded at session start).
+
+
+BASE SUMMARY REQUIRED SECTIONS
+-------------------------------
+Each section should be a short paragraph or tight bullet list. No filler sentences.
+
+SESSION HEADER
+  - Session number and date
+  - Starting version: use the version field from the context doc at session start.
+    If the zip version label and the context doc version differ, the context doc is
+    authoritative. Note any discrepancy.
+  - Ending version
+  - One sentence describing what this session was about
+  - SCOPE NOTE (required when session covers 6 or more distinct features or bug arcs):
+    "This session covered N distinct features/arcs. Expanded summaries produced for all
+    major items. Minor items grouped as noted." Omit for sessions with 5 or fewer arcs.
+    What counts as distinct: separate named backlog items, or separate root causes even
+    if they touch the same area. Related sub-issues within one feature arc are not
+    distinct — they are part of that arc. Self-introduced regressions that share a mental
+    model with the feature that caused them (e.g. a regression during password reset work
+    that only makes sense in that context) count as part of that feature arc, not as a
+    separate arc.
+
+WHAT WAS ACCOMPLISHED
+  - Completed features and bugs fixed, listed in chronological order by version number
+  - Each item gets one sentence of context
+  - Include version numbers where relevant
+  - Minor items grouped into a combined expanded summary may be listed together
+  - For large sessions, multi-version arcs may be compressed:
+    "v3.2.52–v3.2.60 — Alert system arc (see Feature_AlertSystem.txt)"
+  - When referencing a feature that has an expanded summary, always include an inline
+    pointer at the point of reference:
+    Single-feature file:    "... (see Feature_AlertSystem.txt)"
+    Consolidated file:      "... (see Feature_MinorFixesSession_2.txt — "Backfill Bug")"
+    Arc labels used in inline pointers must exactly match the ARC: header in the
+    consolidated file. Arc labels within a single consolidated file must be distinct
+    from each other.
+
+WHAT WAS ATTEMPTED BUT FAILED
+  - What was tried, what happened, and why it didn't work
+  - Do not omit failures — they are as important as successes
+  - If something failed and was later fixed in the same session, note both
+  - Self-introduced regression: label cases where working code was broken and repaired
+    in the same session. Note what broke, what caused it, and how it was repaired.
+    Also document in the relevant expanded summary.
+  - For packages that supersede earlier ones in the same session, describe only the net
+    final behavior. Mention intermediate versions only if the churn is instructive
+    (a future session would waste time repeating the same dead end without the warning).
+
+DECISIONS MADE
+  - Anything deliberately chosen over an alternative, with the reason
+  - Anything explicitly deferred and why
+  - Items raised but not acted on belong here, not in BACKLOG CHANGES
+  - Standalone end-of-session context doc updates belong here:
+    "End-of-session context doc update at vX.X.XX — [brief description of what changed]"
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+  - Things that came up but couldn't be verified
+  - Things that need follow-up in a future session
+  - Anything flagged as "check this later"
+  - [UNVERIFIED] items from this session belong here — they are not resolved before
+    the summary is finalized. They persist until a future session confirms them.
+    When the context doc resolves a disputed item, note that the context doc is
+    the authoritative resolution.
+  - Judgment calls made during summarization that were non-obvious belong here too,
+    with a note explaining the decision and what the alternative interpretation was.
+  - If a transcript contained a large number of rendering artifacts (more than ~5),
+    group them in a single OPEN QUESTIONS entry rather than flagging each individually:
+    "Approximately N 'Show more' artifacts were present throughout the transcript.
+    Most appeared cosmetic based on surrounding content. Sections where content may
+    genuinely be missing: [list sections]."
+  - If the context doc contains a large block of post-session work that never appeared
+    in this transcript, reference it collectively:
+    "[COMPLETED IN LATER SESSIONS — vX.X.XX–vX.X.XX visible in context doc but not
+    present in this transcript. Belong to other sessions.]"
+    Do not enumerate or detail work you cannot confirm from this transcript.
+
+BACKLOG CHANGES
+  - Items marked complete this session
+  - Items added to backlog this session
+  - Items whose status changed
+  - Items identified and completed within the same session: list once under "completed"
+    with a note "(identified and resolved this session)". Do not also list under "added."
+  - Only list items this session explicitly worked on or that the transcript explicitly
+    referenced. Items mentioned in passing but not acted on go in DECISIONS MADE.
+  - Items that were worked on this session but appear ✅ in the context doc were
+    completed in a later session. Mark them here as they stood at end of this session
+    (open or partial), then add: [COMPLETED IN LATER SESSION — see context doc].
+    This is intentional — the summary reflects this session's state, not current state.
+    When the context doc is more than ~5 versions ahead of the transcript end, prefer
+    a collective reference in OPEN QUESTIONS over tagging every individual backlog item.
+    Individual tagging is for items explicitly worked on this session; bulk reference
+    handles the rest.
+  - Items that appear only in the context doc and never in this transcript at all:
+    do not list them individually. Reference them collectively in OPEN QUESTIONS.
+  - Conflicts flagged with [CONFLICT] on its own line, followed by one-sentence explanation
+
+EXPANDED SUMMARIES PRODUCED
+  - List every expanded summary file produced for this session
+  - One line per file: filename — one sentence describing what it covers
+  - Filenames listed here MUST exactly match files actually created
+  - If none were produced, write "None — all detail fits in base summary"
+
+NEW GOTCHAS ADDED
+  - List any new gotcha entries from this session
+  - One line per entry: the title, and whether it is new or an amendment
+  - For summarization sessions: note that entries are in Gotchas_Append_SessionN.txt and must be merged into Gotchas.txt
+  - For dev sessions: entries should already be in Gotchas.txt (appended directly during the session)
+
+CURRENT STATE
+  - Pi version at end of session
+  - What the very next task is, determined in this order:
+    1. If transcript ends cleanly AND context doc is close to transcript end version
+       (within ~3 versions), use what the transcript says is next
+    2. If transcript ends cleanly but context doc is substantially ahead, the
+       transcript-end next task is stale — fall through to step 4 and note the staleness
+    3. If transcript ends mid-arc and context doc confirms that arc later completed,
+       note: "Transcript ends mid-arc on [feature]. Context doc confirms completed at
+       [version]. Next task per context doc: [task]."
+    4. If context doc has a CurrentTask.txt or explicit next-task field, use it
+    5. If context doc is substantially ahead and has no next-task field, use the first
+       incomplete backlog item and note: "Inferred from backlog — context doc is ahead
+       of this session. Verify current task at session start."
+       When the context doc is more than ~5 versions ahead and the backlog has changed
+       substantially, add: "Recommend incoming session ask the user to confirm the
+       current task verbally rather than relying on this inference."
+  - Any known issues with the current install
+
+
+EXPANDED SUMMARY REQUIRED SECTIONS
+------------------------------------
+FEATURE/BUG HEADER
+  - Name, type (feature or bug), date(s) worked on
+  - Which sessions touched this (e.g. Session 3, Session 4)
+  - Final outcome (complete / partial / deferred)
+
+BACKGROUND
+  - Why this was needed, what problem it solves
+  - Any relevant prior context
+
+WHAT WAS TRIED AND FAILED
+  - Each failed approach: one short paragraph
+  - What was tried, what the result was, why it failed
+  - Do not editorialize — just facts
+  - Reference Gotchas.txt entries where relevant rather than re-explaining
+  - Self-introduced regressions: include a dedicated subsection labeled
+    "Self-introduced regression:" describing what broke, cause, and repair
+  - Instructive churn: document dead ends a future session would waste time repeating.
+    Test: "Would a future Claude working on this hit the same dead end?" If yes, include.
+
+WHAT WORKED
+  - Full detail on the successful approach
+  - Every file modified and what changed
+  - Every function added or changed and what it does
+  - Any gotchas encountered during implementation
+  - Package numbers this shipped in
+  - If a feature was re-implemented after a self-introduced regression, and the
+    transcript does not explicitly show the user confirming the repaired behavior,
+    flag it: "[UNVERIFIED — re-test confirmation not explicit in transcript]"
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+  - Anything deliberately left incomplete
+  - The reason it was deferred
+  - What would be needed to complete it
+
+
+CROSS-CHECK REQUIREMENTS
+------------------------
+Before finalizing any summary:
+1. If NetWatch_AI_Context_latest.txt is available, compare backlog changes against it
+   and flag any conflicts. If it does not exist yet, skip this check and note it was
+   skipped.
+   If both an uploaded context doc AND an in-transcript context dump exist, use the
+   uploaded context doc for cross-checking. Use the in-transcript dump only to
+   understand the session's starting state. The uploaded file is authoritative
+   regardless of its internal version label — even if the context doc is labeled
+   "as of v3.2.92" and the transcript ends at v3.2.88, the uploaded file is still
+   the cross-check authority. Do not attempt to reconcile the internal label with
+   the transcript end version.
+   If the context doc is ahead of the transcript, treat the transcript as authoritative
+   for what happened. Do not backfill from the context doc. Items this session left
+   open that the context doc shows complete: mark open with
+   [COMPLETED IN LATER SESSION — see context doc].
+2. Mark ambiguous outcomes:
+   [UNVERIFIED] — could not confirm from transcript whether this succeeded
+3. Do not guess. Do not assume. If unsure, flag it.
+
+
+TRANSCRIPT HANDLING
+-------------------
+If the transcript begins with an AI context dump or summary block — whether as the
+first message or embedded in the chat flow — treat it as background for understanding
+the session's starting state only. It is not authoritative for what happened in the
+session. If an uploaded context doc was also provided, the uploaded file takes
+precedence over the in-transcript dump for cross-checking purposes.
+
+If the transcript contains rendering artifacts — "Show more" buttons, image references
+with no content, truncated lines, or collapsed UI elements:
+- Terminal output truncations (bash, sqlite3, journalctl, etc.): if the user's next
+  message continues coherently, treat as cosmetic. No flag needed.
+- Prose truncations: if surrounding lines make the content clear, no flag needed.
+  If content is genuinely absent or uncertain, flag with:
+    [TRANSCRIPT RENDERING ARTIFACT — possible missing content]
+- If artifacts are numerous (more than ~5 non-terminal), group them in OPEN QUESTIONS
+  rather than flagging each individually. Note which sections had potentially genuine
+  truncations.
+- Do not guess at missing content. Flag in expanded summary too if the artifact
+  falls in a section relevant to a feature or decision.
+
+If the transcript is too large to process in one session, split it and produce:
+  ChatSummary_2.1.txt (first half) and ChatSummary_2.2.txt (second half)
+These are later treated as a single session's record.
+
+
+WHAT TO EXCLUDE
+---------------
+- Conversational filler and pleasantries
+- Repeated explanations of the same concept
+- Anything already fully captured in the context doc (reference it, don't repeat it)
+- Speculation that didn't lead anywhere
+- Non-instructive superseded package versions within the same session
+- Backlog items or decisions that cannot be confirmed from the transcript
+- Work visible in the context doc that never appeared in this transcript
+- Mid-session context doc updates (note as part of feature or in DECISIONS MADE)
+
+
+FINAL CHECKLIST
+---------------
+Before declaring the summary complete, verify each item:
+
+[ ] Base summary produced (ChatSummary_N.txt)
+[ ] All expanded summaries listed in EXPANDED SUMMARIES PRODUCED actually exist as files
+[ ] Filenames in EXPANDED SUMMARIES PRODUCED exactly match created files
+[ ] Gotchas entries: for summarization sessions, Gotchas_Append_SessionN.txt produced; for dev sessions, entries appended directly to Gotchas.txt
+[ ] NEW GOTCHAS ADDED section in base summary lists all new/amended entries
+[ ] [UNVERIFIED] items placed in OPEN QUESTIONS
+[ ] [COMPLETED IN LATER SESSION] tags applied where context doc is ahead
+[ ] Post-session work blocks (never in transcript) referenced collectively in OPEN QUESTIONS
+[ ] [CONFLICT] tags applied for genuine conflicts between transcript and context doc
+[ ] CURRENT STATE reflects correct next task using priority order
+[ ] Session number confirmed with user (not inferred)
+[ ] SCOPE NOTE included if session covered 6 or more distinct arcs
+[ ] No filenames in summary reference files that were not created
+[ ] Same-session add-and-complete items listed once under completed only
+[ ] Inline pointers added in WHAT WAS ACCOMPLISHED for every item with an expanded summary
+[ ] Arc labels in consolidated files are distinct and match inline pointers exactly
+[ ] Existing expanded summaries updated via revision block if more work done this session
+
+
+FORMAT RULES
+------------
+- Plain text (.txt)
+- Section headers in ALL CAPS with a dashed underline
+- Bullet points for lists, short paragraphs for narrative
+- Dates in YYYY-MM-DD format
+- Version numbers always prefixed with v (e.g. v3.2.93)
+- Chronological order (by version number) within WHAT WAS ACCOMPLISHED
+- Keep line width under 100 characters
+NETWATCH CHAT SUMMARY INSTRUCTIONS
+===================================
+Version: 1.16 | Created: 2026-03-08 | Revised: 2026-03-09
+
+PURPOSE
+-------
+This document tells a Claude instance how to produce properly formatted NetWatch session
+summaries from a chat transcript. Summaries are the primary mechanism for preserving
+context between sessions. They must be accurate, complete, and honest about failures —
+not just a record of successes.
+
+WHAT IS A SESSION
+-----------------
+One chat window = one session. If a chat was split due to context limits and continued
+in a new window, each window is a sub-session (e.g. Session 2.1, Session 2.2). The user
+will tell you the session number when starting a summarization task. If not told, ask.
+Do not infer the session number from the transcript, the context doc, or any other
+source. Even if the transcript content implies a session number, always confirm with
+the user. If the user states the session number when requesting the summary (before
+you ask), that satisfies the confirmation requirement — do not ask again.
+
+WHEN TO CREATE A SUMMARY
+------------------------
+- At the end of every development session before closing the chat
+- When explicitly asked by the user mid-session to capture progress
+- When starting a new session with access to a previous transcript
+
+
+SUMMARY TYPES
+-------------
+Every session produces a base summary. Expanded summaries are also required — not
+optional — for any feature or bug where:
+  - The full file/function detail would not fit comfortably in the base summary, OR
+  - A future session would need more than the base summary to pick up the work cleanly
+
+When in doubt, write the expanded summary. The cost of an unnecessary expanded summary
+is small. The cost of a missing one is a future session starting blind.
+
+1. BASE SUMMARY (ChatSummary_N.txt)
+   One per session. Always loaded at the start of every new session.
+   Must be complete — every important point, no filler. When a session is genuinely
+   large, completeness wins over leanness. Use the SCOPE NOTE to set reader expectations.
+   Never sacrifice completeness for brevity.
+   If a decision was made, it's in here.
+   If something failed, it's in here.
+   If something was deferred, it's in here with the reason.
+   The base summary MUST list all expanded summary filenames produced in that session,
+   with a one-line description of each, in the EXPANDED SUMMARIES PRODUCED section.
+   The filenames listed MUST exactly match the files actually created.
+
+   For large sessions with many intermediate versions, the base summary may compress
+   multi-version arcs: e.g. "v3.2.52–v3.2.60 — Alert system + email icon arc
+   (see Feature_AlertSystem.txt for full detail)" rather than listing each version.
+
+2. EXPANDED SUMMARY (Feature_Name.txt or Bug_Name.txt)
+   One file per named backlog item, unless two items share the same mental model —
+   meaning a reader would need both to work on either. "Same file, same function" is
+   a sufficient condition but not a necessary one.
+   Example of shared mental model: a transactional logging fix that is tightly coupled
+   to an auth feature being tested belongs in the auth feature's expanded summary, not
+   a separate file, because the regression it caused only makes sense in that context.
+
+   Grouping multiple minor arcs into one expanded summary is only acceptable when they
+   genuinely share a mental model. "Too small to warrant their own file" is not a
+   sufficient reason to group unrelated arcs. If minor arcs do not share a mental model
+   but are too small for standalone files, consolidate them into a single file named:
+     Feature_MinorFixesSession_N.txt
+   Label each arc clearly within that file. Do not name the consolidated file after
+   just one of the arcs — the name must signal that it contains multiple items.
+
+   If in doubt, give it its own file.
+   Only loaded when actively working on that specific feature or bug.
+   Failed attempts: summarized briefly — what was tried, why it failed.
+   Successful approach: full detail — every relevant file, function, decision, and gotcha.
+
+   For features where the decision was made in one session but implementation happened
+   in a later session: document the decision and rationale fully in WHAT WAS TRIED AND
+   FAILED or BACKGROUND. In KNOWN LIMITATIONS / DEFERRED ITEMS, note:
+   "[COMPLETED IN LATER SESSION — see context doc / ChatSummary_N.txt]"
+   Do not fabricate implementation detail that is not in the transcript.
+
+UPDATING AN EXISTING EXPANDED SUMMARY
+   If a later session does more work on a feature that already has an expanded summary,
+   update that file rather than creating a new one. Rules for updating:
+   - Do not rewrite or remove existing content. Preserve the original sections intact.
+   - Add a dated revision block at the bottom of the file:
+       UPDATED: YYYY-MM-DD | Session N | vX.X.XX
+       [description of what changed, what was added, what was fixed]
+   - If the update adds new failed attempts, append them to WHAT WAS TRIED AND FAILED
+     under the revision block, not inline with the original content.
+   - If the update resolves a KNOWN LIMITATION, note it in the revision block:
+       "Resolved: [limitation description] — see WHAT WORKED update below"
+     then append the implementation detail to WHAT WORKED.
+   - The FEATURE/BUG HEADER outcome field should be updated to reflect current status.
+
+   If a Feature_MinorFixesSession_N.txt file would contain more than ~5 unrelated arcs,
+   reconsider whether any of them are large enough to warrant their own file. The
+   consolidated file is for genuinely minor items — if it is growing long, split out
+   the largest arc rather than letting the file become unwieldy.
+
+   Within a consolidated file, each arc must open with a standard header:
+     ARC: [Label] (vX.X.XX)
+   The label must be distinct from all other arc labels in the same file. This is what
+   inline pointers in the base summary will reference — the label here and the pointer
+   there must match exactly.
+
+   For features that span many packages and multiple revisits across the same session,
+   write one expanded summary covering the full arc. Organize it chronologically within
+   the WHAT WAS TRIED AND FAILED and WHAT WORKED sections. The feature is the unit,
+   not the package.
+
+   For the expanded summary, instructive churn means: intermediate packages or dead ends
+   that a future session working on this feature would waste time repeating if not warned.
+   The test is: "Would a future Claude working on this feature hit the same dead end?"
+   If yes, document it in WHAT WAS TRIED AND FAILED. If no, omit it.
+
+   Self-introduced regressions that are tightly coupled to a feature (caused by
+   misreading the feature's own code, for example) belong in the same expanded summary
+   as the feature. The test is "same mental model": if understanding the regression
+   requires understanding the feature, keep them together.
+   In all cases, also document the regression in the base summary WHAT WAS ATTEMPTED
+   BUT FAILED with the label "Self-introduced regression:".
+
+MID-SESSION CONTEXT DOC UPDATES
+--------------------------------
+Some sessions produce context doc updates as mid-session deliverables. Two cases:
+
+1. Feature-paired update: Claude generates an updated context doc alongside a feature
+   milestone (e.g. at v3.2.60 after completing alert system work). Note it as part of
+   the feature it accompanied. Not its own arc, not a package.
+
+2. Standalone housekeeping update: Claude generates an updated context doc as an
+   end-of-session or administrative step, not paired with a specific feature. Note it
+   in CURRENT STATE or DECISIONS MADE as "end-of-session context doc update at vX.X.XX."
+   Not its own arc, not a package.
+
+In both cases: these are not packages and the "context doc updates ride with real
+packages" gotcha does not apply. A future session loading ChatSummary_N.txt does not
+need to know these intermediate docs existed — only the final state matters.
+
+
+NAMING CONVENTIONS
+------------------
+Base summaries:      ChatSummary_1.txt, ChatSummary_2.txt, ChatSummary_3.txt
+                     Sub-sessions: ChatSummary_2.1.txt, ChatSummary_2.2.txt
+Expanded summaries:  Feature_DevDocuments.txt, Feature_HostMonitoring.txt
+                     Bug_ExportFix.txt, Bug_PatcherPathResolution.txt
+                     Feature_MinorFixesSession_2.txt  (for consolidated minor arcs)
+Gotchas log:         Gotchas.txt (append only, never rewrite)
+
+
+GOTCHAS.TXT — READ AND WRITE RULES
+------------------------------------
+Before producing any summary:
+- Read Gotchas.txt if available. Note any existing gotchas relevant to this session's work.
+  Reference them in expanded summaries where applicable rather than re-explaining them.
+
+While producing summaries:
+- Identify any new hard-learned lessons from this session — things that wasted time,
+  surprising behavior, rules that must be followed to avoid breakage.
+- Do NOT attempt to produce a merged Gotchas.txt. You may not have the complete
+  existing file during a summarization session — producing a merged file risks
+  overwriting entries you cannot see.
+- Instead, produce a separate file named Gotchas_Append_SessionN.txt containing only
+  the new entries from this session. The user will upload it to dev_docs on the Pi.
+  It will be read automatically at the next dev session start before any work begins.
+  NOTE: Gotchas_Append files are for summarization sessions only. Dev sessions append
+  directly to Gotchas.txt (the full file is always loaded at dev session start).
+- If the provided Gotchas.txt already contains entries from sessions after the one being
+  summarized (identifiable by date or version), do not re-add those entries. Note in
+  the base summary's NEW GOTCHAS ADDED section: "Gotchas.txt already contains entries
+  from later sessions — omitted to avoid duplication."
+- If an existing entry covers the same failure pattern but was written from a
+  later-session perspective that may already include incidents you cannot see: still
+  write the amendment. The date/version header will distinguish your incident from
+  others. Add a note in the append file: "Review for overlap with existing entry
+  before merging — existing entry may already cover related incidents."
+- Each entry format (both new entries and amendments):
+    DATE | VERSION
+    TITLE IN CAPS  (or: AMENDMENT TO: [EXISTING TITLE])
+    One to three sentences describing what happened and what the rule is going forward.
+    ---
+  Amendments must carry a date and version header just like new entries, so the append
+  file is datable when merged. The AMENDMENT TO line replaces the TITLE line only.
+  For non-contiguous incidents sharing the same failure pattern within a session, use a
+  comma-separated list: e.g. DATE | v3.2.75, v3.2.85
+  For cross-session incidents sharing the same failure verb, list both dates and versions:
+  e.g. 2026-03-08, 2026-03-09 | v3.2.75, v3.2.85 — these belong in the same amendment.
+  IMPORTANT: Version numbers alone do not uniquely identify an incident across sessions.
+  The same version number can appear in multiple sessions (e.g. two separate v3.2.75
+  incidents in different sessions). Always include the date in amendment headers so a
+  future reader can distinguish which incident belongs to which session.
+
+- Amendment vs. new entry test:
+  If the failure pattern is the same verb (e.g. "concluded something was broken after a
+  shallow read"), it is an amendment to the existing entry — even if the mechanism differs
+  or the incidents are from different sessions.
+  If the specific rule that prevents recurrence is different, it is a new standalone entry.
+
+- For version numbers in gotcha entries: use only the versions relevant to this session's
+  incident. Do not expand the range to include versions from prior sessions even if a
+  related gotcha entry references them. Each entry documents its own incident independently.
+  Use a range (e.g. DATE | v3.2.85-v3.2.86) for contiguous packages in the same session.
+  Use a comma-separated list for non-contiguous or cross-session incidents.
+  Use DATE | general when no specific version applies.
+
+In the base summary NEW GOTCHAS ADDED section, list the titles of new entries and note
+that they are in Gotchas_Append_SessionN.txt and must be merged into Gotchas.txt.
+
+Examples of what belongs in Gotchas.txt:
+- A fix that broke something that was working
+- A file that cannot be read/written normally (e.g. gunicorn.ctl)
+- A packaging rule that must be followed without exception
+- A behavior of patcher.py, Flask, or the Pi environment that is non-obvious
+- Any "never do this" lesson learned the hard way
+
+GOTCHAS APPEND FILES
+--------------------
+Gotchas_Append_SessionN.txt files are produced during summarization sessions only.
+Upload them to dev_docs via Dev Docs and they will be read automatically at the next
+dev session start in session number order.
+
+To merge into Gotchas.txt (optional, for a clean single file):
+- Download Gotchas.txt from Dev Docs
+- Append the new entries to the bottom
+- Re-upload via Dev Docs
+- The append file can then be deleted
+
+Dev sessions do NOT produce append files — new gotcha entries are appended directly
+to Gotchas.txt during the session (the full file is always loaded at session start).
+
+
+BASE SUMMARY REQUIRED SECTIONS
+-------------------------------
+Each section should be a short paragraph or tight bullet list. No filler sentences.
+
+SESSION HEADER
+  - Session number and date
+  - Starting version: use the version field from the context doc at session start.
+    If the zip version label and the context doc version differ, the context doc is
+    authoritative. Note any discrepancy.
+  - Ending version
+  - One sentence describing what this session was about
+  - SCOPE NOTE (required when session covers 6 or more distinct features or bug arcs):
+    "This session covered N distinct features/arcs. Expanded summaries produced for all
+    major items. Minor items grouped as noted." Omit for sessions with 5 or fewer arcs.
+    What counts as distinct: separate named backlog items, or separate root causes even
+    if they touch the same area. Related sub-issues within one feature arc are not
+    distinct — they are part of that arc. Self-introduced regressions that share a mental
+    model with the feature that caused them (e.g. a regression during password reset work
+    that only makes sense in that context) count as part of that feature arc, not as a
+    separate arc.
+
+WHAT WAS ACCOMPLISHED
+  - Completed features and bugs fixed, listed in chronological order by version number
+  - Each item gets one sentence of context
+  - Include version numbers where relevant
+  - Minor items grouped into a combined expanded summary may be listed together
+  - For large sessions, multi-version arcs may be compressed:
+    "v3.2.52–v3.2.60 — Alert system arc (see Feature_AlertSystem.txt)"
+  - When referencing a feature that has an expanded summary, always include an inline
+    pointer at the point of reference:
+    Single-feature file:    "... (see Feature_AlertSystem.txt)"
+    Consolidated file:      "... (see Feature_MinorFixesSession_2.txt — "Backfill Bug")"
+    Arc labels used in inline pointers must exactly match the ARC: header in the
+    consolidated file. Arc labels within a single consolidated file must be distinct
+    from each other.
+
+WHAT WAS ATTEMPTED BUT FAILED
+  - What was tried, what happened, and why it didn't work
+  - Do not omit failures — they are as important as successes
+  - If something failed and was later fixed in the same session, note both
+  - Self-introduced regression: label cases where working code was broken and repaired
+    in the same session. Note what broke, what caused it, and how it was repaired.
+    Also document in the relevant expanded summary.
+  - For packages that supersede earlier ones in the same session, describe only the net
+    final behavior. Mention intermediate versions only if the churn is instructive
+    (a future session would waste time repeating the same dead end without the warning).
+
+DECISIONS MADE
+  - Anything deliberately chosen over an alternative, with the reason
+  - Anything explicitly deferred and why
+  - Items raised but not acted on belong here, not in BACKLOG CHANGES
+  - Standalone end-of-session context doc updates belong here:
+    "End-of-session context doc update at vX.X.XX — [brief description of what changed]"
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+  - Things that came up but couldn't be verified
+  - Things that need follow-up in a future session
+  - Anything flagged as "check this later"
+  - [UNVERIFIED] items from this session belong here — they are not resolved before
+    the summary is finalized. They persist until a future session confirms them.
+    When the context doc resolves a disputed item, note that the context doc is
+    the authoritative resolution.
+  - Judgment calls made during summarization that were non-obvious belong here too,
+    with a note explaining the decision and what the alternative interpretation was.
+  - If a transcript contained a large number of rendering artifacts (more than ~5),
+    group them in a single OPEN QUESTIONS entry rather than flagging each individually:
+    "Approximately N 'Show more' artifacts were present throughout the transcript.
+    Most appeared cosmetic based on surrounding content. Sections where content may
+    genuinely be missing: [list sections]."
+  - If the context doc contains a large block of post-session work that never appeared
+    in this transcript, reference it collectively:
+    "[COMPLETED IN LATER SESSIONS — vX.X.XX–vX.X.XX visible in context doc but not
+    present in this transcript. Belong to other sessions.]"
+    Do not enumerate or detail work you cannot confirm from this transcript.
+
+BACKLOG CHANGES
+  - Items marked complete this session
+  - Items added to backlog this session
+  - Items whose status changed
+  - Items identified and completed within the same session: list once under "completed"
+    with a note "(identified and resolved this session)". Do not also list under "added."
+  - Only list items this session explicitly worked on or that the transcript explicitly
+    referenced. Items mentioned in passing but not acted on go in DECISIONS MADE.
+  - Items that were worked on this session but appear ✅ in the context doc were
+    completed in a later session. Mark them here as they stood at end of this session
+    (open or partial), then add: [COMPLETED IN LATER SESSION — see context doc].
+    This is intentional — the summary reflects this session's state, not current state.
+    When the context doc is more than ~5 versions ahead of the transcript end, prefer
+    a collective reference in OPEN QUESTIONS over tagging every individual backlog item.
+    Individual tagging is for items explicitly worked on this session; bulk reference
+    handles the rest.
+  - Items that appear only in the context doc and never in this transcript at all:
+    do not list them individually. Reference them collectively in OPEN QUESTIONS.
+  - Conflicts flagged with [CONFLICT] on its own line, followed by one-sentence explanation
+
+EXPANDED SUMMARIES PRODUCED
+  - List every expanded summary file produced for this session
+  - One line per file: filename — one sentence describing what it covers
+  - Filenames listed here MUST exactly match files actually created
+  - If none were produced, write "None — all detail fits in base summary"
+
+NEW GOTCHAS ADDED
+  - List any new gotcha entries from this session
+  - One line per entry: the title, and whether it is new or an amendment
+  - For summarization sessions: note that entries are in Gotchas_Append_SessionN.txt and must be merged into Gotchas.txt
+  - For dev sessions: entries should already be in Gotchas.txt (appended directly during the session)
+
+CURRENT STATE
+  - Pi version at end of session
+  - What the very next task is, determined in this order:
+    1. If transcript ends cleanly AND context doc is close to transcript end version
+       (within ~3 versions), use what the transcript says is next
+    2. If transcript ends cleanly but context doc is substantially ahead, the
+       transcript-end next task is stale — fall through to step 4 and note the staleness
+    3. If transcript ends mid-arc and context doc confirms that arc later completed,
+       note: "Transcript ends mid-arc on [feature]. Context doc confirms completed at
+       [version]. Next task per context doc: [task]."
+    4. If context doc has a CurrentTask.txt or explicit next-task field, use it
+    5. If context doc is substantially ahead and has no next-task field, use the first
+       incomplete backlog item and note: "Inferred from backlog — context doc is ahead
+       of this session. Verify current task at session start."
+       When the context doc is more than ~5 versions ahead and the backlog has changed
+       substantially, add: "Recommend incoming session ask the user to confirm the
+       current task verbally rather than relying on this inference."
+  - Any known issues with the current install
+
+
+EXPANDED SUMMARY REQUIRED SECTIONS
+------------------------------------
+FEATURE/BUG HEADER
+  - Name, type (feature or bug), date(s) worked on
+  - Which sessions touched this (e.g. Session 3, Session 4)
+  - Final outcome (complete / partial / deferred)
+
+BACKGROUND
+  - Why this was needed, what problem it solves
+  - Any relevant prior context
+
+WHAT WAS TRIED AND FAILED
+  - Each failed approach: one short paragraph
+  - What was tried, what the result was, why it failed
+  - Do not editorialize — just facts
+  - Reference Gotchas.txt entries where relevant rather than re-explaining
+  - Self-introduced regressions: include a dedicated subsection labeled
+    "Self-introduced regression:" describing what broke, cause, and repair
+  - Instructive churn: document dead ends a future session would waste time repeating.
+    Test: "Would a future Claude working on this hit the same dead end?" If yes, include.
+
+WHAT WORKED
+  - Full detail on the successful approach
+  - Every file modified and what changed
+  - Every function added or changed and what it does
+  - Any gotchas encountered during implementation
+  - Package numbers this shipped in
+  - If a feature was re-implemented after a self-introduced regression, and the
+    transcript does not explicitly show the user confirming the repaired behavior,
+    flag it: "[UNVERIFIED — re-test confirmation not explicit in transcript]"
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+  - Anything deliberately left incomplete
+  - The reason it was deferred
+  - What would be needed to complete it
+
+
+CROSS-CHECK REQUIREMENTS
+------------------------
+Before finalizing any summary:
+1. If NetWatch_AI_Context_latest.txt is available, compare backlog changes against it
+   and flag any conflicts. If it does not exist yet, skip this check and note it was
+   skipped.
+   If both an uploaded context doc AND an in-transcript context dump exist, use the
+   uploaded context doc for cross-checking. Use the in-transcript dump only to
+   understand the session's starting state. The uploaded file is authoritative
+   regardless of its internal version label — even if the context doc is labeled
+   "as of v3.2.92" and the transcript ends at v3.2.88, the uploaded file is still
+   the cross-check authority. Do not attempt to reconcile the internal label with
+   the transcript end version.
+   If the context doc is ahead of the transcript, treat the transcript as authoritative
+   for what happened. Do not backfill from the context doc. Items this session left
+   open that the context doc shows complete: mark open with
+   [COMPLETED IN LATER SESSION — see context doc].
+2. Mark ambiguous outcomes:
+   [UNVERIFIED] — could not confirm from transcript whether this succeeded
+3. Do not guess. Do not assume. If unsure, flag it.
+
+
+TRANSCRIPT HANDLING
+-------------------
+If the transcript begins with an AI context dump or summary block — whether as the
+first message or embedded in the chat flow — treat it as background for understanding
+the session's starting state only. It is not authoritative for what happened in the
+session. If an uploaded context doc was also provided, the uploaded file takes
+precedence over the in-transcript dump for cross-checking purposes.
+
+If the transcript contains rendering artifacts — "Show more" buttons, image references
+with no content, truncated lines, or collapsed UI elements:
+- Terminal output truncations (bash, sqlite3, journalctl, etc.): if the user's next
+  message continues coherently, treat as cosmetic. No flag needed.
+- Prose truncations: if surrounding lines make the content clear, no flag needed.
+  If content is genuinely absent or uncertain, flag with:
+    [TRANSCRIPT RENDERING ARTIFACT — possible missing content]
+- If artifacts are numerous (more than ~5 non-terminal), group them in OPEN QUESTIONS
+  rather than flagging each individually. Note which sections had potentially genuine
+  truncations.
+- Do not guess at missing content. Flag in expanded summary too if the artifact
+  falls in a section relevant to a feature or decision.
+
+If the transcript is too large to process in one session, split it and produce:
+  ChatSummary_2.1.txt (first half) and ChatSummary_2.2.txt (second half)
+These are later treated as a single session's record.
+
+
+WHAT TO EXCLUDE
+---------------
+- Conversational filler and pleasantries
+- Repeated explanations of the same concept
+- Anything already fully captured in the context doc (reference it, don't repeat it)
+- Speculation that didn't lead anywhere
+- Non-instructive superseded package versions within the same session
+- Backlog items or decisions that cannot be confirmed from the transcript
+- Work visible in the context doc that never appeared in this transcript
+- Mid-session context doc updates (note as part of feature or in DECISIONS MADE)
+
+
+FINAL CHECKLIST
+---------------
+Before declaring the summary complete, verify each item:
+
+[ ] Base summary produced (ChatSummary_N.txt)
+[ ] All expanded summaries listed in EXPANDED SUMMARIES PRODUCED actually exist as files
+[ ] Filenames in EXPANDED SUMMARIES PRODUCED exactly match created files
+[ ] Gotchas entries: for summarization sessions, Gotchas_Append_SessionN.txt produced; for dev sessions, entries appended directly to Gotchas.txt
+[ ] NEW GOTCHAS ADDED section in base summary lists all new/amended entries
+[ ] [UNVERIFIED] items placed in OPEN QUESTIONS
+[ ] [COMPLETED IN LATER SESSION] tags applied where context doc is ahead
+[ ] Post-session work blocks (never in transcript) referenced collectively in OPEN QUESTIONS
+[ ] [CONFLICT] tags applied for genuine conflicts between transcript and context doc
+[ ] CURRENT STATE reflects correct next task using priority order
+[ ] Session number confirmed with user (not inferred)
+[ ] SCOPE NOTE included if session covered 6 or more distinct arcs
+[ ] No filenames in summary reference files that were not created
+[ ] Same-session add-and-complete items listed once under completed only
+[ ] Inline pointers added in WHAT WAS ACCOMPLISHED for every item with an expanded summary
+[ ] Arc labels in consolidated files are distinct and match inline pointers exactly
+[ ] Existing expanded summaries updated via revision block if more work done this session
+
+
+FORMAT RULES
+------------
+- Plain text (.txt)
+- Section headers in ALL CAPS with a dashed underline
+- Bullet points for lists, short paragraphs for narrative
+- Dates in YYYY-MM-DD format
+- Version numbers always prefixed with v (e.g. v3.2.93)
+- Chronological order (by version number) within WHAT WAS ACCOMPLISHED
+- Keep line width under 100 characters

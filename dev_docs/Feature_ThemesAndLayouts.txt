@@ -1,0 +1,203 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: THEMES AND LAYOUTS
+=========================================================
+Name: Themes, Layouts, Navigation Styles, and Appearance Preferences
+Type: Feature
+Date: 2026-02-28 (v2.0); extended v2.5 (nav styles), v3.1.3 (alignment, popover)
+Sessions: Session 1.1 (v2.0), Session 1.2 (v2.5–v2.7), Session 1.3 (v3.1.3–v3.1.5)
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+User requested per-user theme and layout customization in the same conversation where
+auth/roles were designed. The assistant recommended building themes + auth + layouts
+into the templates simultaneously rather than doing them as separate patches. This
+avoided multiple rounds of file editing by the user.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+16-separate-files approach (considered and rejected before building):
+The obvious naive approach — a separate HTML file per theme/layout combination — was
+rejected immediately. 4 themes × 4 layouts = 16 files with massive duplication. The
+CSS-class-on-body approach was chosen instead.
+
+v2.5 nav style "labels only" regression:
+When nav style was set to "labels only," the appearance button icon disappeared and was
+not replaced by a label. Fixed in v3.1.5 by providing a label text fallback for the
+appearance button specifically in labels-only mode.
+
+v2.6 layout col sizing and CSS cache issues:
+Dashboard-first layout had col sizing issues after initial deployment. Repeated
+browser-caching problems required Cache-Control headers to be added to all Flask
+responses (v3.1.1) to ensure style changes took effect.
+
+Preference card selection visual bug (v2.6–v2.7):
+The preference card highlight (active theme/layout selection) was not updating correctly
+in some layouts. Fixed during the v2.6/v2.7 arc.
+
+
+WHAT WORKED
+-----------
+CSS ARCHITECTURE (v2.0):
+- Single base.html template extended by all pages
+- Theme and layout applied as CSS classes on the <body> tag:
+  <body class="theme-dark-blue layout-comfortable nav-top">
+- All theme CSS lives in themes.css as CSS custom properties (variables)
+- Adding a new theme = adding a new --variable set; no template changes needed
+- Theme classes: theme-dark-blue, theme-dark-green, theme-light, theme-high-contrast
+- Layout classes: layout-dashboard-first, layout-wide-sidebar, layout-comfortable,
+  layout-compact
+
+THEMES (4):
+- Dark Blue — original style, navy/cyan accent
+- Dark Green / Terminal — green-on-black terminal aesthetic
+- Light / Day Mode — white background, dark text
+- High Contrast / Accessibility — maximum contrast for readability
+
+LAYOUTS (4):
+- Dashboard-First — large stats cards, minimal nav
+- Wide Sidebar — expanded sidebar navigation
+- Comfortable — default spacing (original design)
+- Compact — dense data view, smaller text
+
+USER PREFERENCE STORAGE:
+- theme and layout columns on users table (SQLite)
+- Loaded at login, stored in Flask session
+- Appearance popover allows live switching: AJAX POST to /api/prefs/appearance,
+  page reload applies new class
+- Preferences persist across sessions via DB
+
+APPEARANCE POPOVER (v2.0, enhanced v3.1.3):
+- Floating panel triggered by appearance button in navbar
+- v2.0: fixed position (top-right)
+- v3.1.3: dynamic positioning — detects nav style (top vs sidebar), positions
+  accordingly: top-right when top nav, bottom-left near sidebar when sidebar nav
+- Contains theme swatches and layout radio buttons
+
+NAVIGATION STYLES (v2.5):
+Added as a third preference axis on top of theme + layout.
+Stored in user prefs (nav_style column on users table).
+Options:
+- Top nav (default horizontal navbar)
+- Wide sidebar (expanded sidebar with text labels)
+- Labels + icons (sidebar with both)
+- Labels only (sidebar with text only)
+- Icons only (sidebar icons, no text)
+- Compact (tight sidebar)
+
+Nav style preview rendering implemented — each option shows a mini preview of how the
+nav will look before selecting.
+
+CONTENT ALIGNMENT (v3.1.3):
+- Per-user preference: centered (default) or left-aligned content
+- Applied as CSS class on body
+- Stored in user prefs
+
+FILES MODIFIED:
+- templates/base.html — body class injection, appearance popover
+- static/themes.css — all theme and layout variables
+- templates/preferences.html — theme/layout/nav selector UI
+- auth.py — theme/layout/nav columns on users table
+- webapp.py — /api/prefs/appearance route
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- All 4 themes × 4 layouts × 6 nav styles = 96 combinations were never exhaustively
+  tested. Some edge cases in compact layout + wide sidebar may have visual quirks.
+- The appearance popover position detection is heuristic (checks body class); if a
+  future layout is added, the detection logic may need updating.
+
+
+UPDATED: 2026-03-13 | Session 8 | v3.3.13-v3.3.21
+---------------------------------------------------
+Full custom theme system built and confirmed working. This update adds the entire
+import/export/apply feature arc.
+
+BACKGROUND (Session 8 addition):
+User wanted to extend NetWatch's built-in themes (dark-blue, dark-green, light,
+high-contrast) with importable custom themes in a structured JSON format, with admin
+controls for managing which themes are available to all users.
+
+WHAT WAS TRIED AND FAILED (Session 8 additions):
+
+v3.3.18 self-introduced regression:
+During preferences.html work in v3.3.18, {% block scripts %} was opened inside
+{% block content %}. In base.html these are separate sequential blocks. Jinja2
+rendered scripts content TWICE -- once inline within content, and again at the
+standalone {% block scripts %} location. Produced ~2023-line rendered HTML with
+duplicate `const APPEAR_KEY` declarations, causing SyntaxError killing all JS
+on the preferences page. Fixed in v3.3.19.
+
+v3.3.20 -- :root selector attempt:
+generate_css() changed to use `:root { ... }` as selector. FAILED. CSS custom
+properties resolve by DOM inheritance (nearest ancestor wins). body.theme-* sets
+variables on body; body is closer to all elements than :root, so body always wins
+regardless of source order.
+
+WHAT WORKED (Session 8 additions):
+
+CUSTOM THEME FORMAT (.nwtheme):
+JSON with two top-level keys:
+  "color_scheme": dict of 25 CSS variable names/values (REQUIRED_COLOR_KEYS)
+  "layout": dict of 3 CSS variable names/values (REQUIRED_LAYOUT_KEYS)
+Stored in ~/netwatch/themes/ as <name>.nwtheme.
+Disabled themes: <name>.nwtheme.disabled sidecar file.
+
+NEW MODULE: theme_manager.py
+- REQUIRED_COLOR_KEYS: 25 variables (--bg-page through --shadow)
+- REQUIRED_LAYOUT_KEYS: --content-padding, --card-padding, --gap
+- save_theme(name, data): validate and write
+- load_theme(name): read and return dict
+- list_themes(): return list with enabled/disabled status
+- delete_theme(name): remove .nwtheme and .disabled sidecar
+- toggle_theme(name): create/remove .disabled sidecar
+- generate_css(theme, part): returns CSS block using body[class] selector
+
+CSS INJECTION ARCHITECTURE (v3.3.15, corrected v3.3.21):
+System theme class stays on <body> always (theme-dark-blue etc.).
+Custom variables override via inline <style id="custom-theme-css"> block
+placed AFTER themes.css in <head>. Selector is body[class] { ... } --
+equal specificity to body.theme-* (element + attribute = element + class),
+wins on source order. No class switching = no page flash on load.
+
+USER PREF STORAGE:
+- custom_color_scheme: name of active custom color scheme (or None = system default)
+- custom_layout: name of active custom layout (or None = system default)
+- set_user_pref(id, key, None) deletes the row (reverts to system default)
+- Stored in user_prefs table via database.py
+
+WEBAPP.PY ROUTES ADDED:
+- POST /api/themes/import -- admin only, multipart upload of .nwtheme file
+- GET  /api/themes/export/<name> -- admin only, download .nwtheme file
+- GET  /api/themes/list -- returns enabled themes for user selectors
+- POST /api/themes/delete/<name> -- admin only
+- POST /api/themes/toggle/<name> -- admin only, enable/disable toggle
+- Context processor: injects custom_theme_css into every template render
+
+ADMIN.HTML CHANGES:
+- New "Color Schemes" section: lists all custom themes with enabled/disabled status
+- Import button (file upload), export/delete/toggle actions per theme
+- Admin-only visibility
+
+PREFERENCES.HTML AND POPOVER CHANGES:
+- Custom color scheme and layout selectors added to appearance popover
+- Preferences page: custom scheme/layout sections alongside system theme selectors
+- block scripts must be OUTSIDE block content (separate sequential blocks per base.html)
+
+FILES MODIFIED (Session 8):
+- theme_manager.py (new file)
+- webapp.py -- theme routes, context processor
+- database.py -- set_user_pref(None) deletes row
+- templates/base.html -- custom-theme-css style block in head
+- templates/admin.html -- Color Schemes admin section
+- templates/preferences.html -- block structure fixed, custom theme selectors
+
+PACKAGES (Session 8): v3.3.13-v3.3.21
+Confirmed working: Neon Dystopia custom theme applies correctly across pages.
+
+KNOWN LIMITATIONS / DEFERRED ITEMS (updated):
+- Popover custom theme selection: UI built, end-to-end not explicitly verified
+  [UNVERIFIED -- test at start of next session]
+- Cross-page theme consistency: Neon Dystopia tested on preferences page;
+  full cross-page verification not completed this session

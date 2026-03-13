@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Dashboard{% endblock %}
+
+{% block content %}
+
+<!-- Status Banner -->
+<div id="banner" class="nw-card p-3 mb-4" style="border-left:4px solid var(--ok);">
+  <div class="d-flex align-items-center" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+    <span>
+      <span id="banner-dot" style="font-size:1.1rem; color:var(--ok);">●</span>
+      &nbsp;<strong id="banner-text">Loading...</strong>
+    </span>
+    <span style="font-size:0.72rem; color:var(--text-muted);">
+      Last check: <span id="last-check">—</span>
+    </span>
+  </div>
+</div>
+
+<!-- Mode badges -->
+<div id="mode-badges" class="mb-3 d-flex gap-2 flex-wrap"></div>
+
+<!-- Four status cards -->
+<div class="row mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="nw-card p-4 text-center h-100 hero-card">
+      <div class="nw-label mb-2">LAN Gateway</div>
+      <div class="nw-big-stat" id="stat-lan">—</div>
+      <div class="nw-label mt-1" id="label-lan-gw">—</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="nw-card p-4 text-center h-100 hero-card">
+      <div class="nw-label mb-2">WiFi AP</div>
+      <div class="nw-big-stat" id="stat-wifi">—</div>
+      <div class="nw-label mt-1" id="label-wifi-gw">—</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="nw-card p-4 text-center h-100 hero-card">
+      <div class="nw-label mb-2">WAN / Internet</div>
+      <div class="nw-big-stat" id="stat-wan">—</div>
+      <div class="nw-label mt-1" id="label-wan-gw">—</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="nw-card p-4 text-center h-100 hero-card">
+      <div class="nw-label mb-2">WAN Latency</div>
+      <div class="nw-big-stat" id="stat-latency">—</div>
+      <div class="nw-label mt-1">milliseconds</div>
+    </div>
+  </div>
+</div>
+
+<!-- Uptime + Speedtest -->
+<div class="row mb-4">
+  <div class="col-md-6">
+    <div class="nw-card p-4 h-100">
+      <div class="nw-label mb-3">Uptime</div>
+      <div class="row text-center">
+        <div class="col-3"><div class="nw-big-stat" id="up-1h">—</div><div class="nw-label mt-1">1 hr</div></div>
+        <div class="col-3"><div class="nw-big-stat" id="up-24h">—</div><div class="nw-label mt-1">24 hr</div></div>
+        <div class="col-3"><div class="nw-big-stat" id="up-7d">—</div><div class="nw-label mt-1">7 day</div></div>
+        <div class="col-3"><div class="nw-big-stat" id="up-30d">—</div><div class="nw-label mt-1">30 day</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="nw-card p-4 h-100">
+      <div class="nw-label mb-3">Last Speedtest</div>
+      <div class="row text-center">
+        <div class="col-4"><div class="nw-big-stat" id="spd-dl">—</div><div class="nw-label mt-1">↓ Mbps</div></div>
+        <div class="col-4"><div class="nw-big-stat" id="spd-ul">—</div><div class="nw-label mt-1">↑ Mbps</div></div>
+        <div class="col-4"><div class="nw-big-stat" id="spd-ping">—</div><div class="nw-label mt-1">ping ms</div></div>
+      </div>
+      <div class="text-center mt-2 nw-label" id="spd-when"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Last reset + resets today -->
+<div class="row">
+  <div class="col-md-8">
+    <div class="nw-card p-4">
+      <div class="nw-label mb-2">Last Reset Event</div>
+      <div id="last-reset-info" style="color:var(--text-muted); font-size:0.83rem;">No resets on record</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="nw-card p-4 text-center">
+      <div class="nw-label mb-1">Auto Resets Today</div>
+      <div class="nw-big-stat" id="resets-today">—</div>
+      <div class="nw-label">of 5 maximum</div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Load network config labels once on page load
+async function loadNetworkLabels() {
+  try {
+    const cfg = await fetch("/api/config/network").then(r => r.json());
+    document.getElementById("label-lan-gw").textContent  = cfg.lan_gateway  || "—";
+    document.getElementById("label-wan-gw").textContent  = cfg.wan_primary   || "—";
+    document.getElementById("label-wifi-gw").textContent = cfg.wifi_gateway  || "—";
+  } catch(e) {}
+}
+
+async function refresh() {
+  try {
+    const [status, uptime] = await Promise.all([
+      fetch("/api/status").then(r => r.json()),
+      fetch("/api/uptime_stats").then(r => r.json())
+    ]);
+
+    const banner     = document.getElementById("banner");
+    const bannerText = document.getElementById("banner-text");
+    const bannerDot  = document.getElementById("banner-dot");
+
+    if (status.healthy) {
+      banner.style.borderLeftColor = "var(--ok)";
+      bannerDot.style.color = "var(--ok)";
+      bannerText.textContent = "Network is healthy";
+    } else if (status.lan_ok && status.wan_ok) {
+      banner.style.borderLeftColor = "var(--warn)";
+      bannerDot.style.color = "var(--warn)";
+      bannerText.textContent = "Network degraded — quality is poor";
+    } else {
+      banner.style.borderLeftColor = "var(--fail)";
+      bannerDot.style.color = "var(--fail)";
+      bannerText.textContent = "Network issue detected";
+    }
+
+    const ts = status.timestamp ? new Date(status.timestamp).toLocaleTimeString() : "—";
+    document.getElementById("last-check").textContent = ts;
+
+    // Mode badges
+    const badges = document.getElementById("mode-badges");
+    badges.innerHTML = "";
+    if (status.lockout)
+      badges.innerHTML += `<span style="font-size:0.72rem;padding:3px 10px;border-radius:12px;background:var(--fail-glow);border:1px solid var(--fail);color:var(--fail);">🔒 LOCKOUT ACTIVE</span>`;
+    if (status.conservative_mode)
+      badges.innerHTML += `<span style="font-size:0.72rem;padding:3px 10px;border-radius:12px;background:var(--fail-glow);border:1px solid var(--warn);color:var(--warn);">⚠ CONSERVATIVE MODE</span>`;
+
+    // Status cards
+    const ok   = `<span class="status-ok">✓ OK</span>`;
+    const fail = `<span class="status-fail">✗ DOWN</span>`;
+    const na   = `<span style="color:var(--text-muted);">—</span>`;
+    document.getElementById("stat-lan").innerHTML  = status.lan_ok  === null ? na : (status.lan_ok  ? ok : fail);
+    document.getElementById("stat-wan").innerHTML  = status.wan_ok  === null ? na : (status.wan_ok  ? ok : fail);
+    document.getElementById("stat-wifi").innerHTML = status.wifi_ok === null ? na : (status.wifi_ok ? ok : fail);
+
+    const lat = status.latency_ms;
+    const latEl = document.getElementById("stat-latency");
+    if (!lat) { latEl.innerHTML = na; }
+    else {
+      const cls = lat > 200 ? "status-fail" : lat > 100 ? "status-warn" : "status-ok";
+      latEl.innerHTML = `<span class="${cls}">${lat.toFixed(0)}</span>`;
+    }
+
+    // Uptime
+    document.getElementById("up-1h").textContent  = uptime["1h"]  + "%";
+    document.getElementById("up-24h").textContent = uptime["24h"] + "%";
+    document.getElementById("up-7d").textContent  = uptime["7d"]  + "%";
+    document.getElementById("up-30d").textContent = uptime["30d"] + "%";
+
+    // Speedtest
+    if (status.last_speedtest) {
+      const s = status.last_speedtest;
+      document.getElementById("spd-dl").textContent   = s.download_mbps ? s.download_mbps.toFixed(1) : "—";
+      document.getElementById("spd-ul").textContent   = s.upload_mbps   ? s.upload_mbps.toFixed(1)   : "—";
+      document.getElementById("spd-ping").textContent = s.ping_ms       ? s.ping_ms.toFixed(0)       : "—";
+      document.getElementById("spd-when").textContent = "As of " + new Date(s.timestamp).toLocaleString();
+    }
+
+    // Last reset
+    if (status.last_reset) {
+      const r = status.last_reset;
+      document.getElementById("last-reset-info").innerHTML =
+        `<strong>${r.type}</strong> — ${r.reason}<br>
+         <span style="color:var(--text-muted);">${new Date(r.timestamp).toLocaleString()} · triggered by ${r.triggered_by}</span>`;
+    }
+
+    // Resets today
+    const rt   = status.resets_today ?? "—";
+    const rtEl = document.getElementById("resets-today");
+    rtEl.textContent = rt;
+    rtEl.style.color = rt >= 5 ? "var(--fail)" : rt >= 3 ? "var(--warn)" : "var(--ok)";
+
+  } catch(e) { console.error("Dashboard refresh error:", e); }
+}
+
+refresh();
+loadNetworkLabels();
+setInterval(refresh, 10000);  // 10s — fast enough for host monitoring
+</script>
+{% endblock %}

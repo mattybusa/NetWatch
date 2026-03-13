@@ -1,0 +1,109 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: SECURITY HARDENING
+=========================================================
+Name: Account Locking, Forced Change Timeout, Email Verification, Password Reset
+Type: Feature
+Date: 2026-03-03 (v3.2.0); hotfix v3.2.1
+Sessions: Session 1.3
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+The auth system had no brute-force protection and no mechanism to enforce a password
+change deadline. Security features were designed, planned in detail with the user
+one-by-one before coding, and shipped as a batch in v3.2.0.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+login_user/logout_user missing from auth.py (v3.2.0 crash):
+The security hardening package rewrote several auth.py functions. In doing so,
+logout_user() and login_user() functions that existed in the original auth.py were
+accidentally removed. webapp.py called these functions. Result: NameError on web
+service startup at auth.py line 586. Service crashed in a restart loop.
+User was locked out of the web UI.
+Fix (v3.2.1): restore login_user and logout_user to auth.py. SSH install required
+since web UI was down.
+Rule: auth.py is the most-called module in the system. Any rewrite must verify all
+functions that other modules call are still present.
+
+Forced change back-button exploit (v3.1.1–v3.1.2):
+User could complete the forced password change flow, then hit the browser back button
+to navigate to the change-password page as though still in forced mode — without
+actually having changed the password. Root cause: forced=1 mode only checked the
+session flag at the initial redirect, not on every subsequent request to that page.
+Fix: check must_change_pass on every GET and POST to /change-password?forced=1.
+Also added: must_change_pass DB validation — flag is always read from DB on request,
+not just from session, so it can't be bypassed by session manipulation.
+
+Account locking message silent failure (v3.2.4):
+authenticate() returned None when an account was locked (same as wrong password).
+The login page showed "Invalid credentials" instead of "Account locked — try again in
+X minutes." Fixed by returning a distinct sentinel from authenticate() for locked state
+and handling it separately in the login route.
+
+Security config keys not appearing in config editor (v3.2.0–v3.2.1):
+The config_validator schema got new keys (FORCED_CHANGE_TIMEOUT_MINUTES,
+ACCOUNT_LOCK_THRESHOLD, ACCOUNT_LOCK_DURATION_MINUTES, etc.) but the config editor's
+FIELDS list was a separate hardcoded list. New keys were added to the schema but not
+to FIELDS, so they didn't appear in the editor UI. Fixed in v3.2.1 by adding a
+Security section to the config editor FIELDS.
+
+
+WHAT WORKED
+-----------
+ACCOUNT LOCKING:
+- locked_until TIMESTAMP column on users table (NULL = not locked)
+- authenticate() checks locked_until before password verify:
+  if locked_until > now: return "LOCKED" sentinel (not None)
+- Failed login increments failed_attempts counter on users table
+- When failed_attempts >= ACCOUNT_LOCK_THRESHOLD (default 5):
+  set locked_until = now + ACCOUNT_LOCK_DURATION_MINUTES (default 30)
+  reset failed_attempts = 0
+- Successful login: reset failed_attempts = 0, locked_until = NULL
+- Failed attempt while locked: reset the clock (locked_until extended from now)
+- Locked ≠ disabled: locked auto-unlocks when window passes; disabled stays disabled
+
+FORCED PASSWORD CHANGE TIMEOUT:
+- When must_change_pass = True, every request routes to /change-password?forced=1
+- On first landing: write forced_change_deadline = now + FORCED_CHANGE_TIMEOUT_MINUTES
+  (default 10) to session. Deadline set only once (not reset on refresh).
+- Every GET/POST to /change-password?forced=1 checks deadline:
+  if now > deadline: logout_user(), redirect to /login with "session expired" message
+- must_change_pass read from DB on each check (not cached in session) — prevents bypass
+
+EMAIL VERIFICATION:
+- verify_email column on users table
+- /api/auth/me/verify-email POST: generates 6-digit code, sends to user's stored email,
+  code stored in session with 10-minute expiry
+- /api/auth/me/verify-email/confirm POST: checks code, sets verify_email=True
+- Code entry field fix (v3.2.5): event handler was bound before input field existed
+  in DOM — fixed by binding after DOMContentLoaded
+
+SELF-SERVICE PASSWORD RESET:
+- /forgot-password GET: shows email entry form
+- /forgot-password POST: generates secure token, stores with expiry, sends link via email
+- /reset-password/<token> GET/POST: validates token, allows setting new password
+- Login username prefill (v3.2.44): reset email link includes username token;
+  /login?u=<token> prefills the username field for smoother UX
+- Temporary password in alert delivery history: redacted to [REDACTED] (v3.2.43)
+
+SECURITY LOGGING (security_log.py):
+- record(event_type, username, ip_address, detail) — writes to security_log table
+- Event types: LOGIN_SUCCESS, LOGIN_FAIL, ACCOUNT_LOCKED, ACCOUNT_UNLOCKED,
+  ACCOUNT_DISABLED, PASSWORD_CHANGED, PASSWORD_RESET
+- Admin can view security log (if manage_admin permission)
+- Security alerts sent to admin subscriber when ACCOUNT_LOCKED fires
+
+CONFIG.PY KEYS ADDED (v3.2.0):
+- FORCED_CHANGE_TIMEOUT_MINUTES (default 10)
+- ACCOUNT_LOCK_THRESHOLD (default 5 failed attempts)
+- ACCOUNT_LOCK_DURATION_MINUTES (default 30)
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- IP-based blocking: security_log records IP but no automatic IP block after N failures
+  from the same IP. Only per-account locking.
+- No admin UI to manually unlock an account (must use SSH to set locked_until=NULL).
+  Admin can disable/enable accounts but cannot unlock — these are different states.
+  [This limitation existed through v3.2.95; check context doc for current status.]

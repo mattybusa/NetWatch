@@ -1,0 +1,131 @@
+NETWATCH SESSION 9 SUMMARY
+==========================
+Session: 9
+Date: 2026-03-13
+Starting version: v3.3.21 (per context doc at session start; zip label matched)
+Ending version: v3.3.24 (rolled back from v3.3.26 test package cleanup)
+Focus: Interface-bound network checks, dashboard card swap, config editor badge
+       for newly auto-added keys.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- Session-start verifications (cleared from backlog):
+  - Popover custom theme selection: CONFIRMED WORKING (user-verified)
+  - Rollback DB restore: CONFIRMED WORKING (user-verified; open since Session 5)
+
+- v3.3.22 — Interface-bound network checks (see Feature_NetworkInterfaceChecks.txt)
+  Added LAN_INTERFACE and WIFI_INTERFACE config keys. ping() now accepts an optional
+  interface parameter and passes -I <iface> to the OS. New _bound_ping() helper does
+  a pre-flight IP check before the ping and logs a clear failure reason if the interface
+  has no IP. WAN checks remain unbound. Backwards compatible: blank config keys fall
+  back to unbound pings. Confirmed working by user.
+
+- v3.3.23 — Dashboard card swap
+  Swapped WiFi AP and WAN/Internet card positions in templates/index.html. New order:
+  LAN → WiFi AP → WAN/Internet → Latency. JS uses IDs so no JS changes needed.
+  Confirmed working by user.
+
+- v3.3.24 — Config editor NEEDS SETUP badge for newly added keys
+  (see Feature_FileUploaderAndConfigEditor.txt — revision block appended)
+  When the validator auto-adds a new key with a valid default (e.g. SNAPSHOT_RETENTION),
+  it now shows a NEEDS SETUP badge so the user can confirm the value. Previously the
+  badge only fired for known placeholder values; valid defaults slipped through silently.
+  Two-path detection: Case 1 (placeholder values in UNCONFIGURED_VALUES), Case 2
+  (undismissed config_notification in DB). Saving the Config Editor dismisses
+  notifications for saved keys. Also fixed: optional keys with blank values
+  (LAN_INTERFACE, WIFI_GATEWAY, WIFI_INTERFACE) no longer trigger spurious NEEDS SETUP
+  badges. Verified with test keys (v3.3.25); test keys removed (v3.3.26); user rolled
+  back to v3.3.24 (test packages not needed on Pi).
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- Config editor badge — first attempt built wrong fix: Claude initially misread the
+  backlog item and implemented logic to SUPPRESS badges on optional blank keys (the
+  opposite of what was needed). The real problem was that valid defaults were NOT being
+  badged at all. User corrected this. Claude rebuilt from scratch.
+
+- Config editor badge — second attempt had correct direction but a regression: Case 1
+  (placeholder check) still flagged blank optional keys like WIFI_INTERFACE because ""
+  is in UNCONFIGURED_VALUES. Fixed by adding the required/optional guard to Case 1 only,
+  while Case 2 (notifications) remains unrestricted. All test cases passed after fix.
+
+
+DECISIONS MADE
+--------------
+- Interface-bound pings: user's .100 and .110 subnets share the same VLAN. Without
+  interface binding, unbound pings could route out either NIC, making WiFi/LAN checks
+  unreliable. Decision: force pings via -I <iface>; WAN always unbound since it tests
+  internet reachability, not a specific NIC.
+
+- Optional keys / blank-is-valid: LAN_INTERFACE, WIFI_INTERFACE, WIFI_GATEWAY have
+  required=False and default="". Blank is a valid configured state for these keys.
+  They should never trigger NEEDS SETUP from the placeholder path. Only trigger via
+  Case 2 (new-key notification) if the validator auto-added them.
+
+- Test key rollback: user chose to roll back rather than install cleanup package v3.3.26.
+  Pi is at v3.3.24. Orphan test key lines may remain in config.py on the Pi — harmless,
+  validator ignores unknown keys.
+
+- End-of-session context doc updated at v3.3.24 — backlog items marked complete,
+  version bumped.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- Weekly Pi update cron (v3.3.12): not yet run in the wild. Verify after first fire:
+    crontab -l | grep netwatch-pkg-update
+  then watch pkg_update.log and alert delivery.
+
+- Web service silent-exit after delayed restart: gunicorn may exit cleanly (status=0)
+  after a package install restart, causing systemd Restart=always not to trigger.
+  Manual start: sudo systemctl start netwatch-web.service. Not confirmed as a bug;
+  watch on future installs.
+
+- DB-driven registry backlog item: origin still unclear. Transcript research was not
+  completed. May relate to backup file tracking.
+
+- Transcript upload via Dev Documents: not yet built.
+
+- CurrentTask.txt (Session 9 start) flagged AI_Session_Process.txt v1.2 as having a
+  stale reference: "GETTING SUMMARY FILES ONTO THE PI" section still mentions
+  Gotchas_Append_SessionN.txt for dev sessions. As of v1.3 the correct workflow is
+  direct append to Gotchas.txt. [UNVERIFIED — not addressed this session; check process
+  doc version and update if needed.]
+
+- Orphan test key lines (TEST_KEY_WITH_DEFAULT, TEST_KEY_UNCONFIGURED) may remain in
+  config.py on the Pi after rollback to v3.3.24. Harmless but untidy.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Popover custom theme selection (verified, cleared)
+- Rollback DB restore (verified, cleared)
+- Network interface verification rework (v3.3.22)
+- Dashboard WAN/WiFi card swap (v3.3.23)
+- Config editor: visual indicator for newly added keys with valid defaults (v3.3.24)
+
+No new items added to backlog.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Feature_NetworkInterfaceChecks.txt — full detail on interface-bound ping implementation
+- Feature_FileUploaderAndConfigEditor.txt — revision block appended for v3.3.24 badge work
+
+
+NEW GOTCHAS ADDED
+-----------------
+None new this session. No hard-learned lessons that aren't already covered in Gotchas.txt.
+(Misread backlog direction was corrected quickly by user; not a systemic pattern to log.)
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.24
+- Services: web and monitor running; both current
+- Next task: open — top candidates per backlog:
+    1. System log viewer (pkg_update.log tail in Admin)
+    2. Host monitoring

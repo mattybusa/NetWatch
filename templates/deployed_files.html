@@ -1,0 +1,494 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Deployed Files{% endblock %}
+
+{% block content %}
+
+<div style="max-width:900px;">
+
+  <h2 style="font-family:var(--font-mono);color:var(--accent);font-size:1.1rem;letter-spacing:2px;margin-bottom:6px;">
+    DEPLOYED FILES
+  </h2>
+  <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:24px;">
+    Upload new versions of any NetWatch file. Python files are syntax-checked before applying.
+    The previous version is automatically backed up and can be rolled back instantly.
+  </p>
+
+  <!-- ── Upload Zone ── -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-3">Upload File</div>
+
+    <!-- Drag and drop zone -->
+    <div id="drop-zone"
+         style="border:2px dashed var(--border-color); border-radius:10px;
+                padding:40px; text-align:center; cursor:pointer;
+                transition:all 0.2s; background:var(--bg-input);"
+         onclick="document.getElementById('file-input').click()"
+         ondragover="handleDragOver(event)"
+         ondragleave="handleDragLeave(event)"
+         ondrop="handleDrop(event)">
+      <div style="font-size:2rem; margin-bottom:10px; color:var(--text-muted);">📂</div>
+      <div style="font-size:0.9rem; color:var(--text-secondary); font-weight:600;">
+        Drop a file here or click to browse
+      </div>
+      <div style="font-size:0.75rem; color:var(--text-muted); margin-top:6px;">
+        .py &nbsp;·&nbsp; .html &nbsp;·&nbsp; .css &nbsp;·&nbsp; .js &nbsp;·&nbsp; .json &nbsp;·&nbsp; .sh &nbsp;·&nbsp; any file
+      </div>
+    </div>
+
+    <input type="file" id="file-input" style="display:none;" onchange="fileSelected(this.files[0])">
+
+    <!-- Selected file info + apply button -->
+    <div id="upload-preview" style="display:none; margin-top:16px;">
+      <div style="background:var(--bg-input);border:1px solid var(--border-color);
+                  border-radius:8px;padding:14px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+          <div>
+            <div style="font-weight:600;color:var(--text-primary);" id="preview-name"></div>
+            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:3px;" id="preview-size"></div>
+          </div>
+          <div id="preview-service-tag"
+               style="font-size:0.7rem;padding:3px 10px;border-radius:12px;
+                      background:var(--accent-glow);color:var(--accent);border:1px solid var(--border-color);">
+          </div>
+        </div>
+        <div id="preview-existing" style="margin-top:10px;font-size:0.78rem;color:var(--text-muted);"></div>
+      </div>
+
+      <!-- Syntax check result -->
+      <div id="syntax-result" style="display:none;margin-bottom:12px;padding:10px 14px;
+                                      border-radius:6px;font-size:0.82rem;"></div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="nw-btn nw-btn-primary" id="apply-btn" onclick="applyFile()" style="flex:1;min-width:140px;">
+          <span id="apply-btn-text">✓ Apply Update</span>
+        </button>
+        <button class="nw-btn" onclick="cancelUpload()" style="min-width:100px;">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div id="upload-result" style="display:none;margin-top:14px;padding:12px 16px;
+                                    border-radius:8px;font-size:0.85rem;"></div>
+  </div>
+
+  <!-- ── Deployed Files ── -->
+  <div class="nw-card p-4 mb-4">
+    <div class="d-flex align-items-center mb-3" style="justify-content:space-between;">
+      <div class="nw-label mb-0">Deployed Files</div>
+      <button class="range-btn" onclick="loadFileList()">↻ Refresh</button>
+    </div>
+    <div id="file-list">
+      <div style="color:var(--text-muted);font-size:0.83rem;">Loading...</div>
+    </div>
+  </div>
+
+  <!-- ── Dev Documents ── -->
+  <div class="nw-card p-4 mb-4">
+    <div class="d-flex align-items-center mb-3" style="justify-content:space-between;">
+      <div class="nw-label mb-0">Dev Documents</div>
+      <div style="display:flex;gap:8px;">
+        <button class="range-btn" onclick="loadDevDocs()">↻ Refresh</button>
+        <button class="nw-btn nw-btn-primary" onclick="document.getElementById('devdoc-input').click()"
+                style="font-size:0.78rem;padding:4px 14px;">+ Upload</button>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:14px;">
+      Store AI context documents and session transcripts here. These files are included
+      when using <strong>Download Code + Dev Documents</strong> on the Admin page.
+    </p>
+    <input type="file" id="devdoc-input" style="display:none;" onchange="uploadDevDoc(this.files[0])">
+    <div id="devdoc-result" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:6px;font-size:0.82rem;"></div>
+    <div id="devdoc-list">
+      <div style="color:var(--text-muted);font-size:0.83rem;">Loading...</div>
+    </div>
+  </div>
+
+  <!-- ── Upload History ── -->
+  <div class="nw-card p-4">
+    <div class="nw-label mb-3">Upload History</div>
+    <div class="overflow-auto">
+      <table class="nw-table">
+        <thead><tr>
+          <th>Timestamp</th><th>File</th><th>By</th><th>Result</th><th>Notes</th>
+        </tr></thead>
+        <tbody id="history-tbody">
+          <tr><td colspan="5" style="color:var(--text-muted);text-align:center;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedFile = null;
+
+// ── Drag and drop handlers ────────────────────────────────────────────────────
+function handleDragOver(e) {
+  e.preventDefault();
+  document.getElementById("drop-zone").style.borderColor = "var(--accent)";
+  document.getElementById("drop-zone").style.background  = "var(--accent-glow)";
+}
+
+function handleDragLeave(e) {
+  document.getElementById("drop-zone").style.borderColor = "var(--border-color)";
+  document.getElementById("drop-zone").style.background  = "var(--bg-input)";
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  handleDragLeave(e);
+  const file = e.dataTransfer.files[0];
+  if (file) fileSelected(file);
+}
+
+// ── File selected ─────────────────────────────────────────────────────────────
+async function fileSelected(file) {
+  selectedFile = file;
+  const ext    = file.name.split(".").pop().toLowerCase();
+
+  document.getElementById("preview-name").textContent = file.name;
+  document.getElementById("preview-size").textContent =
+    `${(file.size / 1024).toFixed(1)} KB  ·  ${file.type || "binary"}`;
+
+  // Get info about existing deployed file
+  try {
+    const info = await fetch(`/api/update/file_info?filename=${encodeURIComponent(file.name)}`).then(r => r.json());
+    const tag  = document.getElementById("preview-service-tag");
+
+    // Service restart label
+    const serviceMap = {
+      "main.py":"restarts monitor","monitor.py":"restarts monitor","network.py":"restarts monitor",
+      "relay.py":"restarts monitor","button.py":"restarts monitor","alerts.py":"restarts monitor",
+      "database.py":"restarts both","webapp.py":"restarts web","auth.py":"restarts web",
+      "config.py":"restarts both",
+    };
+    const service = serviceMap[file.name] || (ext === "html" || ext === "css" ? "restarts web" : "no restart needed");
+    tag.textContent = `⟳ ${service}`;
+
+    const existing = document.getElementById("preview-existing");
+    if (info.exists) {
+      const mod = new Date(info.modified).toLocaleString();
+      existing.innerHTML =
+        `Currently deployed: <strong>${(info.size_bytes/1024).toFixed(1)} KB</strong>, last modified ${mod}` +
+        (info.has_backup ? `  ·  <span style="color:var(--ok);">backup available</span>` : "");
+    } else {
+      existing.textContent = "This file is not currently deployed — will be created as new.";
+    }
+  } catch(e) {
+    document.getElementById("preview-existing").textContent = "";
+  }
+
+  document.getElementById("syntax-result").style.display = "none";
+  document.getElementById("upload-result").style.display  = "none";
+  document.getElementById("upload-preview").style.display = "block";
+}
+
+function cancelUpload() {
+  selectedFile = null;
+  document.getElementById("file-input").value = "";
+  document.getElementById("upload-preview").style.display = "none";
+  document.getElementById("upload-result").style.display  = "none";
+}
+
+// ── Apply the upload ──────────────────────────────────────────────────────────
+async function applyFile() {
+  if (!selectedFile) return;
+
+  const btn     = document.getElementById("apply-btn");
+  const btnText = document.getElementById("apply-btn-text");
+  btnText.textContent = "Uploading...";
+  btn.disabled = true;
+
+  const form = new FormData();
+  form.append("file", selectedFile);
+
+  try {
+    const res  = await fetch("/api/update/apply", { method: "POST", body: form });
+    const data = await res.json();
+
+    const result = document.getElementById("upload-result");
+    result.style.display = "block";
+
+    if (data.success) {
+      result.style.background   = "var(--ok-glow)";
+      result.style.border       = "1px solid var(--ok)";
+      result.style.color        = "var(--text-primary)";
+      result.innerHTML = `✓ <strong>${data.message}</strong>` +
+        (data.backup_created ? `<br><span style="color:var(--text-muted);font-size:0.78rem;">Previous version backed up automatically</span>` : "");
+      showToast(data.message, "success");
+      cancelUpload();
+      loadFileList();
+      loadHistory();
+
+      // If web service is restarting, warn the user
+      if (data.service_restarted && data.service_restarted.includes("web")) {
+        setTimeout(() => {
+          result.innerHTML += `<br><span style="color:var(--warn);">⚠ Web service is restarting — page will reload in 5 seconds...</span>`;
+          setTimeout(() => window.location.reload(), 5000);
+        }, 1500);
+      }
+
+    } else {
+      result.style.background = "var(--fail-glow)";
+      result.style.border     = "1px solid var(--fail)";
+      result.style.color      = "var(--text-primary)";
+
+      if (data.syntax_error) {
+        const sr = document.getElementById("syntax-result");
+        sr.style.display    = "block";
+        sr.style.background = "var(--fail-glow)";
+        sr.style.border     = "1px solid var(--fail)";
+        sr.style.color      = "var(--text-primary)";
+        sr.innerHTML = `<strong>✗ Syntax Error — file was NOT applied:</strong><br>
+                        <code style="font-family:var(--font-mono);font-size:0.78rem;">${esc(data.syntax_error)}</code>`;
+      }
+
+      result.innerHTML = `✗ ${data.message}`;
+      showToast("Upload failed: " + data.message, "error");
+    }
+
+  } catch(e) {
+    showToast("Upload error: " + e.message, "error");
+  } finally {
+    btnText.textContent = "✓ Apply Update";
+    btn.disabled = false;
+  }
+}
+
+// ── File list ─────────────────────────────────────────────────────────────────
+async function loadFileList() {
+  const data = await fetch("/api/update/files").then(r => r.json());
+  const container = document.getElementById("file-list");
+
+  let html = "";
+  for (const [category, files] of Object.entries(data)) {
+    if (!files.length) continue;
+    html += `<div style="margin-bottom:16px;">
+      <div class="nw-label mb-2">${category}</div>
+      <table class="nw-table">
+        <thead><tr><th>File</th><th>Size</th><th>Last Modified</th><th>Backup</th><th></th></tr></thead>
+        <tbody>`;
+
+    for (const f of files) {
+      const fname = f.filename;
+      const mod   = f.modified ? new Date(f.modified).toLocaleString() : "—";
+      const size  = f.size_bytes ? `${(f.size_bytes/1024).toFixed(1)} KB` : "—";
+      const bak   = f.has_backup
+        ? `<span style="color:var(--ok);">✓</span>
+           <button onclick="rollback('${fname}')"
+                   style="font-size:0.7rem;padding:2px 8px;border-radius:4px;
+                          background:var(--bg-input);border:1px solid var(--border-color);
+                          color:var(--text-muted);cursor:pointer;margin-left:6px;">
+             Rollback
+           </button>`
+        : `<span style="color:var(--text-muted);">—</span>`;
+
+      html += `<tr>
+        <td style="font-family:var(--font-mono);font-size:0.82rem;">
+          ${fname} ${!f.exists ? '<span style="color:var(--fail);font-size:0.7rem;">missing</span>' : ''}
+        </td>
+        <td style="color:var(--text-muted);">${size}</td>
+        <td style="color:var(--text-muted);white-space:nowrap;">${mod}</td>
+        <td>${bak}</td>
+        <td>
+          <button onclick="triggerUploadFor('${fname}')"
+                  style="font-size:0.72rem;padding:2px 8px;border-radius:4px;
+                         background:var(--accent-glow);border:1px solid var(--border-color);
+                         color:var(--accent);cursor:pointer;">
+            Upload New
+          </button>
+        </td>
+      </tr>`;
+    }
+
+    html += `</tbody></table></div>`;
+  }
+
+  container.innerHTML = html || `<div style="color:var(--text-muted);">No files found</div>`;
+}
+
+function triggerUploadFor(filename) {
+  // Pre-filter the file picker — hint toward the right filename
+  document.getElementById("file-input").click();
+}
+
+async function rollback(filename) {
+  if (!confirm(`Roll back '${filename}' to the previous version?`)) return;
+  const res  = await fetch("/api/update/rollback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename })
+  }).then(r => r.json());
+
+  showToast(res.message, res.success ? "success" : "error");
+  if (res.success) {
+    loadFileList();
+    loadHistory();
+    if (res.message && res.message.includes("web")) {
+      setTimeout(() => window.location.reload(), 4000);
+    }
+  }
+}
+
+// ── Upload history ────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const rows = await fetch("/api/update/history").then(r => r.json());
+  const tb   = document.getElementById("history-tbody");
+
+  if (!rows.length) {
+    tb.innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);text-align:center;">No uploads yet</td></tr>`;
+    return;
+  }
+
+  tb.innerHTML = rows.map(r => `
+    <tr>
+      <td style="white-space:nowrap;color:var(--text-muted);">${new Date(r.timestamp).toLocaleString()}</td>
+      <td style="font-family:var(--font-mono);font-size:0.82rem;">${r.filename}</td>
+      <td style="color:var(--text-muted);">${r.uploaded_by || "—"}</td>
+      <td style="color:${r.success ? 'var(--ok)' : 'var(--fail)'};">${r.success ? "✓" : "✗"}</td>
+      <td style="color:var(--text-muted);font-size:0.78rem;">${r.notes || ""}</td>
+    </tr>`).join("");
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ── Dev Documents ─────────────────────────────────────────────────────────────
+let renameTarget = null;
+
+async function loadDevDocs() {
+  const files = await fetch("/api/devdocs/list").then(r => r.json());
+  const container = document.getElementById("devdoc-list");
+
+  if (!files.length) {
+    container.innerHTML = `<div style="color:var(--text-muted);font-size:0.83rem;">No documents yet. Upload your AI context doc and session transcripts here.</div>`;
+    return;
+  }
+
+  let html = `<table class="nw-table"><thead><tr>
+    <th>Filename</th><th>Size</th><th>Last Modified</th><th></th>
+  </tr></thead><tbody>`;
+
+  for (const f of files) {
+    const mod  = f.modified ? new Date(f.modified).toLocaleString() : "—";
+    const size = f.size_bytes ? `${(f.size_bytes/1024).toFixed(1)} KB` : "—";
+    html += `<tr>
+      <td style="font-family:var(--font-mono);font-size:0.82rem;">${esc(f.filename)}</td>
+      <td style="color:var(--text-muted);">${size}</td>
+      <td style="color:var(--text-muted);white-space:nowrap;">${mod}</td>
+      <td>
+        <a href="/api/devdocs/download?filename=${encodeURIComponent(f.filename)}"
+           style="font-size:0.72rem;padding:2px 8px;border-radius:4px;
+                  background:var(--accent-glow);border:1px solid var(--border-color);
+                  color:var(--accent);cursor:pointer;text-decoration:none;margin-right:4px;">↓ Download</a>
+        <button onclick="openRenameModal('${esc(f.filename)}')"
+                style="font-size:0.7rem;padding:2px 8px;border-radius:4px;
+                       background:var(--bg-input);border:1px solid var(--border-color);
+                       color:var(--text-muted);cursor:pointer;margin-right:4px;">Rename</button>
+        <button onclick="deleteDevDoc('${esc(f.filename)}')"
+                style="font-size:0.7rem;padding:2px 8px;border-radius:4px;
+                       background:var(--fail-glow);border:1px solid var(--fail);
+                       color:var(--fail);cursor:pointer;">Delete</button>
+      </td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+  container.innerHTML = html;
+}
+
+async function uploadDevDoc(file) {
+  if (!file) return;
+  const result = document.getElementById("devdoc-result");
+  result.style.display = "block";
+  result.style.background = "var(--bg-input)";
+  result.style.border = "1px solid var(--border-color)";
+  result.style.color = "var(--text-muted)";
+  result.textContent = `Uploading ${file.name}...`;
+  const form = new FormData();
+  form.append("file", file);
+  document.getElementById("devdoc-input").value = "";
+  try {
+    const res  = await fetch("/api/devdocs/upload", { method: "POST", body: form });
+    const data = await res.json();
+    if (data.success) {
+      result.style.background = "var(--ok-glow)";
+      result.style.border     = "1px solid var(--ok)";
+      result.style.color      = "var(--text-primary)";
+      result.textContent = `✓ ${data.message}`;
+      showToast(data.message, "success");
+      loadDevDocs();
+    } else {
+      result.style.background = "var(--fail-glow)";
+      result.style.border     = "1px solid var(--fail)";
+      result.style.color      = "var(--text-primary)";
+      result.textContent = `✗ ${data.message}`;
+      showToast("Upload failed: " + data.message, "error");
+    }
+  } catch(e) { showToast("Upload error: " + e.message, "error"); }
+}
+
+async function deleteDevDoc(filename) {
+  if (!confirm(`Delete '${filename}'? This cannot be undone.`)) return;
+  const res = await fetch("/api/devdocs/delete", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({filename})
+  }).then(r => r.json());
+  showToast(res.message, res.success ? "success" : "error");
+  if (res.success) loadDevDocs();
+}
+
+function openRenameModal(filename) {
+  renameTarget = filename;
+  document.getElementById("rename-old-label").textContent = `Renaming: ${filename}`;
+  document.getElementById("rename-input").value = filename;
+  const modal = document.getElementById("rename-modal");
+  modal.style.display = "flex";
+  setTimeout(() => document.getElementById("rename-input").select(), 50);
+}
+
+function closeRenameModal() {
+  renameTarget = null;
+  document.getElementById("rename-modal").style.display = "none";
+}
+
+async function confirmRename() {
+  const newName = document.getElementById("rename-input").value.trim();
+  if (!newName || newName === renameTarget) { closeRenameModal(); return; }
+  const res = await fetch("/api/devdocs/rename", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({old_filename: renameTarget, new_filename: newName})
+  }).then(r => r.json());
+  closeRenameModal();
+  showToast(res.message, res.success ? "success" : "error");
+  if (res.success) loadDevDocs();
+}
+
+// Initial load
+loadFileList();
+loadDevDocs();
+loadHistory();
+</script>
+
+<!-- Rename modal -->
+<div id="rename-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);
+     z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:12px;
+              padding:28px;max-width:420px;width:90%;box-shadow:var(--shadow);">
+    <div class="nw-label mb-3">Rename File</div>
+    <div style="font-size:0.83rem;color:var(--text-muted);margin-bottom:10px;" id="rename-old-label"></div>
+    <input id="rename-input" type="text" class="nw-input"
+           style="width:100%;margin-bottom:16px;box-sizing:border-box;"
+           onkeydown="if(event.key==='Enter') confirmRename()">
+    <div style="display:flex;gap:10px;">
+      <button class="nw-btn nw-btn-primary" onclick="confirmRename()" style="flex:1;">Rename</button>
+      <button class="nw-btn" onclick="closeRenameModal()" style="flex:1;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

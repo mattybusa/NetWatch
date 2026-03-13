@@ -1,0 +1,564 @@
+NETWATCH CHAT SUMMARY — SESSION 1.3
+=====================================
+Date: 2026-03-02 – 2026-03-07
+Starting version: v3.0.0 (multi-channel alert system begins)
+Ending version: v3.2.50f (monitor crash fix; install unconfirmed in transcript)
+Session focus: Complete v3.x development arc from multi-channel alerts through security
+  hardening, role system, My Account refactor, subscriber integrity, notification center,
+  changelog, session timeout UI, config editor final fix, live polling, code export,
+  admin collapsible sections, and extended metrics/monitor crash debugging arc.
+
+SCOPE NOTE: This sub-session covered 25+ distinct arcs across 15 transcripts. All major
+items have expanded summaries. Version range v3.0.0–v3.2.50f.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+v3.0.0–v3.0.8 — Alert subscription system + security logging:
+- Multi-channel alert subscriptions (v3.0.0-v3.0.3): Per-user email + SMS subscriptions
+  with carrier gateway selection. Per-alert-type granularity (LAN down, WAN down,
+  degraded, reset triggered, etc.). Global alert type defaults. Admin subscriber management
+  page. Separate from the old global ALERT_TO setting. Jinja2 template syntax fixes during
+  this arc.
+  (see Feature_AlertSubscriptions.txt)
+
+- Security logging system (v3.0.4-v3.0.8): Failed login tracking, brute force detection,
+  account locking (automatic, temporary — locked_until timestamp). Security alerts
+  categorized separately from network alerts. Security alert delivery to admin email.
+  Account locking threshold and duration configurable. Forced password change on create.
+  (see Feature_SecurityHardening.txt)
+
+v3.0.9–v3.1.5 — UI fixes, auth hardening, preference system:
+- My Account page reorganization (v3.0.9): Appearance moved to bottom, Alerts and
+  Password Change moved to top. Logout message cleared on new login (was leaking across
+  accounts).
+  (see Feature_MinorFixesSession_1.txt — "My Account Reorganization")
+
+- Alert subscription UI completion (v3.0.9-v3.1.0): Per-type checkboxes, email/SMS
+  fields visible only when relevant type checked. Subscriber modal layout optimization.
+
+- Sidebar/top nav sync (v3.1.0-v3.1.1): Navigation active state not updating on page
+  transitions; fixed by improving route → nav-item mapping.
+
+- Cache-Control headers (v3.1.1): Added to all Flask responses to prevent browser
+  caching of preference changes and auth state.
+
+- Forced password change exploit fix (v3.1.1-v3.1.2): Back-button exploit allowed
+  bypassing forced change. Fixed by checking must_change_pass on every request, not just
+  on login. must_change_pass DB validation added.
+  (see Feature_SecurityHardening.txt — forced change section)
+
+- Content alignment preference (v3.1.3): Left-aligned vs centered content option per user.
+  Applied via CSS class on body.
+
+- Appearance popover dynamic positioning (v3.1.3-v3.1.5): Detects whether nav is top or
+  sidebar; positions popover accordingly (top-right vs bottom-left of sidebar).
+  (see Feature_ThemesAndLayouts.txt — v3.1 update)
+
+- Nav style label-only regression fix (v3.1.5): "Labels only" nav style caused appearance
+  icon to disappear with no label replacement. Fixed by providing label text for the
+  appearance button when in labels-only mode.
+
+v3.2.0–v3.2.7 — Security hardening package + rollback system + planning:
+- Security hardening package (v3.2.0): Account locking, forced password change timeout
+  (10 min to complete forced change before session expires), email verification, self-
+  service password reset via email. login_user/logout_user functions missing from auth.py
+  — caused NameError crash on web service startup. Hotfixed in v3.2.1.
+  (see Feature_SecurityHardening.txt — v3.2.0 section)
+
+- Rollback system (v3.2.2-v3.2.4): Pre-install snapshots taken before each package
+  install. Snapshot = zip of all current files. rollback.sh script for emergency SSH
+  recovery (restores from snapshot without web UI). Web UI rollback button in patcher.
+  User requested this after recognizing risk of session-limit scenario with broken server.
+  (see Feature_PatcherSystem.txt — rollback section)
+
+- Forced password change timeout fix (v3.2.3): Deadline stored in session, checked on
+  every request to change_password route. Logout triggered on expiry.
+
+- Account locking message fix (v3.2.4): "Account locked" message was not appearing;
+  authenticate() was returning None silently instead of the locked state.
+
+- Email verification JS fix (v3.2.5): Code entry field for email verification was not
+  accepting typed input (event handler bound too early).
+
+- Transactional email subjects (v3.2.5): Verification and password reset emails now have
+  meaningful subjects instead of generic ones.
+
+- Update Manager cleanup (v3.2.6): Removed stale UI elements from the Update Manager
+  section. Favicon restored after being dropped in a patch.
+
+- Comprehensive backlog review and planning (v3.2.7): 40-item backlog organized by
+  category. 17 major future features discussed and documented. mBase bootstrapper project
+  scoped. Changelog PDF style previews generated (user preferred Style A header with
+  ink-friendly white body). reportlab chosen (later replaced when PDF gen moved to
+  per-package HTML approach).
+  (see Feature_ChangelogSystem.txt — planning section)
+
+v3.2.8–v3.2.16 — Config editor debugging + UI fixes + My Account refactor:
+- Config editor final fix (v3.2.8-v3.2.10, v3.2.37): Extended debugging arc. Three
+  separate root causes: (1) service restart chaining (restarted before file flushed), (2)
+  path resolution (expanduser vs __file__), (3) UTF-8 encoding on file open/write. Fixed
+  one at a time over v3.2.8-v3.2.10; pyc cache repeatedly obscured whether fixes had
+  taken effect. Final complete fix shipped in v3.2.37.
+  (see Bug_ConfigEditorSave.txt)
+
+- Alert subscriber save confirmation toast (v3.2.11): Success/failure toast on subscriber
+  preference save.
+
+- Users & Roles — My Account tab removal (v3.2.12): My Account tab removed from
+  Users & Roles admin page (it was a confusing duplicate of the main My Account page).
+
+- Speedtest no-data overlay (v3.2.13): When no speedtest data exists, chart shows a
+  "No data" overlay instead of an empty Chart.js canvas.
+
+- Admin page collapsible sections (v3.2.14-v3.2.15): Collapsible cards on admin page
+  with chevron indicators. JavaScript structure bug fixed (div closure in wrong place
+  due to Jinja2 conditional interference). Collapse state in localStorage at this stage.
+
+- My Account refactor (v3.2.16): Contact & Identity card added (first_name, last_name,
+  email, phone fields). Personalized alert emails (uses first name or username in
+  greeting). first_name/last_name added to users table and alert_subscribers table,
+  synced between them. get_display_name() helper. Planning for merge behavior when
+  standalone subscriber records conflict with account holder records.
+  (see Feature_MyAccountAndSubscriberIntegrity.txt)
+
+v3.2.17–v3.2.24 — Subscriber integrity + notification center + changelog:
+- Subscriber integrity rules (v3.2.17-v3.2.20): Account holders always have a subscriber
+  record (created at account creation, even if empty). Duplicate detection for email/phone
+  across standalone subscribers and account holders. Merge standalone into account on
+  conflict. SMS verification. Account deletion with subscription options dialog.
+  Username management refinement.
+  (see Feature_MyAccountAndSubscriberIntegrity.txt — v3.2.17 update)
+
+- Per-role alert defaults with reassignment dialog (v3.2.21): When a role is deleted,
+  dialog asks where to reassign its users. Role defaults grid (alert types × roles matrix).
+  (see Feature_RolesAndPermissions.txt)
+
+- Notification Center architecture (v3.2.22): Alerts page renamed and refactored to
+  "Notification Center." Test Alert button and Delivery History added. Alert delivery
+  logged to DB. Admin can view per-subscriber delivery history.
+  (see Feature_AlertSubscriptions.txt — Notification Center update)
+
+- Changelog system (v3.2.23-v3.2.24): Per-package HTML release notes generated at install
+  time from manifest.json description field. Changelog viewer in admin under Package
+  Installer section (not a separate page). About page link stub. reportlab removed in favor
+  of themed HTML (user requested ink-friendly print style: themed header, white body).
+  (see Feature_ChangelogSystem.txt)
+
+v3.2.25–v3.2.30 — Session management + roles + changelog fixes:
+- Activity-based session timeout with client countdown (v3.2.25): Session extended on
+  each API call. Countdown timer in UI. Warning before expiry. Monitor role remains exempt
+  (never times out regardless of inactivity).
+  (see Feature_GuestAccessAndSessionFixes.txt — session timeout update)
+
+- Role system fixes (v3.2.26-v3.2.28): is_system flag migration for built-in roles
+  (Admin, Monitor, Operator). Delete button hidden for system roles. Reassignment dialog
+  for custom role deletion. Custom role card row cap (5 per row, centered overflow).
+
+- Changelog architecture finalized (v3.2.28-v3.2.29): Per-package HTML file saved on
+  install. Viewer fetches from filesystem. Both "all packages" and individual entries
+  viewable.
+
+- Create user bugs (v3.2.29): must_change_pass ignored on user creation (always False).
+  Create button broken by JS hoisting issue. Both fixed.
+
+- Package installer restart polling (v3.2.30): After install, UI polls for service
+  recovery rather than assuming immediate restart. Better UX for packages that take
+  several seconds to restart.
+
+v3.2.31–v3.2.37 — Role defaults, changelog themes, alert guard, config editor final fix:
+- Role defaults panel refresh on delete (v3.2.31): Deleting a role now immediately
+  refreshes the defaults panel without requiring page reload.
+
+- Themed changelog PDFs (v3.2.32): Changelog HTML files respect current theme (dark/light
+  accent color in header, white body). Ink-friendly printing confirmed.
+
+- Alert infrastructure guard (v3.2.33): When ALERTS_ENABLED=False in config, all alert
+  delivery routes return early gracefully instead of erroring.
+
+- Config editor save — final complete fix (v3.2.37): Root cause confirmed: service restart
+  was called before the file write was fully flushed to disk. Fixed ordering in
+  configeditor.py. The multi-restart chain (web restarts while handling its own request)
+  also addressed. This closed the longest-running bug in the session.
+  (see Bug_ConfigEditorSave.txt — final fix section)
+
+v3.2.38–v3.2.50f — Polling sync, code export, admin collapse, metrics crash fix:
+- Config editor boolean toggle double-fire bug (v3.2.38-v3.2.41): ALERTS_ENABLED toggle
+  was firing twice on change event. Diagnostic route added to verify in-memory vs on-disk
+  value. Root cause: change event fired by both the native checkbox and a JavaScript
+  listener. Fixed by removing duplicate listener. Diagnostic route cleaned up afterward.
+  (see Bug_ConfigEditorSave.txt — boolean toggle section)
+
+- Email/SMS verification UX fixes (v3.2.42): Unverified state now shows Send Code button
+  immediately. Test buttons hidden until verified. Previously both were visible regardless
+  of verification state.
+
+- Alert history temp password redaction (v3.2.43): Temporary passwords in alert delivery
+  history redacted to [REDACTED] in the history view.
+
+- Login username prefill from reset email (v3.2.44): Password reset email link includes
+  username token; login page prefills username field on landing.
+
+- Live polling on dashboard/metrics/logs (v3.2.45-v3.2.46): Dashboard, metrics page, and
+  logs page auto-refresh every CHECK_INTERVAL seconds. Polling heartbeat exempt from
+  session activity timeout (so Monitor display never triggers timeout warning).
+
+- Latency/packet loss chart bug fix (v3.2.46): Chart was not updating correctly on poll
+  tick due to data array mutation issue. Fixed by replacing dataset data reference.
+
+- Test alerts logging to delivery history (v3.2.47): Test alert sends now appear in
+  Delivery History with [TEST] tag.
+
+- Code export download (v3.2.47): Admin page "Export Code" button downloads current
+  codebase as zip. Excludes .bak files, DB, config.py. Pi-only hardware files
+  (main.py, monitor.py, etc.) added to canonical so export is complete.
+  Canonical sync check performed at v3.2.47 confirming Pi matches canonical exactly.
+
+- Admin page collapsible sections — server-side persistence (v3.2.49): Collapse state
+  migrated from localStorage to server-side per-account user_prefs table. Package History
+  row count selector (5/10/20/50/All) with per-account persistence.
+  NOTE: This package introduced the monitor crash — see v3.2.50f.
+  (see Feature_AdminCollapseAndHistoryLimit.txt)
+
+- Config.py excluded from snapshots (v3.2.50): SNAP_EXCLUDE = {"config.py"} added to
+  patcher.py _take_snapshot(). Live credentials no longer written to snapshot archives.
+  (see Feature_MinorFixesSession_1.txt — "Config.py Snapshot Exclusion")
+
+- Speedtest chart resize fix (v3.2.50-v3.2.50e): Speedtest charts now fill their card
+  width on resize. Implemented via wrapper divs with explicit height + 
+  maintainAspectRatio:false on speedtest canvases only. Latency/loss canvases retain
+  height="70" attribute + maintainAspectRatio:true (healthOpts). spanGaps:true on all
+  datasets.
+  (see Bug_MetricsChartAndAdminCollapse.txt)
+
+- Admin collapse regression fixed (v3.2.50c-v3.2.50e): Server-side collapse approach
+  broke due to .id dict access bug (.id → ["id"]) and admin.html missing from v3.2.50d.
+  Reverted to localStorage in v3.2.50e as working baseline.
+  (see Bug_MetricsChartAndAdminCollapse.txt)
+
+- Monitor crash root cause + fix (v3.2.50f): user_prefs CREATE TABLE was embedded in
+  same c.execute() string as alerts CREATE TABLE in database.py init_db(). Python's
+  sqlite3 raises ProgrammingError on multi-statement execute(). Monitor crash-looped
+  since v3.2.49 install; no health records written. This was the true root cause of
+  1H chart showing no data. Fixed by splitting into separate c.execute() calls.
+  (see Bug_MetricsChartAndAdminCollapse.txt — root cause section)
+  [UNVERIFIED — install not confirmed in transcript; context doc implies installed]
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- alert_subscribers.cleanup_duplicate_owner() missing (v3.0.0-v3.0.2): webapp.py called
+  a function not yet in the shipped version of alert_subscribers.py. Service crashed.
+  Fixed by direct SSH line removal and proper catch-up package.
+
+- Self-introduced regression — .id dict access on get_current_user() (v3.2.49, v3.2.50c,
+  v3.2.50d): auth.get_current_user() returns a dict. Accessing .id throws AttributeError.
+  This was written incorrectly in v3.2.49 and persisted through two more packages before
+  being fully fixed in v3.2.50d. The .current_user() → .get_current_user() name fix in
+  v3.2.50c correctly changed the method name but left the .id intact.
+
+- Wrong diagnosis — 1H chart empty (clock drift): Diagnosed as Pi clock ahead of SQLite
+  datetime('now'). Built v3.2.50f with 5-minute query buffer. User correctly pushed back:
+  it was caused by our changes, not clock drift. Reverted. Correct root cause was the
+  monitor crash from v3.2.49 multi-statement c.execute().
+
+- Wrong diagnosis — DOMContentLoaded timing: Theorized chart init racing with CSS
+  property computation. Added DOMContentLoaded wrapper. Not the cause. Reverted.
+
+- Self-introduced chart regression (v3.2.50-v3.2.50b): Changed autoSkip:false to true
+  while keeping the blank-string makeLabels() pre-spacing approach. These two are a paired
+  design — changing one without the other caused most labels to disappear. Took five
+  packages (3.2.50 through 3.2.50e) to resolve cleanly.
+
+- v3.2.50c admin.html + v3.2.50d admin.html omission: v3.2.50c shipped admin.html with
+  server-side collapse JS; v3.2.50d fixed the .id bug in webapp.py but omitted admin.html.
+  Pi had inconsistent state across two packages before admin was finally fixed.
+
+- login_user/logout_user missing from auth.py (v3.2.0): Security hardening package
+  called these functions but they weren't defined. NameError crash on web service startup.
+  Hotfixed in v3.2.1.
+
+
+DECISIONS MADE
+--------------
+- Admin collapse reverted to localStorage in v3.2.50e. Server-side approach architecturally
+  sound but too many failure points in a single package. Future deliberate reimplementation
+  deferred. [COMPLETED IN LATER SESSION]
+
+- Two chart opts functions (healthOpts / speedOpts) maintained permanently in metrics.html.
+  The split is the correct architectural approach for charts with different sizing strategies.
+
+- spanGaps:true on all latency/loss datasets: null latency_ms values (when WAN ping fails)
+  bridge as continuous line rather than breaking the chart.
+
+- autoSkip:false + blank-string makeLabels() confirmed as the working label architecture
+  for health charts. Do not change autoSkip without changing the label approach.
+
+- Canonical baseline sync verified at v3.2.47: Pi and canonical confirmed identical at
+  that point. This was the last formal sync check in this sub-session.
+
+- mBase bootstrapper project: concept discussed, named (Matt's initials prefix), scoped
+  as a standalone PC tool (PyInstaller .exe) for SD card provisioning. No implementation
+  started. Deferred indefinitely.
+
+- Alert system full review: raised at end of sub-session as the recommended next item.
+  [COMPLETED IN LATER SESSION — see context doc]
+
+- End-of-session context doc: No formal context document was established within this
+  sub-session. The AI context document system was created in a later session.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [UNVERIFIED] v3.2.50e install: 3.2.50e packaged in transcript; admin confirmed fixed
+  after v3.2.50d; unclear if v3.2.50e was installed separately before v3.2.50f.
+
+- [UNVERIFIED] v3.2.50f install: Transcript ends with package built and presented. No
+  user response confirming install. Context doc at v3.2.95 implies installed at some point.
+
+- Two consecutive Assistant turns in the v3.2.50 transcript (sections 19 and 21 with no
+  Human turn between them). Transcript artifact from the original session fragmentation.
+  Content is coherent; treated as normal continuation.
+
+- [COMPLETED IN LATER SESSIONS — v3.2.51 through v3.2.95 visible in context doc but not
+  present in these transcripts. Those belong to Sessions 2+.]
+
+
+BACKLOG CHANGES
+---------------
+Completed this sub-session:
+- Multi-channel alert subscriptions (v3.0.0)
+- Security logging + brute force + account locking (v3.0.4-v3.0.8)
+- Forced password change timeout (v3.2.3)
+- Rollback system with pre-install snapshots (v3.2.2)
+- Config editor save fully fixed (v3.2.37)
+- My Account refactor with Contact & Identity (v3.2.16)
+- Subscriber integrity rules (v3.2.17-v3.2.20)
+- Notification Center (v3.2.22)
+- Changelog system (v3.2.23-v3.2.24)
+- Activity-based session timeout with countdown (v3.2.25)
+- Role system hardening (is_system, delete protection, row cap) (v3.2.26-v3.2.28)
+- Config editor boolean toggle fix (v3.2.38-v3.2.41)
+- Live polling on dashboard/metrics/logs (v3.2.45-v3.2.46)
+- Code export download (v3.2.47)
+- Admin collapse + history row limit (v3.2.49) [introduced monitor crash, fixed v3.2.50f]
+- config.py excluded from snapshots (v3.2.50)
+- Speedtest chart resize (v3.2.50e)
+- Monitor crash fix — init_db() multi-statement c.execute() (v3.2.50f) [UNVERIFIED install]
+
+Deferred / raised but not completed:
+- Alert system full review (raised at session end, deferred)
+  [COMPLETED IN LATER SESSION — see context doc]
+- Admin collapse server-side (reverted to localStorage, proper reimplementation deferred)
+  [COMPLETED IN LATER SESSION]
+- Chart x-axis label improvements beyond current approach
+  [COMPLETED IN LATER SESSION — see context doc, bucketAvg() and related]
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Feature_AlertSubscriptions.txt — Multi-channel alert system, per-type granularity,
+  SMS carrier gateways, admin subscriber management, Notification Center.
+- Feature_SecurityHardening.txt — Account locking, brute force detection, forced change
+  timeout, email verification, self-service password reset, security crash hotfix.
+- Feature_RolesAndPermissions.txt — Role defaults grid, is_system protection, delete
+  protection, reassignment dialog, custom role row cap.
+- Feature_MyAccountAndSubscriberIntegrity.txt — My Account refactor, Contact & Identity,
+  subscriber integrity rules, merge logic, SMS verification, account deletion dialog.
+- Feature_ChangelogSystem.txt — Changelog architecture, per-package HTML, themed output,
+  admin viewer, about page link.
+- Feature_AdminCollapseAndHistoryLimit.txt — v3.2.49 feature, server-side collapse,
+  history row limit, monitor crash introduced by this package.
+- Bug_ConfigEditorSave.txt — Full config editor save debugging arc: path resolution,
+  encoding, service restart chaining, boolean toggle double-fire.
+- Bug_MetricsChartAndAdminCollapse.txt — Chart resize arc (v3.2.50–v3.2.50e), admin
+  collapse regression, and monitor crash root cause (v3.2.50f).
+- Feature_MinorFixesSession_1.txt — config.py snapshot exclusion; My Account page
+  reorganization; other minor fixes.
+
+
+NEW GOTCHAS ADDED
+-----------------
+These entries are in Gotchas.txt (merged from Gotchas_Append_Session1.txt in Session 6):
+- SQLITE3 c.execute() CRASHES ON MULTI-STATEMENT STRINGS (v3.2.50f)
+- CHART.JS autoSkip:false AND BLANK-STRING makeLabels() ARE A PAIRED DESIGN
+- OMITTING A FILE FROM A PACKAGE WHEN SERVER CODE EXPECTS IT (v3.2.50c/d)
+- MISSING FUNCTIONS IN auth.py CRASH THE WEB SERVICE AT STARTUP (v3.2.0) — new entry
+- AMENDMENT added to DO NOT DIAGNOSE FROM SURFACE CODE READS — Session 1 clock drift
+  and DOMContentLoaded incidents incorporated into the main entry
+- DICT ACCESS NOT ATTRIBUTE ACCESS ON get_current_user() (v3.2.49, v3.2.50c)
+- WEBAPP.PY FUNCTION CALLS THAT REFERENCE MODULES NOT YET DEPLOYED (v3.0.0)
+
+
+CURRENT STATE
+-------------
+- Pi version at end of sub-session: v3.2.50f [UNVERIFIED install]
+- Next task at end of this sub-session: Alert system full review (per transcript end state)
+- NOTE: Context doc is at v3.2.95 — 45 versions ahead of this transcript. The alert
+  system review and many other items were completed in Sessions 2+. Do not infer current
+  task from this summary. Recommend asking the user to confirm the current task verbally
+  at the next session start.
+
+
+=============================================================================
+ADDENDUM — SESSION 1.3.1
+=============================================================================
+Additional findings from a deeper re-read of Session 1.3 transcripts.
+These items were not present in the original expanded summaries above.
+=============================================================================
+
+ADDITIONAL FINDINGS — Feature_AlertSubscriptions.txt
+-----------------------------------------------------
+
+ALERTS_ENABLED AS SYSTEM-WIDE MASTER SWITCH (clarification, v3.2.36):
+The relationship between config.ALERTS_ENABLED and per-user alert subscriptions was
+clarified in a detailed architecture discussion (v3.2.31-v3.2.37 transcript):
+
+ALERTS_ENABLED in config.py = global infrastructure kill switch ("can the system
+send anything at all?"). It holds the SMTP credentials. Turning it off disables all
+outbound alert delivery regardless of any user's subscription preferences.
+
+Per-user subscriptions = "what does this user want to receive?" (dimmer switches).
+These are independent of the global toggle.
+
+A soft "alerts disabled" banner is shown to account holders in My Account → Alert
+Subscriptions when ALERTS_ENABLED is False, so users understand why they're not
+receiving alerts even if they have subscriptions enabled.
+
+Test button behavior:
+- When email unverified: Test button hidden (cannot send to unverified address)
+- When ALERTS_ENABLED = False: clicking Test returns "alerts are disabled" message
+These are separate conditions with separate behaviors. Fixed in v3.2.38.
+
+VERIFY BUTTON ALWAYS VISIBLE WHEN UNVERIFIED (v3.2.38):
+The email/phone verification button was being gated on "resave preferences" — it
+disappeared and only reappeared after saving the preferences form. Fixed: verify button
+always visible when email/phone is not verified, regardless of save state.
+
+
+ADDITIONAL FINDINGS — Bug_ConfigEditorSave.txt
+-----------------------------------------------
+
+ALERTS_ENABLED TOGGLE ARCHITECTURE CLARIFICATION:
+The config editor boolean toggle uses a hidden <input type="checkbox"> and a visual
+<span> track. The double-fire bug (v3.2.38-v3.2.41) was caused by:
+1. onclick on the <span> (visual track) fires toggleBool(), which sets cb.checked = !cb.checked
+2. The <label> wrapping the hidden checkbox also receives the click event and flips
+   cb.checked again — restoring the original value
+
+Net effect: every toggle click resulted in a no-op (value flipped twice back to original).
+Fix: stopPropagation() on the span click handler to prevent the label from receiving
+the event. This is a standard HTML form interaction bug with custom-styled checkboxes.
+
+DIAGNOSTIC ROUTE CLEANUP (v3.2.42):
+/api/config/diag/alerts debug route was added to expose in_memory vs on_disk config
+values during the config editor debugging arc. After the fix was confirmed working,
+this route and all associated diagnostic print statements were cleaned up from webapp.py
+in v3.2.42. Rule: diagnostic routes are always temporary — clean up before moving on.
+
+
+ADDITIONAL FINDINGS — Feature_MinorFixesSession_1.txt
+------------------------------------------------------
+
+AUTO-DISABLE LOCKOUT FIX (v3.2.38):
+Accounts were being auto-locked for reasons they shouldn't be. The specific trigger was
+not documented in detail in the transcript, but the fix was shipped in the same package
+as the config editor toggle fix (v3.2.38). The lockout_until logic in auth.py was
+updated to not trigger on normal session expiry — only on failed_attempts >= threshold.
+Session timeouts previously were incrementing failed_attempts due to the timeout-logout
+path touching the same code path as a failed login. Fixed by separating the session
+expiry code path from the authentication failure code path.
+
+BACKLOG STATE AT SESSION END (v3.2.49 transcript, end of session):
+The following items were confirmed DONE during the v3.2.49 backlog review:
+- Users & Roles — locked/disabled visual indicators ✓
+- Admin page collapsible state — persistent per user account (server-side) ✓ (later
+  partially reverted to localStorage in v3.2.50e; see Feature_AdminCollapseAndHistoryLimit.txt)
+- Changelog — retroactive generation ✓
+- Empty speedtest graph overlay ✓
+
+The following items were confirmed as still OPEN at session end:
+- Auto-disable lockout fix ✗ (confirmed done in v3.2.38 per 3.2.38-v3.2.48 transcript —
+  discrepancy in the v3.2.49 backlog list suggests it may have been partially reopened)
+- Speedtest chart label overlap on window resize ✗
+- Host monitoring — ping/status for other devices on network ✗
+- Dashboard polling wired up to DOM updates ✗ (this became the live polling feature in v3.2.45-v3.2.47)
+
+HOST MONITORING (planned, not implemented in Session 1):
+Briefly mentioned in the v3.2.49 backlog: "ping/status for other devices on the network,
+show on dashboard." Not designed in detail. Still deferred as of Session 1 end.
+[Check context doc v3.2.95 for current status.]
+
+NETWATCH DEMO MODE (mentioned in backlog, not implemented):
+The backlog list included "NetWatch Demo Mode" as a future feature. No implementation
+details discussed in Session 1 transcripts.
+[Check context doc v3.2.95 for current status.]
+
+
+ADDITIONAL FINDINGS — Bug_MetricsChartAndAdminCollapse.txt
+----------------------------------------------------------
+
+DOMContentLoaded TIMING — initCharts() ORDERING (v3.2.50 arc):
+During the diagnostic arc for the blank 1H chart, a second theory was explored:
+The Pi's metrics.html was calling initCharts() and loadData() directly at script
+execution time (bottom of <body>). The canonical version wrapped these in
+DOMContentLoaded. The difference: direct execution at </body> runs after the DOM is
+parsed but before all deferred subresources. DOMContentLoaded fires after all deferred
+scripts and subresources, including CSS. initCharts() calls cssVar() which reads CSS
+custom property values — if CSS hasn't loaded, cssVar() returns empty string and the
+chart renders with default colors or zero dimensions.
+
+This was a real drift between Pi and canonical. The Pi had accumulated a version of
+metrics.html from an earlier session that lacked the DOMContentLoaded wrapper.
+However, fixing this drift was NOT the cause of the blank chart — the monitor crash
+was the real cause. The DOMContentLoaded fix was included anyway as a correctness fix.
+
+CLOCK DRIFT THEORY — WHY IT WAS PLAUSIBLE:
+The v3.2.50 arc's wrong clock-drift diagnosis was understandable given the symptoms.
+At the point the theory was formed, the only visible evidence was:
+1. 6H chart showed data correctly
+2. 1H chart showed y-axis of 0-1 with no plotted points
+3. The monitor service appeared to be running (journalctl showed no obvious crash loop)
+The crash loop was subtle: init_db() crashed on startup, but systemd restarted the
+monitor successfully after each crash so journalctl showed normal restart behavior with
+very short "active" windows. The monitor was starting, crashing in init_db() before
+writing any health records, then being restarted. This looked identical to a running
+monitor with no records matching the query window — hence the clock drift hypothesis.
+
+The decisive evidence that disproved clock drift: the user's pushback — "this has worked
+until just recently, it was caused by a change we did." This directed attention to what
+changed in v3.2.49, which led directly to the init_db() multi-statement c.execute() bug.
+
+
+ADDITIONAL FINDINGS — Feature_RolesAndPermissions.txt
+------------------------------------------------------
+
+ROLES API RESPONSE FORMAT (v2.4 era, confirmed still relevant in v3.2.x):
+See also ChatSummary_1.2.1.txt additional findings on this topic.
+The /api/auth/roles endpoint format was normalized to return a plain array in v2.4.
+Later, the admin_users.html was refactored and the format was implicitly assumed to be
+consistent. This is noted because any future refactor of auth endpoints should preserve
+the plain array format for roles, users, and subscribers API endpoints.
+
+
+ADDITIONAL FINDINGS — Feature_ChangelogSystem.txt
+--------------------------------------------------
+
+STYLED HTML THEME SELECTION (v3.2.23-v3.2.24, additional detail):
+The changelog HTML theme color is written in at generation time from the installing
+user's current theme. If the user is on dark-blue theme when installing, the changelog
+header uses dark-blue accent colors. This was an intentional design choice discussed
+before building: "Themed header + white body for printing" was the user-selected style.
+The print-safe reasoning: the themed header makes it visually identifiable on screen
+as a NetWatch artifact. The white body ensures ink is not wasted if anyone prints it.
+The style was chosen over three alternatives (A, B, C) that were previewed as PDF
+samples during the v3.2.5-v3.2.7 backlog planning session. Style A with white body
+was selected.
+
+CHANGELOG VERSION STRING NORMALIZATION (v3.2.25 era):
+The packaging library's version comparison treated "3.2.24b" as a pre-release of
+"3.2.24" (older). This was discovered when the patcher flagged a 3.2.24b install as
+out-of-order. From this point forward: no letter suffixes in version numbers.
+Use dotted numerics only: 3.2.24.1 or 3.2.25, never 3.2.24a or 3.2.24b.
+This was also applied retroactively: the patcher's version comparison logic was
+updated to handle dotted numerics only, rejecting letter suffixes with a clear error.

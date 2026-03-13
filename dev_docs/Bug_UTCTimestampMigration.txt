@@ -1,0 +1,82 @@
+NETWATCH EXPANDED SUMMARY — BUG: UTC TIMESTAMP MIGRATION
+=========================================================
+Name: Local-to-UTC Timestamp Migration and 1H Chart Fix
+Type: Bug
+Date: 2026-03-01 (v2.7.x–v2.8)
+Sessions: Session 1.2
+Final outcome: Complete — UTC storage established as permanent standard
+
+
+BACKGROUND
+----------
+The metrics page showed the 1H chart returning 6 hours of data. The cause was a
+mismatch between stored timestamps (local time, EST = UTC-5) and SQLite's
+datetime('now') which is always UTC. A -1 hour window in UTC pulled -6 hours of
+local data. The user noticed because a fresh database was accumulating data and
+the 1H chart was clearly showing too many records.
+
+Confirmed with:
+  sqlite3 ~/netwatch/netwatch.db "SELECT datetime('now'), MAX(timestamp) FROM network_health;"
+  Result: datetime('now') = 09:16 UTC, MAX(timestamp) = 04:16 local EST
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Option 1 — datetime('now', 'localtime') quick fix:
+Proposed as the immediate fix: change all WHERE clauses to use localtime modifier.
+User asked "is there a reason you want to go with the quick fix versus the right fix?"
+This was the correct pushback. The quick fix was rejected. UTC migration chosen instead.
+
+Data migration attempt with timezone offset:
+Initial migration script added 5 hours to all existing timestamps. After migration,
+MIN(timestamp) and MAX(timestamp) still showed strange ranges — records that were
+near midnight local now appeared as ~5am UTC, and some ranges didn't fully line up.
+The migration was correct in principle but the existing data had mixed precision
+(some records with milliseconds, some without) and the UTC check of the 1H query
+was still showing unexpected record counts during the transition window.
+The user had little historical data ("if I lose it no big deal") so the priority
+was getting the recording code correct going forward rather than perfect migration.
+
+
+WHAT WORKED
+-----------
+UTC MIGRATION (database.py):
+Changed all datetime.now().isoformat() → datetime.utcnow().isoformat() in all
+database write functions:
+- record_health() — network_health table
+- record_reset() — reset_events table
+- record_speedtest() — speedtest_results table
+- record_alert() — alert_log table
+
+UTC QUERIES (database.py):
+All WHERE timestamp >= datetime('now', '-N hours') queries are correct when using
+datetime.utcnow() for storage, because datetime('now') in SQLite is also UTC.
+No localtime modifier needed. This is the clean state.
+
+CHART.JS LABEL ARCHITECTURE established during this arc:
+The x-axis label approach for health charts that remained through v3.2.50:
+- makeLabels(data, range): returns array of label strings same length as data array
+- Most entries return "" (blank) — only show a label at spaced intervals
+- autoSkip: false — REQUIRED when using blank-string approach (if autoSkip:true,
+  Chart.js also skips, and ends up skipping the sparse non-blank labels)
+- spanGaps: true on latency/loss datasets (null latency_ms values bridge as
+  continuous line rather than breaking)
+- maintainAspectRatio: true on health charts (they use height="70" canvas attribute
+  for fixed height)
+- healthOpts() vs speedOpts(): established at v3.2.50e as the correct split —
+  health charts use maintainAspectRatio:true, speedtest charts use :false with
+  wrapper divs for resize
+
+PERMANENT RULE:
+All timestamp writes use datetime.utcnow(). All timestamp queries use datetime('now').
+Never use datetime('now', 'localtime') — this would re-introduce the original bug.
+Never store local time — this causes DST jumps in charts twice per year.
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Historical data recorded before the UTC migration is 5 hours behind true UTC.
+  The amount was small at time of migration; user accepted the loss.
+- Display: timestamps shown in the dashboard UI are rendered by the browser, which
+  converts them from UTC to local time automatically. If a future version shows
+  timestamps as strings directly from the DB, they will display as UTC, not local.
+  Not a current issue but worth noting.

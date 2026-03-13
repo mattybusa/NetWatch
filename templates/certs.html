@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Certificates{% endblock %}
+
+{% block content %}
+<div style="max-width:760px;">
+
+  <h2 style="font-family:var(--font-mono);color:var(--accent);font-size:1.1rem;letter-spacing:2px;margin-bottom:6px;">
+    CERTIFICATE MANAGEMENT
+  </h2>
+  <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:24px;">
+    Install the NetWatch root CA certificate on your devices to get a clean padlock
+    with no browser warnings. Do this once per device.
+  </p>
+
+  <!-- ── HTTPS Status ── -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-3">HTTPS Status</div>
+    <div class="row text-center">
+      <div class="col-6 col-md-3">
+        <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
+          <div style="font-size:1.4rem;" id="https-icon">—</div>
+          <div class="nw-label mt-1">Connection</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
+          <div class="nw-big-stat" style="font-size:1rem;" id="cert-expires">—</div>
+          <div class="nw-label mt-1">Cert Expires</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
+          <div class="nw-big-stat" style="font-size:1rem;" id="ca-expires">—</div>
+          <div class="nw-label mt-1">CA Expires</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
+          <div class="nw-big-stat" style="font-size:1rem;" id="cert-sans">—</div>
+          <div class="nw-label mt-1">IPs Covered</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Install CA on Devices ── -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-1">Install CA Certificate on Your Devices</div>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin:8px 0 20px;">
+      Download and install the root CA certificate once on each device.
+      After installation, NetWatch will show a clean padlock with no warnings.
+    </p>
+
+    <!-- Download button -->
+    <a href="/ca-cert" download="netwatch-ca.crt"
+       class="nw-btn nw-btn-primary"
+       style="display:inline-flex;align-items:center;gap:8px;margin-bottom:24px;">
+      <i class="bi bi-download"></i> Download netwatch-ca.crt
+    </a>
+
+    <!-- Per-platform instructions -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+
+      <!-- Windows -->
+      <div style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:8px;padding:16px;">
+        <div style="font-weight:600;color:var(--text-secondary);margin-bottom:10px;">
+          🖥 Windows
+        </div>
+        <ol style="font-size:0.78rem;color:var(--text-muted);margin:0;padding-left:16px;line-height:1.8;">
+          <li>Download the certificate above</li>
+          <li>Double-click <code>netwatch-ca.crt</code></li>
+          <li>Click <strong>Install Certificate</strong></li>
+          <li>Choose <strong>Local Machine</strong> → Next</li>
+          <li>Select <strong>Trusted Root Certification Authorities</strong></li>
+          <li>Finish → Yes</li>
+          <li>Restart Chrome/Edge</li>
+        </ol>
+      </div>
+
+      <!-- iPhone / iPad -->
+      <div style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:8px;padding:16px;">
+        <div style="font-weight:600;color:var(--text-secondary);margin-bottom:10px;">
+          📱 iPhone / iPad
+        </div>
+        <ol style="font-size:0.78rem;color:var(--text-muted);margin:0;padding-left:16px;line-height:1.8;">
+          <li>Download the certificate above in Safari</li>
+          <li>Go to <strong>Settings → General</strong></li>
+          <li>Tap <strong>VPN &amp; Device Management</strong></li>
+          <li>Tap the NetWatch CA profile → Install</li>
+          <li>Go to <strong>Settings → General → About</strong></li>
+          <li>Tap <strong>Certificate Trust Settings</strong></li>
+          <li>Toggle NetWatch CA to <strong>ON</strong></li>
+        </ol>
+      </div>
+
+      <!-- Android -->
+      <div style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:8px;padding:16px;">
+        <div style="font-weight:600;color:var(--text-secondary);margin-bottom:10px;">
+          🤖 Android
+        </div>
+        <ol style="font-size:0.78rem;color:var(--text-muted);margin:0;padding-left:16px;line-height:1.8;">
+          <li>Download the certificate above</li>
+          <li>Go to <strong>Settings → Security</strong></li>
+          <li>Tap <strong>Install from storage</strong> (or Encryption &amp; credentials)</li>
+          <li>Select <code>netwatch-ca.crt</code></li>
+          <li>Name it <strong>NetWatch CA</strong></li>
+          <li>Select <strong>CA Certificate</strong></li>
+          <li>Tap OK</li>
+        </ol>
+      </div>
+
+      <!-- Mac -->
+      <div style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:8px;padding:16px;">
+        <div style="font-weight:600;color:var(--text-secondary);margin-bottom:10px;">
+          🍎 macOS
+        </div>
+        <ol style="font-size:0.78rem;color:var(--text-muted);margin:0;padding-left:16px;line-height:1.8;">
+          <li>Download the certificate above</li>
+          <li>Double-click <code>netwatch-ca.crt</code></li>
+          <li>Keychain Access opens — add to <strong>System</strong> keychain</li>
+          <li>Find <strong>NetWatch Root CA</strong> in the list</li>
+          <li>Double-click it → expand <strong>Trust</strong></li>
+          <li>Set <strong>When using this certificate</strong> to <strong>Always Trust</strong></li>
+          <li>Close and enter your Mac password</li>
+        </ol>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── CA Backup ── -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-1">CA Backup</div>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin:8px 0 16px;">
+      Download an encrypted backup of your CA private key. Store this somewhere safe —
+      you'll need it if the Pi ever needs to be rebuilt. The backup is password-protected
+      with the password you chose during setup.
+    </p>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <a href="/api/certs/backup" download="netwatch-ca-backup.zip"
+         class="nw-btn" style="border-color:var(--warn);color:var(--warn);">
+        <i class="bi bi-shield-lock me-2"></i>Download Encrypted CA Backup (.zip)
+      </a>
+      <span style="font-size:0.75rem;color:var(--text-muted);">Password protected · Contains CA private key</span>
+    </div>
+  </div>
+
+  <!-- ── Regenerate ── -->
+  <div class="nw-card p-4">
+    <div class="nw-label mb-1">Regenerate Server Certificate</div>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin:8px 0 16px;">
+      If you add a new IP address to the Pi or the certificate expires, regenerate it here.
+      This does NOT change the CA — your devices will not need to reinstall anything.
+      NetWatch will restart briefly.
+    </p>
+    <button class="nw-btn" style="border-color:var(--fail);color:var(--fail);"
+            onclick="regenCert()">
+      ↻ Regenerate Server Certificate
+    </button>
+    <div id="regen-result" style="display:none;margin-top:12px;padding:10px 14px;
+                                   border-radius:6px;font-size:0.83rem;"></div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadCertInfo() {
+  try {
+    const data = await fetch("/api/certs/info").then(r => r.json());
+
+    document.getElementById("https-icon").innerHTML =
+      data.https_active
+        ? `<span style="color:var(--ok);font-size:1.6rem;">🔒</span>`
+        : `<span style="color:var(--warn);font-size:1.6rem;">🔓</span>`;
+
+    document.getElementById("cert-expires").textContent = data.cert_expires || "—";
+    document.getElementById("ca-expires").textContent   = data.ca_expires   || "—";
+    document.getElementById("cert-sans").textContent    = data.ip_count ? `${data.ip_count} IPs` : "—";
+  } catch(e) {
+    document.getElementById("https-icon").innerHTML = `<span style="color:var(--text-muted);">—</span>`;
+  }
+}
+
+async function regenCert() {
+  if (!confirm("Regenerate the server certificate? NetWatch will restart briefly.")) return;
+  const result = document.getElementById("regen-result");
+  result.style.display = "block";
+  result.style.background = "var(--bg-input)";
+  result.style.border = "1px solid var(--border-color)";
+  result.textContent = "Regenerating... this may take a few seconds.";
+
+  const res  = await fetch("/api/certs/regenerate", { method: "POST" }).then(r => r.json());
+  result.style.background = res.success ? "var(--ok-glow)"   : "var(--fail-glow)";
+  result.style.border     = res.success ? "1px solid var(--ok)" : "1px solid var(--fail)";
+  result.textContent      = res.message;
+
+  if (res.success) {
+    setTimeout(() => window.location.reload(), 4000);
+  }
+}
+
+loadCertInfo();
+</script>
+{% endblock %}

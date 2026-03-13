@@ -1,0 +1,364 @@
+NETWATCH GOTCHAS LOG
+====================
+Append only. Never rewrite or delete entries. Each entry includes date and version.
+
+---
+
+2026-02-28 | pre-v2.0
+CONTEXT COMPACTION LOSES GENERATED CODE
+Claude's context window has a hard limit. During long code generation sessions,
+earlier content is silently dropped. If the session was generating a large codebase,
+partial or complete regeneration may be required after compaction. Always save working
+code to disk before continuing a long session. For large code sessions, present files
+for download as soon as they are generated and confirm the user has saved them before
+the session grows further.
+
+---
+
+2026-02-28 | pre-v2.0
+SCP FROM WINDOWS — MUST USE SEPARATE POWERSHELL WINDOW, NOT INSIDE SSH SESSION
+SCP commands cannot be run from inside an active SSH session. Open a separate
+PowerShell window (not the SSH shell) and run SCP from there. Running SCP inside SSH
+produces an error and the file transfer will not complete.
+
+---
+
+2026-03-01 | v2.4
+DUPLICATE FLASK ROUTES AFTER PATCHING webapp.py
+Incremental patching of webapp.py can introduce duplicate @app.route decorators.
+Flask silently ignores the second definition, causing old route behavior to persist.
+After patching webapp.py, always check for duplicate @app.route decorators.
+The patcher now performs a preflight check and refuses to apply packages with
+duplicate routes.
+
+---
+
+2026-03-01 | v2.3-ish
+SCP FILE TRANSFER NOT TAKING EFFECT — PYCOM CACHE
+After SCP-ing a Python file to the Pi, the old behavior persists because Python caches
+compiled .pyc files. Delete the __pycache__ directory or restart the service to force
+reload. Under gunicorn with preload_app=True, a full service restart is required.
+
+---
+
+2026-03-01 | v2.3–v3.2.37
+CONFIG EDITOR SAVE: THREE SEPARATE ROOT CAUSES
+The config editor save bug had three independent root causes: (1) UTF-8 encoding not
+specified on file open/write, (2) service restart called before file write flushed to
+disk, (3) path resolution using __file__ instead of os.path.expanduser(). All three
+must be fixed together — fixing one at a time leaves the others active. Final fix
+shipped v3.2.37.
+
+---
+
+2026-03-01 | v2.8–v2.9
+CRON JAVASCRIPT ORPHAN CODE CAN SILENTLY BREAK UNRELATED FUNCTIONALITY
+A JavaScript function left in a template after its associated HTML was removed caused
+a parse error that silently broke other functionality. Symptom: unrelated JS functions
+throw "not defined" errors. Always search for orphaned function references when removing
+HTML sections that had associated JS.
+
+---
+
+2026-03-02 | v3.0.0
+WEBAPP.PY FUNCTION CALLS THAT REFERENCE MODULES NOT YET DEPLOYED
+webapp.py called alert_subscribers.cleanup_duplicate_owner() before that function
+existed in the deployed version of alert_subscribers.py. Service crashed with
+AttributeError on startup. When adding calls to functions in other modules, verify
+the target function is already deployed or ship both files in the same package.
+
+---
+
+2026-03-03 | v3.2.0
+MISSING FUNCTIONS IN auth.py CRASH THE WEB SERVICE AT STARTUP
+If webapp.py or another module calls a function from auth.py that is not defined there
+(e.g. login_user, logout_user), the web service crashes on startup with NameError.
+Always verify that every function called from auth.py is actually defined in auth.py
+before packaging. The error only surfaces at runtime, not at build time.
+
+---
+
+2026-03-02 | v3.2.49, v3.2.50c
+DICT ACCESS NOT ATTRIBUTE ACCESS ON get_current_user()
+auth.get_current_user() returns a dict, not an object. Accessing result.id throws
+AttributeError. Always use result["id"]. This mistake persisted through three packages
+(v3.2.49, v3.2.50c, v3.2.50d) before being fully fixed. When using get_current_user(),
+always use bracket notation for all field access.
+
+---
+
+2026-03-02 | v3.2.50c, v3.2.50d
+OMITTING A FILE FROM A PACKAGE WHEN SERVER CODE EXPECTS IT
+v3.2.50c fixed a bug in webapp.py but omitted admin.html. v3.2.50d fixed admin.html
+but omitted updated webapp.py context. The Pi was in an inconsistent state across
+two packages. When fixing a multi-file bug, ship all affected files in the same
+package. Never fix half a bug.
+
+---
+
+2026-03-02 | v3.2.50f
+SQLITE3 c.execute() CRASHES ON MULTI-STATEMENT STRINGS
+Python's sqlite3 module raises ProgrammingError if a single c.execute() call contains
+multiple SQL statements separated by semicolons. This is silent at schema design time
+but crashes the monitor on startup. Always use separate c.execute() calls for each
+statement in init_db() and any other schema initialization code.
+
+---
+
+2026-03-02 | general
+CHART.JS autoSkip:false AND BLANK-STRING makeLabels() ARE A PAIRED DESIGN
+The health chart label architecture uses autoSkip:false with a makeLabels() function
+that returns blank strings for non-display positions. These two settings are coupled —
+changing autoSkip to true while keeping blank-string labels causes most labels to
+disappear. Changing makeLabels() without setting autoSkip:false causes label crowding.
+Do not change one without reviewing the other.
+
+---
+
+2026-03-07 | v3.2.52–v3.2.57
+ALERTS.PY REQUIRES BOTH SERVICES TO RESTART
+alerts.py is imported by both netwatch-monitor (main monitoring loop) and netwatch-web
+(webapp.py imports it for test email sends from the web UI). Updating only the
+monitor means the web service continues serving the cached old module. Always restart
+both services when alerts.py changes.
+
+---
+
+2026-03-07 | v3.2.55–v3.2.57
+PACKAGE INSTALLER FEEDBACK ONLY TRIGGERS ON WEB SERVICE RESTART
+The package installer JS polls for restart confirmation and renders a step row showing
+service restart status. The polling logic checks for "web" in the restart response. If a
+package only restarts the monitor, the web key is absent and the feedback UI shows no
+confirmation row — giving the false impression the install had no restart step. Fixed in
+v3.2.57 by updating the feedback polling logic. Confirmed that monitor-only restarts now
+also show a confirmation row.
+
+---
+
+2026-03-07, 2026-03-08 | v3.2.75, v3.2.82, v3.2.85 (Session 2); general (Session 3+)
+DO NOT DIAGNOSE FROM SURFACE CODE READS
+Multiple incidents were caused by concluding something was broken or missing after
+a shallow grep or partial read. Always read the full relevant code before forming
+a conclusion. If the user says it works, it works. Find why before saying otherwise.
+Canonical incidents: v3.2.75 (broke working password reset), v3.2.82 (misdiagnosed
+24H data gap as clock skew — was real monitor downtime), v3.2.85 (rewrote working
+datetime queries), Session 4 SMS change detection (dismissed as not implemented when
+it was fully working — user had screenshots proving it), Session 1 1H chart empty
+(diagnosed as clock drift — wrong; real cause was monitor crash from multi-statement
+c.execute() in v3.2.49).
+Rule: simulate before shipping. If the user says something works, find the actual cause
+before changing it. When user says "it worked until we changed X," diff that specific
+change against its prior version before hypothesizing external causes.
+
+---
+
+2026-03-08 | v3.2.89
+ZIP PACKAGING — MUST BUILD FROM INSIDE DIRECTORY
+If you zip from outside the package directory (e.g. zip -r pkg.zip ./package_dir/),
+all files land inside a subdirectory in the zip. patcher.py looks for manifest.json
+at the zip root and won't find it. Always: cd /package_dir && zip -r ../output.zip .
+
+---
+
+2026-03-08 | v3.2.90
+PATCHER _resolve_path() — dev_docs/ PREFIX REQUIRED
+patcher.py auto-places files by extension: .html -> templates/, .css/.js -> static/.
+For dev_docs/ files it matches on the prefix "dev_docs/" in the filename field.
+Always specify: { "action": "replace", "file": "dev_docs/filename.txt" }
+This was fixed in v3.2.90 — packages before that could not place files in dev_docs/.
+
+---
+
+2026-03-08 | v3.2.93
+PATCHER CREATES .BAK FILES FOR EVERY REPLACED FILE
+This is intentional behavior for code files but creates noise for dev docs.
+The dated summary files (e.g. NetWatch_AI_Context_2026-03-08.txt) serve as the
+backup mechanism for dev docs. The .bak files are harmless — do not attempt to
+suppress them by modifying patcher core behavior.
+
+---
+
+2026-03-08 | v3.2.94
+GUNICORN.CTL IS A RUNTIME SOCKET — NOT A REGULAR FILE
+gunicorn.ctl lives in the netwatch root and looks like a Unix socket.
+os.walk picks it up and zf.write() throws OSError: [Errno 6] No such device or address.
+Fixed in v3.2.94 by adding "gunicorn.ctl" to EXCLUDE_FILES in both export routes.
+Always exclude it from any file-walking export operation.
+
+---
+
+2026-03-08 | general
+CONTEXT DOC UPDATES RIDE WITH REAL PACKAGES
+Never build a package solely to update the context doc or summaries.
+They go along with the next real bug fix or feature package.
+Exception: if ending a session with no pending code changes, a doc-only package
+is acceptable but should be noted as such.
+
+---
+
+2026-03-11 | v3.3.2–v3.3.4
+PURE ASCII ONLY IN ALL .sh FILES
+Shell scripts containing Unicode box-drawing or symbol characters (e.g. = - + arrows)
+cause bash syntax errors on the Pi when transferred via SCP or Dev Docs upload,
+even if the file is valid UTF-8. The Pi's bash parser chokes on multi-byte characters
+in certain contexts. Rule: ALL .sh files must use pure ASCII only. No decorative
+box-drawing, no Unicode arrows, no Unicode checkmarks. Use +, -, =, and plain text
+equivalents instead.
+
+---
+
+2026-03-11 | v3.3.2–v3.3.4
+NEVER USE BASH HEREDOCS IN SHELL SCRIPTS
+Bash heredocs (<< LABEL) fail silently on the Pi in certain shell environments. The
+rollback.sh DB restore used python3 - << PYEOF which ran without error but did nothing.
+Use printf to build temp Python files instead, passing content via a temp file argument.
+This was the root cause of the v3.3.2 DB restore failure.
+
+---
+
+2026-03-11 | v3.3.2–v3.3.4
+ROLLBACK RESTORES .sh FILES FROM SNAPSHOT
+If you fix rollback.sh via a package and then immediately run rollback, the old broken
+version of rollback.sh is restored from the snapshot taken before your fix package.
+Fix: install the corrected rollback.sh in a package first, then install a no-op package
+to create a new snapshot containing the fixed script before any rollback is needed.
+
+---
+
+2026-03-11 | Session 6
+CLAUDE SKIPS LONG SUMMARY FILES MARKED AS HISTORICAL
+Multiple Claude instances have read only the first 80 lines of ChatSummary_1.2.txt and
+ChatSummary_1.3.txt and moved on, treating them as lower priority due to their age and
+length. The process doc says read all base summaries completely — this is non-negotiable.
+Historical summaries contain architecture decisions, canonical incident records, and
+relay wiring corrections that are still authoritative. There is no "probably not relevant"
+exception for old content.
+
+---
+
+2026-03-12 | v3.3.9
+ADDING A CONFIG KEY TO SCHEMA IS NOT ENOUGH — CHECK ui_hidden AND BOTH FILES
+Prior to v3.3.9, config_schema.py and configeditor.py each had their own separate
+field lists. A key added to config_schema.py would be known to the validator and
+written to config.py, but would not appear in the Config Editor UI unless also added
+to configeditor.py's hardcoded FIELDS list. As of v3.3.9, FIELDS is built dynamically
+from config_schema.py — one entry covers both. When adding a new key, set ui_hidden=True
+if it should be validator-only (like SECRET_KEY), and ensure section/type/min/max are
+all populated so the UI renders it correctly.
+
+---
+
+2026-03-13 | v3.3.19
+JINJA2 NESTED BLOCKS CAUSE DOUBLE RENDERING
+If {% block scripts %} is opened inside {% block content %} in a child template, but
+base.html defines them as separate sequential blocks, Jinja2 renders the scripts content
+TWICE -- once inline within content, and again at the standalone {% block scripts %}
+location. This produces duplicate JS declarations and a SyntaxError that silently kills
+all JS on the page. Always verify block structure: each block in a child template must be
+a top-level sibling, not nested inside another block, unless base.html also nests them
+the same way.
+
+---
+
+2026-03-13 | v3.3.19-v3.3.21
+CSS CUSTOM PROPERTIES: body BEATS :root FOR INHERITANCE
+CSS custom properties (variables) resolve by DOM inheritance, not just specificity. If
+body.theme-* sets --bg-card on body, that value wins over :root { --bg-card } because body
+is a closer ancestor to all elements than :root. Setting variables on :root does NOT
+override variables set on body. To override body.theme-* variables: use a selector with
+equal or higher specificity (e.g. body[class]) placed AFTER themes.css in the <head> so
+source order breaks the tie.
+
+---
+
+2026-03-13 | v3.3.20
+UPDATER.PY DRAG-AND-DROP TREATS ZIP AS A RAW FILE
+If a .zip package is accidentally uploaded via the Deployed Files drag-and-drop
+(updater.py), it copies the entire zip file as-is into ~/netwatch/ -- it does NOT extract
+it. The zip just sits there as a stale file. Remove it manually with:
+  rm ~/netwatch/netwatch_vX.X.XX.zip
+This is distinct from the Package Installer (patcher.py) which properly extracts and
+applies packages.
+
+---
+
+2026-03-13 | v3.3.21
+DON'T CHASE CACHE -- IT'S ALWAYS THE CODE
+When the browser shows different behavior than expected after a restart, resist the urge
+to blame browser cache or gunicorn template cache. In NetWatch's history, it has ALWAYS
+been a code issue. Pursue the code first: check rendered HTML source, check block
+structure, check what the server is actually returning. Incognito windows rule out
+browser cache; a confirmed service restart rules out gunicorn memory cache. If the
+problem persists after both, the bug is in the code.
+
+---
+
+2026-03-13 | v3.3.25
+SERVICE ACCOUNT HOME DIRECTORY TRAVERSAL -- /home/mboynton MUST BE 751
+When a systemd service runs as a different user (e.g. netwatch-svc) with WorkingDirectory
+inside /home/mboynton/, the Pi's default home dir permissions of 700 (drwx------) will
+cause the service to fail at startup with status=200/CHDIR (Permission denied). The
+service account needs execute permission on the parent directory to traverse into it.
+Fix: sudo chmod 751 /home/mboynton. The 751 gives others execute-only (no directory
+listing) while allowing traversal. This is a one-time manual step -- it does not ride
+in a package.
+
+---
+
+2026-03-13 | v3.3.25
+PATCHER LEAVES TEMP .pyc FILES IN /tmp/__pycache__/ -- NEVER CLEANED UP
+patcher.py performs a syntax check by compiling each Python file to a temp .pyc in
+/tmp/__pycache__/. It never cleans up these files. They accumulate across every package
+install and are owned by whatever user ran the install. If the directory exists with
+wrong ownership/permissions when a new user (e.g. netwatch-svc via web service) tries
+to write there, the patcher reports a misleading "syntax error in filename.py" when the
+real error is a permission failure on the temp file. Workaround: sudo chmod 777
+/tmp/__pycache__. Real fix (backlog): use tempfile.mkstemp() in patcher.py and clean
+up after the syntax check completes or fails.
+
+---
+
+2026-03-13 | v3.3.25
+SERVICE ACCOUNT WITH --no-create-home: expanduser() BREAKS -- USE __file__ PATHS
+When a Python script runs as a system account created with --home-dir /nonexistent
+--no-create-home, os.path.expanduser("~") resolves to /nonexistent. Any path built
+with expanduser() will fail when the code tries to create or access that path.
+All Python files that run as the service account (main.py, theme_manager.py) must use
+os.path.dirname(os.path.abspath(__file__)) to build paths relative to the script
+location instead. Shell scripts that run as mboynton over SSH are unaffected -- $HOME
+resolves correctly for the interactive user.
+
+---
+
+---
+
+GOTCHA: PACKAGE ZIP STRUCTURE MUST MIRROR TARGET PATH STRUCTURE
+Session 10 | 2026-03-13
+
+Files in a package zip must be placed inside a subdirectory matching their target
+path prefix. For example, dev_docs files must be inside a dev_docs/ folder in the
+zip, not at the zip root. The patcher validation step checks zip structure and will
+hang on "validating" indefinitely if files are at the wrong level.
+
+Manifest.json always sits at the zip root. Everything else mirrors its target path.
+
+Correct structure:
+  manifest.json          (root)
+  dev_docs/
+    ChatSummary_10.txt
+    Gotchas.txt
+    ...
+  templates/
+    some_template.html
+  static/
+    some_file.js
+
+Wrong structure (causes hang on "validating"):
+  manifest.json
+  ChatSummary_10.txt     (should be inside dev_docs/)
+  Gotchas.txt
+  ...
+
+The _find_in_zip function matches by basename, so the patcher CAN find files
+at the wrong level -- but an earlier validation step rejects the package before
+_find_in_zip is ever reached. Always match zip structure to target path structure.

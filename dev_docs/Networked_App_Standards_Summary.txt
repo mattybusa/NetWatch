@@ -1,0 +1,691 @@
+================================================================================
+NETWORKED APP DEVELOPMENT GUIDE — COMPLETE STANDARDS REFERENCE
+For use as context when discussing implementations with Claude
+Version 2 — includes UI/UX, Data/Storage, Testing, Compliance, and AI
+================================================================================
+
+Share this document with Claude at the start of a conversation to get advice
+aligned with these established recommendations.
+
+LEGEND:
+  [BORROW] = Use an existing tool/library — do not build from scratch
+  [BUILD]  = Implement yourself, following the standard or pattern
+  [MIXED]  = Use a tool for the mechanism; build your domain logic on top
+  [ADOPT]  = Implement against an existing open specification or protocol
+
+================================================================================
+PART 1 — CORE SECURITY & OPERATIONS FOUNDATIONS
+================================================================================
+
+──────────────────────────────────────────────────────
+1. AUTHENTICATION [MIXED]
+──────────────────────────────────────────────────────
+Standard: OAuth 2.0, OpenID Connect (OIDC), SAML 2.0, JWT, PKCE flow
+
+RECOMMENDATION: Almost always use an Identity Provider (IdP).
+Never roll your own authentication from scratch.
+
+Preferred tools:
+  - Auth0 (auth0.com) — SaaS IdP, easiest for most apps
+  - Keycloak (keycloak.org) — open-source, self-hosted IdP
+  - Supabase Auth (supabase.com) — good for smaller projects
+  - Firebase Auth (firebase.google.com) — Google ecosystem
+  - Okta (okta.com) — enterprise-grade
+
+For enterprise / internal apps:
+  - Integrate with Active Directory or Azure AD (Entra ID) via SAML or OIDC
+  - Users log in with company credentials (SSO)
+  - Deprovisioning is automatic when IT removes the user from AD
+
+Rule: Never store passwords as plain text or MD5. Use bcrypt, scrypt, or Argon2.
+
+
+──────────────────────────────────────────────────────
+2. AUTHORIZATION [MIXED]
+──────────────────────────────────────────────────────
+Standard: RBAC (Role-Based Access Control), ABAC (Attribute-Based), OAuth scopes
+
+RECOMMENDATION: RBAC for most apps. Keep authorization logic separate from
+business logic. Always enforce on the server — never trust the client.
+
+Preferred tools:
+  - Casbin (casbin.org) — open-source RBAC/ABAC engine
+  - Open Policy Agent / OPA (openpolicyagent.org) — policy-as-code
+  - Permit.io (permit.io) — managed authorization service
+
+Rule: RBAC = users have roles (Admin/Editor/Viewer), roles have permissions.
+      Always enforce server-side. Never trust the client to restrict its own access.
+
+
+──────────────────────────────────────────────────────
+3. TRANSPORT SECURITY [BORROW]
+──────────────────────────────────────────────────────
+Standard: TLS 1.2 / 1.3, HTTPS everywhere, HSTS headers
+
+RECOMMENDATION: Every networked app must use HTTPS. Free certs via Let's Encrypt.
+Disable TLS 1.0/1.1. Use mTLS for service-to-service comms.
+
+Preferred tools:
+  - Let's Encrypt (letsencrypt.org) — free auto-renewing certs
+  - Certbot (certbot.eff.org) — automates cert renewal
+  - Cloudflare (cloudflare.com) — edge TLS + CDN
+  - AWS Certificate Manager — if on AWS
+
+Rule: Never implement your own encryption algorithms.
+
+
+──────────────────────────────────────────────────────
+4. LOGGING & OBSERVABILITY [MIXED]
+──────────────────────────────────────────────────────
+Standard: Structured JSON logging, correlation/trace IDs, OpenTelemetry
+
+RECOMMENDATION: Log as JSON objects. Every request gets a unique correlation ID.
+Ship logs to a central aggregator in production.
+
+Preferred tools:
+  - Winston / Pino (Node.js), Serilog (.NET), Logback (Java)
+  - Datadog (datadog.com), Grafana + Loki (grafana.com)
+  - OpenTelemetry (opentelemetry.io) — vendor-neutral instrumentation
+
+Rule: NEVER log passwords, full credit card numbers, SSNs, or full auth tokens.
+
+
+──────────────────────────────────────────────────────
+5. INPUT VALIDATION [MIXED]
+──────────────────────────────────────────────────────
+Standard: Schema validation, allowlisting, SQL parameterization, XSS/CSRF prevention
+
+RECOMMENDATION: Validate ALL external input at the boundary using a schema library.
+Use parameterized SQL queries always.
+
+Preferred tools:
+  - Zod / Joi (JavaScript) — zod.dev
+  - Pydantic (Python) — docs.pydantic.dev
+  - FluentValidation (.NET) — fluentvalidation.net
+  - Helmet.js (Node.js HTTP security headers) — helmetjs.github.io
+
+Rule: NEVER concatenate user input into SQL strings. Use parameterized queries.
+
+
+──────────────────────────────────────────────────────
+6. ERROR HANDLING [BUILD]
+──────────────────────────────────────────────────────
+Standard: RFC 7807 Problem Details, circuit breaker pattern, graceful degradation
+
+RECOMMENDATION: Never expose stack traces to users. Return generic errors externally,
+log full details internally. Standardize error format across the whole API.
+
+Standard error format: { "error": "NOT_FOUND", "message": "...", "requestId": "..." }
+
+Preferred tools: Resilience4j (Java), Polly (.NET), Boom (Node.js)
+
+Rule: Stack traces in API responses are security vulnerabilities, not just bad UX.
+
+
+──────────────────────────────────────────────────────
+7. RATE LIMITING [BORROW]
+──────────────────────────────────────────────────────
+Standard: Token bucket / sliding window, HTTP 429, Retry-After headers
+
+RECOMMENDATION: Apply at CDN/WAF level (stops floods) AND application level
+(per-user/per-endpoint). Be strict on auth endpoints: 5 attempts per 15 min per IP.
+
+Preferred tools:
+  - express-rate-limit (Node.js), slowapi (Python)
+  - Cloudflare WAF, AWS API Gateway throttling
+
+
+──────────────────────────────────────────────────────
+8. SECRETS MANAGEMENT [BORROW]
+──────────────────────────────────────────────────────
+Standard: 12-Factor App config, environment variables, never in code or git
+
+Preferred tools:
+  - HashiCorp Vault (vaultproject.io)
+  - AWS Secrets Manager (aws.amazon.com/secrets-manager)
+  - Azure Key Vault, Doppler (doppler.com)
+  - .env files — development ONLY, never committed to git
+
+Rule: NEVER commit API keys, passwords, or certificates to any git repository.
+
+
+──────────────────────────────────────────────────────
+9. SESSION MANAGEMENT [MIXED]
+──────────────────────────────────────────────────────
+Standard: JWT, opaque tokens, refresh token rotation, Secure+HttpOnly+SameSite cookies
+
+  - APIs: JWTs (stateless). Web apps: server-side sessions in Redis (revocable).
+  - Access tokens: expire 15-60 min. Refresh tokens: rotate on use, revocable.
+
+Rule: Session cookies must have HttpOnly + Secure + SameSite=Strict.
+
+
+──────────────────────────────────────────────────────
+10. API DESIGN & VERSIONING [BUILD]
+──────────────────────────────────────────────────────
+Standard: REST, OpenAPI/Swagger spec, semantic versioning
+
+  - Version from day one (/v1/). Use correct HTTP status codes.
+  - Document with OpenAPI. Design the contract first, then implement.
+  - FastAPI (fastapi.tiangolo.com) — auto-generates OpenAPI docs
+
+Key status codes:
+  200 OK, 201 Created, 400 Bad Request, 401 Unauthorized,
+  403 Forbidden, 404 Not Found, 429 Too Many Requests, 500 Server Error
+
+
+──────────────────────────────────────────────────────
+11. HEALTH CHECKS & RELIABILITY [BORROW]
+──────────────────────────────────────────────────────
+Standard: /health + /ready endpoints, liveness/readiness/startup probes
+
+  /health failure → restart the process
+  /ready failure → remove from load balancer
+  Rule: Every call to a DB, API, or queue must have a timeout.
+
+Tools: Prometheus + Grafana (prometheus.io), Datadog, Spring Actuator
+
+
+──────────────────────────────────────────────────────
+12. USER MANAGEMENT [MIXED]
+──────────────────────────────────────────────────────
+Standard: SCIM, MFA (TOTP/SMS/passkeys), GDPR right to erasure
+
+  - Most apps: Auth0, Supabase, or Firebase — handles full lifecycle
+  - Enterprise/internal: Integrate with Active Directory via SAML/OIDC
+
+Rule: Design your data model for GDPR right-to-erasure from day one.
+
+
+================================================================================
+PART 2 — INTEGRATION STANDARDS & INTEROPERABILITY
+================================================================================
+
+──────────────────────────────────────────────────────
+EVENT & ASYNC COMMUNICATION
+──────────────────────────────────────────────────────
+
+WEBHOOKS [BUILD]
+  Standard: CloudEvents spec (CNCF), HMAC-SHA256 signing, idempotency keys
+  Tools: Svix (svix.com), Hookdeck (hookdeck.com), Ngrok (dev testing)
+
+  - Always sign payloads with HMAC-SHA256; receiver verifies before processing
+  - Build retry logic with exponential backoff (5-10 retries)
+  - Never make webhook delivery synchronous — always async queue
+
+MESSAGE QUEUES / EVENT STREAMING [BORROW]
+  - IoT / constrained devices: MQTT + Mosquitto broker (mosquitto.org)
+  - High-throughput streams: Apache Kafka (kafka.apache.org) or AWS MSK
+  - Task queues / background jobs: RabbitMQ (rabbitmq.com) or AWS SQS
+  - Document events with AsyncAPI (asyncapi.com)
+
+  HOME AUTOMATION: MQTT + Mosquitto + zigbee2mqtt is the community-standard
+  local stack. Home Assistant speaks MQTT natively. No cloud dependency.
+
+SSE / WEBSOCKETS / REAL-TIME [BUILD]
+  - One-way server push: SSE (simpler, plain HTTP, auto-reconnects)
+  - Bi-directional real-time: WebSockets (Socket.io, SignalR)
+  - At scale: Ably (ably.com) or Pusher (pusher.com)
+
+──────────────────────────────────────────────────────
+OBSERVABILITY
+──────────────────────────────────────────────────────
+
+OPENTELEMETRY [ADOPT]
+  Standard: OTLP protocol, W3C TraceContext (traceparent header), semantic conventions
+  Tools: OpenTelemetry SDKs (opentelemetry.io), OTel Collector, Jaeger, Prometheus,
+         Grafana, Datadog, Honeycomb
+
+  - THREE PILLARS: Traces + Metrics + Logs — all connected via OTel
+  - Instrument once → route to ANY backend via OTel Collector
+  - W3C TraceContext propagates trace IDs across service boundaries
+  - OTel replaced OpenCensus and OpenTracing — go straight to OTel
+
+──────────────────────────────────────────────────────
+DEVICE & INDUSTRY PROTOCOLS
+──────────────────────────────────────────────────────
+
+ONVIF — IP CAMERAS [ADOPT]
+  Standard: ONVIF Profile S/T/G, RTSP for video, WS-Discovery for device detection
+  Tools: node-onvif, python-onvif, ONVIF Device Manager (free tool), FFmpeg
+
+  - WS-Discovery: UDP multicast Probe enumerates cameras on network
+  - RTSP: get stream URI from ONVIF, hand to FFmpeg for actual video
+  - ONVIF uses SOAP/XML — use an existing library, never hand-roll SOAP
+  - Test with ONVIF Device Manager before coding against specific camera
+
+MODBUS / BACNET / OPC UA — INDUSTRIAL [ADOPT]
+  - Simple sensors/PLCs: Modbus TCP/RTU (pymodbus, node-modbus)
+  - Building HVAC/lighting: BACnet/IP (node-bacnet)
+  - Modern industrial interop: OPC UA (node-opcua, Eclipse Milo)
+  IMPORTANT: Never expose Modbus or BACnet to the internet. Always use a secure gateway.
+
+MATTER / ZIGBEE / Z-WAVE / THREAD — SMART HOME [ADOPT]
+  - Zigbee + zigbee2mqtt + Mosquitto: most practical today, no cloud dependency
+  - Z-Wave: 900MHz (avoids 2.4GHz congestion), reliable for locks/sensors
+  - Matter: cross-platform future (Apple/Google/Amazon/Samsung)
+  Tools: Home Assistant (home-assistant.io), zigbee2mqtt (zigbee2mqtt.io),
+         Mosquitto (mosquitto.org), zwavejs2mqtt
+  RASPBERRY PI: Sonoff Zigbee 3.0 USB dongle (~$15) is all extra hardware needed.
+
+──────────────────────────────────────────────────────
+IDENTITY & FEDERATION
+──────────────────────────────────────────────────────
+
+SCIM / DIRECTORY SYNC [ADOPT]
+  Standard: SCIM 2.0 (RFC 7643/7644), JIT provisioning, SAML attribute mapping
+  Tools: WorkOS (workos.com), Auth0 SCIM, Okta, Microsoft Entra ID
+  WorkOS = single API for SAML + SCIM + directory sync across all major IdPs
+
+MULTI-TENANCY PATTERNS [BUILD]
+  - Pool: shared DB, tenant_id column. Cheapest, simplest.
+  - Silo: separate DB per tenant. Max isolation, expensive at scale.
+  - BEST PRACTICE: PostgreSQL Row-Level Security (RLS)
+  Tools: PostgreSQL RLS, Citus (citusdata.com), Neon (neon.tech)
+
+──────────────────────────────────────────────────────
+DATA FORMATS & SERVICE COMMUNICATION
+──────────────────────────────────────────────────────
+
+gRPC / PROTOCOL BUFFERS [ADOPT]
+  Use gRPC when: internal service-to-service, high throughput, polyglot
+  Use REST when: public APIs, browser clients, human-readable payloads
+  Tools: grpc.io, Buf CLI (buf.build), grpc-gateway
+  Rule: Proto field numbers never change. Never delete fields — deprecate them.
+
+GRAPHQL [MIXED]
+  Best for: mobile apps with multiple client types, complex nested data
+  Watch out for: N+1 queries — always use DataLoader for batching
+  Tools: Apollo (apollographql.com), Strawberry (Python), Hasura (hasura.io)
+
+──────────────────────────────────────────────────────
+OPERATIONS & DEPLOYMENT
+──────────────────────────────────────────────────────
+
+CI/CD & GITOPS [BORROW]
+  Rule: Never deploy manually to production. Git-triggered pipelines only.
+  Tools: GitHub Actions, GitLab CI, ArgoCD (Kubernetes GitOps)
+
+FEATURE FLAGS [BORROW]
+  Pattern: Deploy dark → release by flipping flag → roll out 1% → 10% → 100%
+  Tools: LaunchDarkly, Flagsmith (flagsmith.com), Unleash, OpenFeature SDK
+  Rule: Use OpenFeature SDK — swap providers without changing code.
+
+
+================================================================================
+PART 3 — UI/UX & DESIGN SYSTEMS
+================================================================================
+
+THE CORE PROBLEM: "Blocky" UIs come from inconsistent spacing, ad-hoc colors,
+and raw CSS without a design scale. The solution is a design system.
+
+──────────────────────────────────────────────────────
+DESIGN SYSTEMS & COMPONENT LIBRARIES [BORROW]
+──────────────────────────────────────────────────────
+THE RECOMMENDED STACK FOR NON-DESIGNERS:
+  1. Tailwind CSS (tailwindcss.com) — utility classes that enforce consistent
+     spacing, color, and sizing scale. Directly solves the blocky problem.
+  2. shadcn/ui (ui.shadcn.com) — production-quality components you copy into
+     your project and own. Professionally designed and accessible.
+  3. Figma (figma.com) — free tier + community UI kits. Design before coding.
+  4. Radix UI (radix-ui.com) — accessible primitives (keyboard + screen reader).
+
+Other component libraries:
+  - Material UI / MUI (mui.com), Ant Design (ant.design), Chakra UI (chakra-ui.com)
+
+Design tokens: define --color-primary, --space-4, --radius-lg as CSS custom
+properties. Change the token, the whole app updates consistently.
+
+──────────────────────────────────────────────────────
+UX PATTERNS & PRINCIPLES [BUILD]
+──────────────────────────────────────────────────────
+  - Loading states: indicator if >200ms; skeleton screen if >1s
+  - Optimistic UI: update immediately, reconcile with server response
+    → TanStack Query (tanstack.com/query) handles this
+  - Empty states: illustration + explanation + call to action (not a blank page)
+  - Toast notifications: Sonner (sonner.emilkowal.ski)
+  - Progressive disclosure: show summary, reveal detail on demand
+
+──────────────────────────────────────────────────────
+RESPONSIVE DESIGN [BORROW]
+──────────────────────────────────────────────────────
+Standard: Mobile-first CSS, CSS Grid + Flexbox, 44px minimum touch targets
+  - Design smallest screen first, add complexity for larger
+  - Tailwind's sm: md: lg: prefixes make mobile-first natural
+  - CSS Grid = two-dimensional layout. Flexbox = one-dimensional alignment.
+  Rule: Retrofitting desktop-only apps for mobile is extremely painful.
+
+──────────────────────────────────────────────────────
+MOTION & ANIMATION [BORROW]
+──────────────────────────────────────────────────────
+KEY TOOL: AutoAnimate (auto-animate.formkit.com) — one line added to any
+list/container = items animate in/out automatically. Biggest visual improvement
+for least effort.
+
+Advanced: Framer Motion (framer.com/motion), GSAP (greensock.com)
+
+Rules:
+  - Animate state changes; do not animate for decoration
+  - Duration 150-400ms; longer feels sluggish
+  - Always use @media (prefers-reduced-motion: no-preference)
+
+──────────────────────────────────────────────────────
+ACCESSIBILITY (a11y) [MIXED]
+──────────────────────────────────────────────────────
+Standard: WCAG 2.1 AA, ARIA roles, 4.5:1 color contrast ratio
+
+  - Use semantic HTML (<button>, <nav>, <main>) — accessible by default
+  - shadcn/ui and Radix UI are keyboard-navigable and screen-reader compatible
+  - Run axe-core (deque.com/axe) in CI to catch violations automatically
+  - WAVE tool (wave.webaim.org) for manual page audits
+
+Rule: WCAG 2.1 AA is legally required in many jurisdictions.
+      ADA inaccessibility has resulted in lawsuits against major companies.
+
+
+================================================================================
+PART 4 — DATA, STORAGE & PERFORMANCE
+================================================================================
+
+──────────────────────────────────────────────────────
+DATABASE SELECTION [MIXED]
+──────────────────────────────────────────────────────
+  - Most apps: PostgreSQL (postgresql.org) — JSON, FTS, RLS, huge ecosystem
+  - Local/embedded/Raspberry Pi: SQLite (sqlite.org)
+  - Document/unstructured: MongoDB (mongodb.com)
+  - Cache/queue: Redis (redis.io)
+
+ORM with migrations: Prisma (prisma.io) or Drizzle ORM (orm.drizzle.team)
+
+Rules:
+  - Always write a migration file for schema changes
+  - Test migrations on staging before production
+  - Never DROP COLUMN without a rollback plan
+
+──────────────────────────────────────────────────────
+CACHING STRATEGY [MIXED]
+──────────────────────────────────────────────────────
+Cache layers (apply all relevant):
+  1. Browser cache — HTTP Cache-Control, ETag headers
+  2. CDN — static assets and edge-cached responses (Cloudflare)
+  3. Application cache — Redis for computed results
+  4. Client-side — TanStack Query or SWR (swr.vercel.app)
+
+Rule: Have an explicit cache invalidation strategy.
+      Stale data is often worse than slow data.
+
+──────────────────────────────────────────────────────
+SEARCH [BORROW]
+──────────────────────────────────────────────────────
+  - Most apps: Meilisearch (meilisearch.com) — fast, easy to self-host
+  - Higher scale: Typesense (typesense.org) or Elasticsearch (elastic.co)
+  - SaaS: Algolia (algolia.com)
+  - Simple cases: PostgreSQL full-text search (tsvector/tsquery)
+
+Rule: Never use LIKE %term% — full table scans, catastrophically slow at scale.
+
+──────────────────────────────────────────────────────
+FILE STORAGE & MEDIA [BORROW]
+──────────────────────────────────────────────────────
+Standard: S3-compatible object storage, presigned URLs, CDN delivery
+
+  - AWS S3 (aws.amazon.com/s3) — widest ecosystem
+  - Cloudflare R2 (cloudflare.com/r2) — S3-compatible, no egress fees
+  - MinIO (min.io) — self-hosted S3-compatible (great for Pi deployments)
+  - Cloudinary (cloudinary.com) — image/video with resizing and CDN
+
+Pattern: Generate presigned URL → client uploads/downloads directly to storage.
+         Your server never touches the bytes.
+
+Rules:
+  - Never store binary files in your database
+  - Always virus-scan user uploads
+  - Use presigned URLs, not streaming through your server
+
+──────────────────────────────────────────────────────
+FRONTEND PERFORMANCE [MIXED]
+──────────────────────────────────────────────────────
+Standard: Core Web Vitals (LCP, CLS, INP), code splitting, WebP/AVIF images
+
+  - Run Lighthouse to audit (developer.chrome.com/docs/lighthouse)
+  - Serve images in WebP or AVIF (50-80% smaller than JPEG/PNG)
+  - Use Vite (vitejs.dev) or Next.js — code splitting is automatic
+  - Lazy load below-the-fold images
+
+Rule: Users leave after 3 seconds. Images are usually the biggest offender.
+
+──────────────────────────────────────────────────────
+BACKEND PERFORMANCE & SCALING [MIXED]
+──────────────────────────────────────────────────────
+  - Use EXPLAIN ANALYZE on slow Postgres queries
+  - Move slow work to background jobs: BullMQ (Node), Celery (Python)
+  - PgBouncer (pgbouncer.org) for Postgres connection pooling
+  - Load test with k6 (k6.io) before launch
+
+Rule: Profile before optimizing. Most problems are missing indexes or N+1 queries.
+
+──────────────────────────────────────────────────────
+LOCAL DEV ENVIRONMENT [BORROW]
+──────────────────────────────────────────────────────
+  - Docker Compose: one-command setup for DB, Redis, all services
+  - dotenv: environment variable management
+  - Mise (mise.jdx.dev): tool version manager
+  - Just (just.systems): task runner
+
+Rule: Dev/prod should use the same database type. SQLite in dev, Postgres in
+      prod means bugs you cannot reproduce locally.
+
+──────────────────────────────────────────────────────
+TESTING STRATEGY [MIXED]
+──────────────────────────────────────────────────────
+Standard: Testing pyramid — many unit, fewer integration, handful of E2E
+
+  - Unit: Vitest (vitest.dev) / Jest for JS, pytest (pytest.org) for Python
+  - E2E browser: Playwright (playwright.dev) — current best-in-class
+  - Contract: Pact (pact.io) — verifies API agreements between services
+
+Rules:
+  - Test what would be catastrophic if broken: auth, checkout, data mutations
+  - Playwright can generate tests by recording your browser clicks
+
+──────────────────────────────────────────────────────
+DOCUMENTATION [MIXED]
+──────────────────────────────────────────────────────
+  - Architecture Decision Records (ADRs): short markdown per significant decision
+  - README minimum: what it does, how to run, how to test, how to deploy, config
+  - Storybook (storybook.js.org): living catalog of UI components
+  - OpenAPI/Swagger for all REST APIs
+
+
+================================================================================
+PART 5 — BUSINESS, COMPLIANCE & AI
+================================================================================
+
+──────────────────────────────────────────────────────
+PRIVACY & DATA COMPLIANCE [MIXED]
+──────────────────────────────────────────────────────
+  - GDPR (EU): applies to ANY EU user regardless of company location
+    Key: consent for tracking, right to export, right to deletion, 72hr breach notification
+  - CCPA (California), HIPAA (healthcare PHI), PCI-DSS (payment cards)
+  - Encrypt PII at rest with separate key management
+  - Collect only what you need (data minimization)
+
+HIPAA: every vendor touching Protected Health Information needs a BAA.
+
+Consent tools: OneTrust (onetrust.com), Osano (osano.com), Transcend (transcend.io)
+
+FINES: GDPR up to 4% global revenue or €20M. HIPAA up to $1.9M per violation/year.
+
+──────────────────────────────────────────────────────
+PAYMENTS & BILLING [BORROW]
+──────────────────────────────────────────────────────
+  - Use Stripe (stripe.com) — handles PCI, fraud, 3DS, subscriptions, tax, disputes
+  - Paddle (paddle.com) / LemonSqueezy — merchant of record (handles VAT/sales tax)
+  - Lago (getlago.com) — open-source billing engine
+
+Rules:
+  - Never touch raw card numbers — use Stripe Elements (card input in Stripe's iframe)
+  - Use idempotency keys for payment operations
+  - Use webhook events to track payment state
+
+STORING RAW CARD NUMBERS: illegal without PCI-DSS Level 1. Results in massive
+fines and being banned from card networks.
+
+──────────────────────────────────────────────────────
+ANALYTICS & ERROR MONITORING [BORROW]
+──────────────────────────────────────────────────────
+MANDATORY: Sentry (sentry.io) for error monitoring. Free tier sufficient.
+           Without it you won't know your app is broken until users complain.
+
+Product analytics:
+  - PostHog (posthog.com) — open-source, self-hostable, all-in-one
+  - Plausible (plausible.io) — privacy-first, GDPR-compliant, no consent banner
+  - Mixpanel (mixpanel.com), Amplitude (amplitude.com) — enterprise
+
+──────────────────────────────────────────────────────
+USER SUPPORT & FEEDBACK [BORROW]
+──────────────────────────────────────────────────────
+  - Intercom (intercom.com) or Crisp (crisp.chat) — in-app chat + support
+  - Canny (canny.io) — feature request tracking and voting
+  - Statuspage (atlassian.com/software/statuspage) — incident status page
+
+Rule: Every production app needs a status page.
+      When you're down, users need somewhere to look.
+
+──────────────────────────────────────────────────────
+AI / LLM INTEGRATION [BORROW]
+──────────────────────────────────────────────────────
+Standard: Prompt engineering, RAG, function/tool calling, streaming, evals
+
+  - Vercel AI SDK (sdk.vercel.ai) — single library for OpenAI, Anthropic, etc.
+    Handles streaming, tool calling, state. Start here.
+  - Anthropic Claude API (anthropic.com) — strong reasoning
+  - OpenAI API (openai.com) — widest ecosystem
+  - Ollama (ollama.ai) — run LLMs locally. No data leaves machine.
+    No API costs. Works on Raspberry Pi 5 with sufficient RAM.
+
+For RAG (knowledge-grounded responses):
+  - pgvector (github.com/pgvector/pgvector) — vector search in PostgreSQL
+  - Pinecone (pinecone.io) — managed vector database
+  - LangChain (langchain.com) — complex multi-step AI workflows
+
+Rules:
+  - Build an eval set (test inputs + expected outputs), run after every prompt change
+  - LLM outputs are non-deterministic — test systematically
+
+HOME AUTOMATION: Ollama on a local Pi 5 = voice/text commands on-device,
+no cloud dependency, no API costs.
+
+──────────────────────────────────────────────────────
+WORKFLOW AUTOMATION [BORROW]
+──────────────────────────────────────────────────────
+  - n8n (n8n.io) — self-hosted visual automation. Like Zapier on your own server/Pi.
+    400+ integrations. Free, open-source. Perfect for home automation.
+  - Temporal (temporal.io) — durable long-running workflows in code. Survives restarts.
+  - Inngest (inngest.com) — managed, simpler DX. Step functions in your app code.
+  - Zapier (zapier.com) / Make (make.com) — hosted no-code options
+
+
+================================================================================
+MASTER QUICK DECISION GUIDE
+================================================================================
+
+ALWAYS BORROW (never build from scratch):
+  Authentication          → Auth0 / Supabase / Keycloak / Firebase
+  TLS/HTTPS               → Let's Encrypt + Certbot
+  Secrets management      → HashiCorp Vault / AWS Secrets Manager
+  Rate limiting           → Cloudflare WAF + app-level library
+  Message queues          → RabbitMQ / SQS / Kafka / MQTT + Mosquitto
+  Observability           → OpenTelemetry SDK + any backend
+  Feature flags           → LaunchDarkly / Flagsmith + OpenFeature SDK
+  CI/CD                   → GitHub Actions / GitLab CI
+  Payments                → Stripe (never handle raw card numbers)
+  File storage            → S3-compatible (AWS S3, Cloudflare R2, MinIO)
+  Search                  → Meilisearch / Typesense
+  Error monitoring        → Sentry (mandatory for production)
+  Workflow automation     → n8n (self-hosted) or Inngest
+
+BUILD yourself (domain-specific logic):
+  Authorization rules and role definitions
+  API endpoint design and versioning strategy
+  Error message formats and error codes
+  Health check logic (which dependencies to verify)
+  Business event schemas and webhook payload shapes
+  Multi-tenant data model and isolation strategy
+  Feature flag names and rollout strategy
+  UI component behavior and app-specific UX flows
+  Prompt engineering for your specific AI use cases
+
+ADOPT THE STANDARD (implement against the specification):
+  ONVIF               → IP camera integration (use existing ONVIF library)
+  Modbus / BACnet     → industrial and building systems
+  OPC UA              → modern industrial interop
+  MQTT                → IoT device messaging (Zigbee2MQTT + Mosquitto)
+  Matter / Zigbee     → consumer smart home devices
+  SCIM 2.0            → enterprise user provisioning
+  OpenAPI / Swagger   → REST API documentation
+  CloudEvents spec    → webhook payload format
+  AsyncAPI            → event-driven API documentation
+  W3C TraceContext    → distributed trace propagation
+  WCAG 2.1 AA         → accessibility standard
+  OAuth 2.0 / OIDC    → authentication protocol
+
+UI/UX STACK (for non-designers wanting professional results):
+  Tailwind CSS        → eliminates the blocky problem (enforces design scale)
+  shadcn/ui           → production-quality copy-paste components
+  AutoAnimate         → one-line animation for lists and containers
+  Framer Motion       → advanced animation
+  Figma               → design before coding (free tier + community kits)
+  TanStack Query      → client-side data fetching, caching, optimistic UI
+  Radix UI            → accessible component primitives
+  axe-core            → automated accessibility testing in CI
+
+
+================================================================================
+KEY NON-NEGOTIABLE RULES (29 rules)
+================================================================================
+
+Security:
+  1.  HTTPS/TLS everywhere — no exceptions, no HTTP in production
+  2.  Never store plaintext passwords — use bcrypt/scrypt/Argon2
+  3.  Never commit secrets to git — env vars + secrets manager
+  4.  Parameterized SQL queries always — never string-concatenate user input
+  5.  Never expose stack traces to users — log internally, return generic error
+  6.  Validate ALL external input at the boundary
+  7.  Rate limit auth endpoints: 5 attempts/15min/IP minimum
+  8.  Sign webhook payloads with HMAC-SHA256
+
+Architecture:
+  9.  Version your API from day one (/v1/)
+  10. Set timeouts on ALL external calls (DB, API, queue)
+  11. Log in structured JSON with correlation IDs
+  12. Expose /health and /ready endpoints
+  13. Never deploy manually to production — use a CI/CD pipeline
+  14. Move slow work (emails, reports, uploads) to background jobs
+
+UI/UX:
+  15. Use Tailwind CSS + shadcn/ui for consistent, professional UI
+  16. Every user action needs feedback within 200ms
+  17. Design for mobile first, then expand to desktop
+  18. Test for WCAG 2.1 AA with axe-core in CI
+
+Data & storage:
+  19. Never store binary files in your database — use object storage
+  20. Always write a migration file before changing production schema
+  21. Never use LIKE %term% for search — use a proper search engine
+  22. Always virus-scan user uploads before storing or serving
+  23. Use presigned URLs for file upload/download — server never touches bytes
+
+IoT & industrial:
+  24. Never expose Modbus or BACnet directly to the internet
+  25. Use MQTT + Mosquitto for local IoT messaging
+  26. Use ONVIF for IP cameras — use an existing library, not hand-rolled SOAP
+
+Compliance:
+  27. Design for GDPR right-to-erasure from day one
+  28. Never handle raw credit card numbers — use Stripe Elements
+  29. HIPAA: every vendor touching PHI needs a Business Associate Agreement
+
+================================================================================
+END OF DOCUMENT
+================================================================================

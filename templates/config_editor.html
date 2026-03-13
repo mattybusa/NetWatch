@@ -1,0 +1,712 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Config Editor{% endblock %}
+
+{% block content %}
+
+<div style="max-width:780px;">
+
+  <h2 style="font-family:var(--font-mono);color:var(--accent);font-size:1.1rem;letter-spacing:2px;margin-bottom:6px;">
+    CONFIGURATION EDITOR
+  </h2>
+  <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:{% if unconfigured_keys %}12px{% else %}24px{% endif %};">
+    Changes are written directly to config.py. The previous config is backed up automatically.
+    The monitor service restarts after saving so changes take effect immediately.
+  </p>
+
+  {% if unconfigured_keys %}
+  <div style="background:rgba(210,153,34,0.1);border:1px solid #d29922;border-radius:8px;
+              padding:10px 14px;margin-bottom:20px;font-size:0.82rem;color:#d29922;display:flex;
+              align-items:center;gap:10px;">
+    <i class="bi bi-exclamation-triangle" style="font-size:1rem;flex-shrink:0;"></i>
+    <span>
+      {{ unconfigured_keys|length }} setting{{ 's' if unconfigured_keys|length != 1 else '' }}
+      still {{ 'have' if unconfigured_keys|length != 1 else 'has' }} placeholder values
+      and need{{ '' if unconfigured_keys|length != 1 else 's' }} to be configured.
+      Look for the <span style="background:#d29922;color:#000;font-size:0.7rem;padding:1px 5px;
+      border-radius:3px;font-weight:700;">NEEDS SETUP</span> badge below.
+    </span>
+  </div>
+  {% endif %}
+
+  <!-- Save bar — sticky at top -->
+  <div id="save-bar"
+       style="position:sticky;top:60px;z-index:50;
+              background:var(--bg-card);border:1px solid var(--border-color);
+              border-radius:10px;padding:12px 16px;margin-bottom:24px;
+              display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+              box-shadow:var(--shadow);">
+    <span style="color:var(--text-muted);font-size:0.82rem;flex:1;">
+      Changes are not saved until you click Save.
+    </span>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="nw-btn" onclick="exportConfig()" title="Download encrypted config backup"
+              style="font-size:0.8rem;">
+        <i class="bi bi-box-arrow-up"></i> Export
+      </button>
+      <label class="nw-btn" title="Import encrypted config backup"
+             style="font-size:0.8rem;cursor:pointer;">
+        <i class="bi bi-box-arrow-in-down"></i> Import
+        <input type="file" id="import-file-input" accept=".nwcfg"
+               style="display:none;" onchange="triggerImport(this)">
+      </label>
+      <button class="nw-btn" onclick="rollbackConfig()"
+              style="border-color:var(--warn);color:var(--warn);font-size:0.8rem;">
+        ↩ Restore Backup
+      </button>
+      <button class="nw-btn nw-btn-primary" onclick="saveConfig()" style="font-size:0.8rem;">
+        ✓ Save &amp; Restart Monitor
+      </button>
+    </div>
+  </div>
+
+  <!-- Save result -->
+  <div id="save-result" style="display:none;margin-bottom:20px;padding:12px 16px;
+                                border-radius:8px;font-size:0.85rem;"></div>
+
+  <!-- ── Config Sections ── -->
+  {% for section_name, fields in sections.items() %}
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-3">{{ section_name }}</div>
+
+    {% for field in fields %}
+    <div style="margin-bottom:18px;{% if loop.last %}margin-bottom:0;{% endif %}
+                {% if field.key in unconfigured_keys %}
+                background:rgba(210,153,34,0.06);border-radius:8px;padding:10px 12px;
+                border-left:3px solid #d29922;margin-left:-12px;
+                {% endif %}">
+      <label style="display:block;font-size:0.72rem;font-weight:600;
+                    color:var(--text-label);letter-spacing:1px;
+                    text-transform:uppercase;margin-bottom:6px;">
+        {{ field.label }}
+        {% if field.key in unconfigured_keys %}
+        <span style="background:#d29922;color:#000;font-size:0.65rem;padding:1px 6px;
+                     border-radius:3px;font-weight:700;margin-left:6px;vertical-align:middle;">
+          NEEDS SETUP
+        </span>
+        {% endif %}
+      </label>
+
+      {% if field.type == 'bool' %}
+        <!-- Toggle switch for booleans -->
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="position:relative;display:inline-block;width:44px;height:24px;cursor:pointer;"
+               onclick="toggleBool('{{ field.key }}')">
+            <input type="checkbox" id="field_{{ field.key }}" name="{{ field.key }}"
+                   {% if values.get(field.key) %}checked{% endif %}
+                   style="opacity:0;width:0;height:0;position:absolute;"
+                   onclick="event.stopPropagation()">
+            <span id="toggle_{{ field.key }}"
+                  style="position:absolute;inset:0;border-radius:24px;
+                         background:{% if values.get(field.key) %}var(--ok){% else %}var(--border-color){% endif %};
+                         transition:background 0.2s;cursor:pointer;pointer-events:none;">
+              <span style="position:absolute;left:{% if values.get(field.key) %}22px{% else %}2px{% endif %};
+                           top:2px;width:20px;height:20px;border-radius:50%;
+                           background:white;transition:left 0.2s;"></span>
+            </span>
+          </div>
+          <span id="bool_label_{{ field.key }}" style="font-size:0.83rem;color:{% if values.get(field.key) %}var(--ok){% else %}var(--text-muted){% endif %};">
+            {% if values.get(field.key) %}Enabled{% else %}Disabled{% endif %}
+          </span>
+        </div>
+
+      {% elif field.type == 'password' %}
+        <!-- Password field with show/hide toggle -->
+        <div style="position:relative;display:flex;gap:8px;align-items:center;">
+          <input class="nw-input" type="password" id="field_{{ field.key }}"
+                 name="{{ field.key }}" value="{{ values.get(field.key, '') }}"
+                 style="flex:1;font-family:var(--font-mono);">
+          <button onclick="togglePass('field_{{ field.key }}')"
+                  style="background:var(--bg-input);border:1px solid var(--border-color);
+                         border-radius:6px;padding:8px 12px;color:var(--text-muted);
+                         cursor:pointer;font-size:0.78rem;white-space:nowrap;">
+            Show
+          </button>
+        </div>
+
+      {% elif field.type == 'int' %}
+        <!-- Number input with optional min/max hints -->
+        <input class="nw-input" type="number" id="field_{{ field.key }}"
+               name="{{ field.key }}" value="{{ values.get(field.key, '') }}"
+               {% if field.get('min') is not none %}min="{{ field.min }}"{% endif %}
+               {% if field.get('max') is not none %}max="{{ field.max }}"{% endif %}
+               style="max-width:200px;">
+        {% if field.get('min') is not none and field.get('max') is not none %}
+          <span style="font-size:0.72rem;color:var(--text-muted);margin-left:8px;">
+            Range: {{ field.min }} – {{ field.max }}
+          </span>
+        {% endif %}
+
+      {% else %}
+        <!-- String input -->
+        <input class="nw-input" type="text" id="field_{{ field.key }}"
+               name="{{ field.key }}" value="{{ values.get(field.key, '') }}">
+      {% endif %}
+
+      <div style="font-size:0.73rem;color:var(--text-muted);margin-top:5px;line-height:1.4;">
+        {{ field.desc }}
+      </div>
+    </div>
+
+    {% if not loop.last %}<hr class="nw-hr">{% endif %}
+    {% endfor %}
+
+  </div>
+  {% endfor %}
+
+  <!-- Bottom save button -->
+  <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px;">
+    <button class="nw-btn" onclick="rollbackConfig()" style="border-color:var(--warn);color:var(--warn);">
+      ↩ Restore Backup
+    </button>
+    <button class="nw-btn nw-btn-primary" onclick="saveConfig()">
+      ✓ Save &amp; Restart Monitor
+    </button>
+  </div>
+
+</div>
+
+<!-- ── Passphrase modal (export + import) ── -->
+<div id="passphrase-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);
+     z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--bg-card);border-radius:12px;padding:28px;max-width:420px;width:90%;
+              border:1px solid var(--border-color);box-shadow:var(--shadow);">
+    <div class="nw-label mb-3" id="passphrase-title" style="font-size:0.9rem;">EXPORT CONFIG</div>
+    <p id="passphrase-desc" style="font-size:0.83rem;color:var(--text-secondary);margin-bottom:18px;line-height:1.5;"></p>
+
+    <div style="margin-bottom:16px;">
+      <label class="nw-label" style="display:block;margin-bottom:6px;font-size:0.72rem;">Passphrase</label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input class="nw-input" type="password" id="passphrase-input" placeholder="Enter passphrase…"
+               style="flex:1;font-family:var(--font-mono);"
+               onkeydown="if(event.key==='Enter')passphraseConfirm()">
+        <button onclick="togglePass('passphrase-input')"
+                style="background:var(--bg-input);border:1px solid var(--border-color);
+                       border-radius:6px;padding:8px 12px;color:var(--text-muted);
+                       cursor:pointer;font-size:0.78rem;white-space:nowrap;">Show</button>
+      </div>
+    </div>
+
+    <div id="passphrase-msg" style="display:none;font-size:0.82rem;margin-bottom:14px;
+         padding:8px 12px;border-radius:6px;"></div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="nw-btn" onclick="closePassphraseModal()">Cancel</button>
+      <button class="nw-btn nw-btn-primary" id="passphrase-confirm-btn"
+              onclick="passphraseConfirm()">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Import diff modal ── -->
+<div id="import-diff-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);
+     z-index:1001;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 16px;">
+  <div style="background:var(--bg-card);border-radius:12px;padding:28px;max-width:680px;width:100%;
+              border:1px solid var(--border-color);box-shadow:var(--shadow);margin:auto;">
+    <div class="nw-label mb-1" style="font-size:0.9rem;">IMPORT — REVIEW CHANGES</div>
+    <p id="diff-subtitle" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:20px;"></p>
+
+    <div id="diff-rows"></div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap;">
+      <button class="nw-btn" onclick="closeDiffModal()">Cancel</button>
+      <button class="nw-btn" onclick="diffSelectAll('keep')"
+              style="font-size:0.78rem;">Keep All Current</button>
+      <button class="nw-btn" onclick="diffSelectAll('import')"
+              style="font-size:0.78rem;">Use All Imported</button>
+      <button class="nw-btn nw-btn-primary" onclick="applyDiff()">
+        Apply Selected &amp; Close
+      </button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Toggle switch for booleans ────────────────────────────────────────────────
+function toggleBool(key) {
+  const cb     = document.getElementById("field_" + key);
+  const toggle = document.getElementById("toggle_" + key);
+  const label  = document.getElementById("bool_label_" + key);
+  const dot    = toggle.querySelector("span");
+
+  cb.checked = !cb.checked;
+
+  if (cb.checked) {
+    toggle.style.background = "var(--ok)";
+    dot.style.left          = "22px";
+    label.textContent       = "Enabled";
+    label.style.color       = "var(--ok)";
+  } else {
+    toggle.style.background = "var(--border-color)";
+    dot.style.left          = "2px";
+    label.textContent       = "Disabled";
+    label.style.color       = "var(--text-muted)";
+  }
+}
+
+// ── Password show/hide ────────────────────────────────────────────────────────
+function togglePass(id) {
+  const input = document.getElementById(id);
+  const btn   = input.nextElementSibling;
+  if (input.type === "password") {
+    input.type      = "text";
+    btn.textContent = "Hide";
+  } else {
+    input.type      = "password";
+    btn.textContent = "Show";
+  }
+}
+
+// ── Collect all field values ──────────────────────────────────────────────────
+function collectValues() {
+  const fields = {{ fields_json|safe }};
+  const values = {};
+
+  for (const field of fields) {
+    const el = document.getElementById("field_" + field.key);
+    if (!el) continue;
+
+    if (field.type === "bool") {
+      values[field.key] = el.checked ? "True" : "False";
+    } else {
+      values[field.key] = el.value;
+    }
+  }
+  return values;
+}
+
+// ── Save ──────────────────────────────────────────────────────────────────────
+async function saveConfig() {
+  const values = collectValues();
+  const result = document.getElementById("save-result");
+
+  const res = await fetch("/api/config/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(values)
+  }).then(r => r.json());
+
+  result.style.display = "block";
+
+  if (res.success) {
+    result.style.background = "var(--ok-glow)";
+    result.style.border     = "1px solid var(--ok)";
+    result.innerHTML = `✓ <strong>Config saved.</strong> Services restarting… <span id="restart-counter"></span>`;
+    showToast("Config saved successfully", "success");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    await new Promise(r => setTimeout(r, 2500));
+    let elapsed = 0;
+    const maxWait = 30000;
+    const poll    = 1500;
+    const counter = document.getElementById("restart-counter");
+    while (elapsed < maxWait) {
+      await new Promise(r => setTimeout(r, poll));
+      elapsed += poll;
+      if (counter) counter.textContent = `(${Math.round(elapsed/1000)}s)`;
+      try {
+        const ping = await fetch("/api/auth/me", {signal: AbortSignal.timeout(1000)});
+        if (ping.ok) { await new Promise(r => setTimeout(r, 800)); location.reload(); return; }
+      } catch(e) { /* server not up yet */ }
+    }
+    location.reload();
+  } else {
+    result.style.background = "var(--fail-glow)";
+    result.style.border     = "1px solid var(--fail)";
+    result.innerHTML = `✗ <strong>Save failed:</strong><br><pre style="margin-top:8px;font-family:var(--font-mono);font-size:0.78rem;white-space:pre-wrap;">${esc(res.message)}</pre>`;
+    showToast("Save failed", "error");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+}
+
+// ── Rollback ──────────────────────────────────────────────────────────────────
+async function rollbackConfig() {
+  if (!confirm("Restore the previous config.py backup? Current settings will be overwritten.")) return;
+
+  const res = await fetch("/api/config/rollback", { method: "POST" }).then(r => r.json());
+  showToast(res.message, res.success ? "success" : "error");
+
+  if (res.success) {
+    setTimeout(() => window.location.reload(), 2000);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EXPORT / IMPORT — AES-GCM via WebCrypto, passphrase → PBKDF2 key derivation
+// File format: JSON { v, salt, iv, data }  all base64-encoded binary fields
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Passphrase modal state ────────────────────────────────────────────────────
+let _passphraseMode     = null;   // 'export' | 'import'
+let _pendingImportData  = null;   // raw file text waiting for passphrase
+
+function openPassphraseModal(mode) {
+  _passphraseMode = mode;
+  const modal = document.getElementById("passphrase-modal");
+  const title = document.getElementById("passphrase-title");
+  const desc  = document.getElementById("passphrase-desc");
+  const msg   = document.getElementById("passphrase-msg");
+  const input = document.getElementById("passphrase-input");
+
+  title.textContent = mode === "export" ? "EXPORT CONFIG" : "IMPORT CONFIG";
+  desc.textContent  = mode === "export"
+    ? "Choose a passphrase to encrypt the config backup. You will need this passphrase to import it later. Store it somewhere safe."
+    : "Enter the passphrase that was used to encrypt this backup file.";
+
+  msg.style.display = "none";
+  input.value       = "";
+  input.type        = "password";
+  input.nextElementSibling.textContent = "Show";
+
+  modal.style.display = "flex";
+  setTimeout(() => input.focus(), 80);
+}
+
+function closePassphraseModal() {
+  document.getElementById("passphrase-modal").style.display = "none";
+  _passphraseMode    = null;
+  _pendingImportData = null;
+  // Reset file input so same file can be re-selected
+  const fi = document.getElementById("import-file-input");
+  if (fi) fi.value = "";
+}
+
+function passphraseModalMsg(text, isError) {
+  const msg = document.getElementById("passphrase-msg");
+  msg.textContent        = text;
+  msg.style.display      = "block";
+  msg.style.background   = isError ? "var(--fail-glow)"  : "var(--ok-glow)";
+  msg.style.border       = isError ? "1px solid var(--fail)" : "1px solid var(--ok)";
+  msg.style.color        = isError ? "var(--fail)"        : "var(--ok)";
+}
+
+async function passphraseConfirm() {
+  const passphrase = document.getElementById("passphrase-input").value.trim();
+  if (!passphrase) {
+    passphraseModalMsg("Passphrase cannot be empty.", true);
+    return;
+  }
+  if (_passphraseMode === "export") {
+    await doExport(passphrase);
+  } else if (_passphraseMode === "import") {
+    await doImport(passphrase);
+  }
+}
+
+// Close modal on backdrop click
+document.getElementById("passphrase-modal").addEventListener("click", function(e) {
+  if (e.target === this) closePassphraseModal();
+});
+
+// ── WebCrypto helpers ─────────────────────────────────────────────────────────
+function b64Encode(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function b64Decode(str) {
+  return Uint8Array.from(atob(str), c => c.charCodeAt(0));
+}
+
+async function deriveKey(passphrase, salt) {
+  const enc      = new TextEncoder();
+  const keyMat   = await crypto.subtle.importKey(
+    "raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" },
+    keyMat,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptPayload(plaintext, passphrase) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv   = crypto.getRandomValues(new Uint8Array(12));
+  const key  = await deriveKey(passphrase, salt);
+  const enc  = new TextEncoder();
+  const ct   = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(plaintext));
+  return JSON.stringify({ v: 1, salt: b64Encode(salt), iv: b64Encode(iv), data: b64Encode(ct) });
+}
+
+async function decryptPayload(fileText, passphrase) {
+  let parsed;
+  try { parsed = JSON.parse(fileText); } catch { throw new Error("File is not valid JSON."); }
+  if (!parsed.v || !parsed.salt || !parsed.iv || !parsed.data) {
+    throw new Error("File does not look like a NetWatch config backup.");
+  }
+  const salt = b64Decode(parsed.salt);
+  const iv   = b64Decode(parsed.iv);
+  const ct   = b64Decode(parsed.data);
+  const key  = await deriveKey(passphrase, salt);
+  let plain;
+  try {
+    const buf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+    plain = new TextDecoder().decode(buf);
+  } catch {
+    throw new Error("Decryption failed — wrong passphrase or corrupted file.");
+  }
+  let payload;
+  try { payload = JSON.parse(plain); } catch { throw new Error("Decrypted data is not valid JSON."); }
+  if (!payload._netwatch || !payload.values) {
+    throw new Error("Decrypted data is not a NetWatch config backup.");
+  }
+  return payload;
+}
+
+// ── Export flow ───────────────────────────────────────────────────────────────
+function exportConfig() {
+  openPassphraseModal("export");
+}
+
+async function doExport(passphrase) {
+  const btn = document.getElementById("passphrase-confirm-btn");
+  btn.disabled    = true;
+  btn.textContent = "Encrypting…";
+
+  try {
+    const raw = await fetch("/api/config/export").then(r => r.json());
+    if (!raw._netwatch) throw new Error("Unexpected server response.");
+
+    const encrypted = await encryptPayload(JSON.stringify(raw), passphrase);
+
+    // Trigger browser download
+    const blob = new Blob([encrypted], { type: "application/octet-stream" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    const date = new Date().toISOString().slice(0, 10);
+    a.href     = url;
+    a.download = `netwatch-config-${date}.nwcfg`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showToast("Config exported successfully", "success");
+    closePassphraseModal();
+  } catch (e) {
+    passphraseModalMsg("Export failed: " + e.message, true);
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = "Continue";
+  }
+}
+
+// ── Import flow ───────────────────────────────────────────────────────────────
+function triggerImport(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    _pendingImportData = e.target.result;
+    openPassphraseModal("import");
+  };
+  reader.readAsText(file);
+}
+
+async function doImport(passphrase) {
+  const btn = document.getElementById("passphrase-confirm-btn");
+  btn.disabled    = true;
+  btn.textContent = "Decrypting…";
+
+  try {
+    const payload = await decryptPayload(_pendingImportData, passphrase);
+    closePassphraseModal();
+    showImportDiff(payload);
+  } catch (e) {
+    passphraseModalMsg(e.message, true);
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = "Continue";
+  }
+}
+
+// ── Import diff modal ─────────────────────────────────────────────────────────
+let _diffPayload = null;  // { key → { label, type, current, imported } } for changed fields
+
+function getCurrentFormValue(field) {
+  const el = document.getElementById("field_" + field.key);
+  if (!el) return null;
+  if (field.type === "bool") return el.checked ? "True" : "False";
+  return el.value;
+}
+
+function showImportDiff(payload) {
+  const fields   = {{ fields_json|safe }};
+  const imported = payload.values || {};
+  _diffPayload   = {};
+
+  for (const field of fields) {
+    const imp = imported[field.key];
+    if (imp === undefined || imp === null) continue;
+
+    const cur = getCurrentFormValue(field);
+    // Normalise booleans for comparison
+    const impStr = (field.type === "bool")
+      ? ((imp === true || imp === "True") ? "True" : "False")
+      : String(imp);
+    const curStr = (cur === null) ? "" : String(cur);
+
+    if (impStr !== curStr) {
+      _diffPayload[field.key] = {
+        label:    field.label,
+        type:     field.type,
+        section:  field.section,
+        current:  curStr,
+        imported: impStr,
+        choice:   "import"   // default: use imported value
+      };
+    }
+  }
+
+  const count = Object.keys(_diffPayload).length;
+  document.getElementById("diff-subtitle").textContent =
+    count === 0
+      ? "No differences found — all values in the backup match the current config."
+      : `${count} field${count !== 1 ? "s" : ""} differ from the current config. `
+        + `Choose which value to keep for each. Backup exported ${payload._exported || "unknown date"}.`;
+
+  renderDiffRows();
+
+  const modal = document.getElementById("import-diff-modal");
+  modal.style.display = "flex";
+
+  if (count === 0) {
+    // No diffs — show a brief message then auto-close
+    document.getElementById("diff-rows").innerHTML =
+      `<div style="text-align:center;padding:24px;color:var(--ok);font-size:0.9rem;">
+        <i class="bi bi-check-circle" style="font-size:1.4rem;display:block;margin-bottom:8px;"></i>
+        All values match — nothing to update.
+      </div>`;
+  }
+}
+
+function renderDiffRows() {
+  const container = document.getElementById("diff-rows");
+  if (Object.keys(_diffPayload).length === 0) return;
+
+  // Group by section
+  const sections = {};
+  for (const [key, d] of Object.entries(_diffPayload)) {
+    if (!sections[d.section]) sections[d.section] = [];
+    sections[d.section].push({ key, ...d });
+  }
+
+  let html = "";
+  for (const [section, rows] of Object.entries(sections)) {
+    html += `<div style="font-size:0.7rem;font-weight:700;letter-spacing:1.5px;color:var(--text-muted);
+                         text-transform:uppercase;margin:16px 0 8px;">${esc(section)}</div>`;
+    for (const row of rows) {
+      const isPass = row.type === "password";
+      const curDisp  = isPass && row.current  ? "••••••••" : esc(row.current  || "(empty)");
+      const impDisp  = isPass && row.imported ? "••••••••" : esc(row.imported || "(empty)");
+      const curColor = row.choice === "keep"   ? "var(--ok)" : "var(--text-muted)";
+      const impColor = row.choice === "import" ? "var(--ok)" : "var(--text-muted)";
+
+      html += `
+      <div id="diff-row-${esc(row.key)}" style="border:1px solid var(--border-color);border-radius:8px;
+           padding:12px 14px;margin-bottom:8px;background:var(--bg-input);">
+        <div style="font-size:0.75rem;font-weight:600;color:var(--text-label);letter-spacing:0.8px;
+                    text-transform:uppercase;margin-bottom:10px;">${esc(row.label)}</div>
+        <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;">
+
+          <!-- Current value -->
+          <div onclick="setDiffChoice('${esc(row.key)}','keep')"
+               id="diff-cur-${esc(row.key)}"
+               style="border:2px solid ${curColor};border-radius:6px;padding:8px 10px;
+                      cursor:pointer;transition:border-color 0.15s;">
+            <div style="font-size:0.65rem;font-weight:700;letter-spacing:1px;color:var(--text-muted);
+                        text-transform:uppercase;margin-bottom:4px;">Current</div>
+            <div style="font-family:var(--font-mono);font-size:0.82rem;color:var(--text-primary);
+                        word-break:break-all;">${curDisp}</div>
+          </div>
+
+          <!-- Arrow / choice indicator -->
+          <div style="text-align:center;color:var(--text-muted);font-size:0.75rem;">↔</div>
+
+          <!-- Imported value -->
+          <div onclick="setDiffChoice('${esc(row.key)}','import')"
+               id="diff-imp-${esc(row.key)}"
+               style="border:2px solid ${impColor};border-radius:6px;padding:8px 10px;
+                      cursor:pointer;transition:border-color 0.15s;">
+            <div style="font-size:0.65rem;font-weight:700;letter-spacing:1px;color:var(--text-muted);
+                        text-transform:uppercase;margin-bottom:4px;">Imported</div>
+            <div style="font-family:var(--font-mono);font-size:0.82rem;color:var(--text-primary);
+                        word-break:break-all;">${impDisp}</div>
+          </div>
+
+        </div>
+      </div>`;
+    }
+  }
+  container.innerHTML = html;
+}
+
+function setDiffChoice(key, choice) {
+  if (!_diffPayload[key]) return;
+  _diffPayload[key].choice = choice;
+  // Update border colors
+  document.getElementById("diff-cur-" + key).style.borderColor =
+    choice === "keep"   ? "var(--ok)" : "var(--text-muted)";
+  document.getElementById("diff-imp-" + key).style.borderColor =
+    choice === "import" ? "var(--ok)" : "var(--text-muted)";
+}
+
+function diffSelectAll(choice) {
+  for (const key of Object.keys(_diffPayload)) setDiffChoice(key, choice);
+}
+
+function applyDiff() {
+  const fields = {{ fields_json|safe }};
+  const fieldMap = {};
+  for (const f of fields) fieldMap[f.key] = f;
+
+  let applied = 0;
+  for (const [key, d] of Object.entries(_diffPayload)) {
+    if (d.choice !== "import") continue;
+    const field = fieldMap[key];
+    if (!field) continue;
+
+    if (field.type === "bool") {
+      const cb      = document.getElementById("field_" + key);
+      const checked = d.imported === "True";
+      if (cb && cb.checked !== checked) toggleBool(key);
+    } else {
+      const el = document.getElementById("field_" + key);
+      if (el) el.value = d.imported;
+    }
+    applied++;
+  }
+
+  closeDiffModal();
+
+  // Show banner
+  const total = Object.keys(_diffPayload).length;
+  const kept  = total - applied;
+  const result = document.getElementById("save-result");
+  result.style.display    = "block";
+  result.style.background = "rgba(88,166,255,0.1)";
+  result.style.border     = "1px solid var(--accent)";
+  result.innerHTML = `<i class="bi bi-info-circle me-1"></i>
+    <strong>Import applied:</strong> ${applied} value${applied !== 1 ? "s" : ""} updated from backup`
+    + (kept > 0 ? `, ${kept} kept as current.` : ".")
+    + ` Review below, then click <strong>Save &amp; Restart Monitor</strong> to apply.`;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  showToast(`${applied} value${applied !== 1 ? "s" : ""} imported — review and save`, "success");
+}
+
+function closeDiffModal() {
+  document.getElementById("import-diff-modal").style.display = "none";
+  _diffPayload = null;
+}
+
+document.getElementById("import-diff-modal").addEventListener("click", function(e) {
+  if (e.target === this) closeDiffModal();
+});
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+</script>
+{% endblock %}

@@ -1,0 +1,125 @@
+NETWATCH SESSION SUMMARY
+========================
+Session 10 | 2026-03-13
+Starting version: v3.3.24
+Ending version: v3.3.25
+This session completed two long-standing backlog corrections and implemented the
+dedicated service account feature, transitioning both services to run as netwatch-svc.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- Backlog correction: "DB-driven registry" marked complete. Confirmed it was always
+  the rollback DB restore verification feature, completed in Sessions 6/7. Had persisted
+  as "unclear origin" for four sessions due to a lost original description.
+
+- Backlog correction: "Transcript upload via Dev Docs" marked complete. The original
+  need (Sessions 1+2 summaries) was already met by the existing Dev Docs workflow.
+  The feature never needed building.
+
+- v3.3.25 — Dedicated service account (netwatch-svc). Both services now run as a
+  no-login, no-home system account. netwatch-svc owns ~/netwatch/ files via chown;
+  mboynton retains group membership for SSH access. Narrow sudoers: systemctl +
+  apt-get only. main.py and theme_manager.py updated to use __file__-relative paths
+  instead of expanduser(). (see Feature_ServiceAccount.txt)
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- First approach: moved netwatch directory to /home/netwatch-svc/netwatch and updated
+  all shell scripts to use absolute /home/netwatch-svc/ paths. This was wrong —
+  it created a home directory requirement that undermines the security benefit.
+  A netwatch-svc home dir was created and then deleted (sudo userdel -r netwatch-svc).
+  First package (netwatch_v3.3.25.zip, labeled v3.3.25) was discarded entirely.
+  User caught the error at Step 3 of the manual install instructions.
+
+- Second package (v3.3.25b zip): correct approach, but patcher.py failed during install
+  with "syntax error in main.py" — misleading error caused by a permissions problem on
+  /tmp/__pycache__/ (world-writable dir set to wrong owner). Fixed with
+  sudo chmod 777 /tmp/__pycache__, then install succeeded.
+
+- After package install, netwatch-monitor crashed immediately with:
+  PermissionError: [Errno 13] Permission denied: '/nonexistent'
+  Root cause: the package had not yet been installed when the monitor was first
+  restarted — it was still running the old main.py with expanduser(), which resolved
+  ~/netwatch/logs/ to /nonexistent/netwatch/logs/ for netwatch-svc. Resolved by
+  stopping the monitor and installing the package first.
+
+- netwatch-web failed with status=200/CHDIR (Permission denied). Root cause:
+  /home/mboynton was 700 (owner-only). netwatch-svc could not traverse the parent
+  directory to reach WorkingDirectory=/home/mboynton/netwatch. Fixed with
+  sudo chmod 751 /home/mboynton.
+
+
+DECISIONS MADE
+--------------
+- netwatch-svc created with --no-create-home --home-dir /nonexistent. No home
+  directory. Files stay at /home/mboynton/netwatch/ owned by netwatch-svc.
+  This was the correct approach and what was originally planned. The first build
+  drifted from it and had to be corrected.
+
+- Shell scripts (backup.sh, rollback.sh, etc.) were NOT changed. They run as mboynton
+  over SSH, so $HOME correctly resolves to /home/mboynton. No change needed.
+
+- /home/mboynton chmod'd to 751 (not 755). Execute-only for others: netwatch-svc can
+  traverse into it but cannot list its contents. Deliberate tradeoff — slightly less
+  locked than 700 but required for service to work without moving the netwatch dir.
+
+- /tmp/__pycache__ cleanup: deleted entirely after confirming it was 11MB of patcher
+  temp .pyc files accumulated since March 2, never cleaned up. Patcher bug — backlog
+  item added.
+
+- Context doc updated in-package at v3.3.25. Both backlog corrections and service
+  account completion recorded there.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- /tmp/__pycache__ will likely accumulate again after the next package install. The
+  real fix is in patcher.py (use tempfile.mkstemp() and clean up after syntax check).
+  Currently a workaround: chmod 777 if it exists with wrong permissions. Tracked as
+  backlog item.
+
+- The patcher "syntax error" message when /tmp/__pycache__/ has wrong permissions is
+  misleading — it says "syntax error in main.py" when the real problem is a permission
+  failure writing the temp .pyc. Worth fixing the error message in patcher.py at the
+  same time as the temp file cleanup fix.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- DB-driven registry (identified as already complete in Session 6/7 — confirmed and
+  closed this session)
+- Transcript upload via Dev Docs (identified as never needed — closed this session)
+- Dedicated service account (netwatch-svc) — v3.3.25
+
+Added this session:
+- Fix patcher.py temp file handling: use tempfile.mkstemp(), clean up after syntax
+  check, improve error message when temp write fails due to permissions
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_ServiceAccount.txt — Full detail on the service account feature: both failed
+  approaches, final implementation, all files changed, manual steps, and gotchas.
+
+
+NEW GOTCHAS ADDED
+-----------------
+The following entries are in Gotchas_Append_Session10.txt and must be merged into
+Gotchas.txt via Dev Docs:
+
+- SERVICE ACCOUNT HOME DIRECTORY TRAVERSAL (new entry) — /home/mboynton must be 751
+  for netwatch-svc to reach WorkingDirectory.
+- PATCHER LEAVES TEMP .pyc FILES IN /tmp/__pycache__/ (new entry) — accumulates
+  indefinitely, permissions cause misleading "syntax error" on next install.
+- SERVICE ACCOUNT: NO HOME DIRECTORY MEANS NO expanduser() (new entry) — any Python
+  file that runs as netwatch-svc must use __file__-relative paths.
+
+
+CURRENT STATE
+-------------
+Pi version: v3.3.25
+Both services running as netwatch-svc. System confirmed stable.
+Next task: first incomplete backlog item — fix patcher.py temp file handling.

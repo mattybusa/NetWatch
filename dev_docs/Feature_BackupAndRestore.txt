@@ -1,0 +1,88 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: BACKUP AND RESTORE
+=========================================================
+Name: Database Backup, Full System Backup, Dual Schedules, Web Download
+Type: Feature
+Date: 2026-03-01 (v2.8–v2.9)
+Sessions: Session 1.2
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+User asked if backup and cron schedule management could be done through the web UI
+rather than SSH. Both were implemented: one-click backup download and a web-based
+cron configuration for automated backup schedules.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+JavaScript orphaned function (v2.9):
+During the cron management implementation, a JavaScript function for backup schedule
+management was accidentally left in the template after its associated HTML section was
+refactored. This caused a silent JS parse error that broke unrelated JavaScript on the
+admin page. Symptom: other admin page controls stopped working for no apparent reason.
+Fixed by finding and removing the orphaned function block.
+
+Browser caching of config state (v2.9):
+After completing the first-run wizard and restarting services, some browsers showed
+the old (unconfigured) dashboard state. Cache-Control: no-store headers added to all
+Flask responses to prevent caching of auth state, preferences, and config-dependent UI.
+
+
+WHAT WORKED
+-----------
+TWO BACKUP TYPES:
+
+1. Database-only backup (.db.gpg):
+   - Downloads netwatch.db encrypted with GPG
+   - One-click from Admin → Database Backup card
+   - Fast (DB is small, ~1MB after months of data)
+   - Not safe for email/cloud unencrypted — the .gpg version is fine
+   - Daily automated schedule via cron
+
+2. Full system backup (.tar.gz.gpg):
+   - Archives ~/netwatch/ (code, config, certs, DB, everything)
+   - Encrypted with GPG before download
+   - Weekly automated schedule via cron
+   - Larger but complete — can restore to a fresh Pi from this alone
+
+BACKUP DOWNLOAD:
+Flask routes serve the backup files as attachments:
+- GET /admin/backup/download/db — generates and downloads DB backup
+- GET /admin/backup/download/full — generates and downloads full system backup
+No SCP required. Browser receives file directly.
+
+RESTORE:
+- Upload a .db backup → restore replaces netwatch.db, restarts monitor
+- Upload a .gpg full backup → decrypt and restore to ~/netwatch/
+- Confirmation dialog before overwrite
+
+BACKUP SCHEDULES (web UI):
+Flask reads and writes crontab via:
+  crontab -l (read current)
+  crontab - (write new, via subprocess with stdin)
+Admin page shows schedule cards for daily DB and weekly full backup.
+Fields: day(s) of week, time (hour:minute), enable/disable.
+Last backup time shown (reads from ~/backups/ directory listing).
+Number of backups to keep: configurable (default: keep last 7 daily, last 4 weekly).
+
+BACKUP STORAGE LOCATION:
+~/backups/ on the Pi. Not ~/netwatch/ — kept separate to avoid being included in
+code export zips accidentally.
+
+GPG SETUP:
+- GPG key generated on Pi for encryption
+- CA backup also encrypted with same GPG key
+- Key backup reminder shown in admin page (user should export and store GPG key offline)
+
+FILES MODIFIED/ADDED:
+- webapp.py — backup download routes, cron read/write routes
+- templates/admin.html — Database Backup card, Full System Backup card, schedule UI
+- backup script (called by cron) — shell script in ~/netwatch/scripts/
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- GPG key is stored on the Pi. If Pi is lost without a key backup, the encrypted
+  backups cannot be decrypted. User reminded to export and store the GPG key.
+- Backup retention is enforced at backup-time (old files deleted by the backup script).
+  No automatic cleanup if schedule is disabled while backups accumulate.

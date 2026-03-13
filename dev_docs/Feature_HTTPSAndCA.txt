@@ -1,0 +1,87 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: HTTPS AND PRIVATE CA
+==========================================================
+Name: HTTPS with Private Certificate Authority
+Type: Feature
+Date: 2026-03-01 (v2.1–v2.3)
+Sessions: Session 1.2
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+Initial deployment used plain HTTP on port 5000. Browser showed "not secure" warnings
+and credentials were sent in cleartext. User wanted HTTPS. Two options evaluated:
+Let's Encrypt (requires domain + public internet access) and self-signed cert. A third
+option — private CA — was selected after explanation: install the root CA cert once on
+each device, then all NetWatch certs issued by that CA are trusted permanently.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Let's Encrypt evaluated and rejected:
+Requires real domain name, public DNS, port 80/443 forwarded through ISP router to Pi,
+and Pi reachable from internet for ACME challenge. This is a LAN-only device by design.
+Rejected immediately.
+
+Simple self-signed cert considered:
+Would work but requires clicking through browser security warning on every device every
+time. Private CA gives a better long-term experience at minimal extra setup cost.
+
+
+WHAT WORKED
+-----------
+PRIVATE CA APPROACH:
+- CA root key and certificate generated on Pi and stored in ~/netwatch/certs/ca/
+- Server certificate issued by the CA, stored in ~/netwatch/certs/
+- Ca.crt distributed to each device that accesses the dashboard (one-time install)
+- Once CA cert is installed on a device, all future NetWatch certs show green padlock
+
+GENERATE_CERTS.SH:
+Shell script on Pi that generates:
+1. CA private key (ca.key) — kept secret, never leaves Pi
+2. CA certificate (ca.crt) — distributed to client devices
+3. Server private key (server.key)
+4. Server CSR (server.csr)
+5. Server certificate signed by CA (server.crt)
+Certificate validity: configurable (default 3650 days / 10 years)
+SAN (Subject Alternative Name): set to Pi's IP addresses (192.168.100.10,
+192.168.110.10) so browsers accept the cert for both subnets.
+
+FLASK HTTPS:
+webapp.py updated to use ssl_context=(cert, key) when starting:
+  app.run(host='0.0.0.0', port=443, ssl_context=('certs/server.crt', 'certs/server.key'))
+Or via gunicorn with --certfile and --keyfile flags (used after gunicorn migration).
+
+CA BACKUP:
+CA key files encrypted with GPG before backup. If Pi dies, can re-issue server certs
+from the backed-up CA without re-distributing ca.crt to all devices.
+
+CLIENT INSTALLATION:
+- Windows: double-click ca.crt → Install Certificate → Local Machine →
+  Trusted Root Certification Authorities
+- iOS: AirDrop ca.crt → Settings → Profile → Install → General → Certificate Trust
+- Chrome on Android: Settings → Security → Install certificates
+
+CA CERT DISTRIBUTION:
+A download route was added to webapp.py: GET /certs/ca.crt
+Allows downloading the CA cert directly from the dashboard (before HTTPS is set up,
+from http; after, from https with the cert already trusted).
+
+CERTMANAGER.PY:
+Module added for cert management UI in admin page. Shows cert expiry dates, allows
+regenerating server cert, shows days remaining.
+
+FILES MODIFIED/ADDED:
+- generate_certs.sh — CA + server cert generation script
+- certmanager.py — cert management logic
+- webapp.py — ssl_context, /certs/ca.crt route
+- templates/admin.html — Certificate Management card added
+- templates/cert_manager.html — cert manager UI
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Certificate renewal: when server.crt expires, run generate_certs.sh again (only
+  the server cert; CA cert doesn't need renewal for 10 years). ca.crt does NOT need
+  to be re-distributed to devices if CA key is unchanged.
+- The CA private key (ca.key) is stored on the Pi's filesystem. If the Pi is
+  compromised, the CA is compromised. Acceptable for LAN-only use case.

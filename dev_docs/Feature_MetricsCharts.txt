@@ -1,0 +1,123 @@
+Feature_MetricsCharts.txt
+=========================
+FEATURE/BUG HEADER
+------------------
+Name: Metrics Charts — Crosshair Tooltip, Bucketed Averaging, Zoom-by-Drag,
+      Data Gap Investigation Arc (including self-introduced regression)
+Type: Feature + Self-introduced regression arc
+Date worked on: 2026-03-07
+Sessions: Session 2
+Final outcome: Complete (v3.2.86 confirmed working; data gap confirmed as real gap
+  not a code bug)
+
+
+BACKGROUND
+----------
+User requested a crosshair tooltip showing exact value and timestamp on hover over
+any chart. After implementing, a second bug was identified: graphs changed appearance
+every 30 seconds because sample() picked evenly-spaced index positions — as new data
+arrived, different rows were selected, making historical data appear to shift randomly.
+
+User also requested a zoom-by-drag feature.
+
+Existing metrics page: Chart.js 4.4.0, four charts, all using makeOpts(). makeLabels()
+intentionally created sparse x-axis labels (empty string for most points) to avoid
+overcrowding the axis.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Tooltip timestamp from chart.data.labels[idx] (v3.2.78): Labels array has empty
+strings for most points (by design in makeLabels). Tooltip showed blank timestamps
+for nearly all cursor positions. Fixed in v3.2.79 with _rawLabels.
+
+Self-introduced regression — database.py datetime queries (v3.2.85):
+While investigating the 24H data gap, concluded (incorrectly) that SQLite's
+datetime('now', '-24 hours') was affected by the Pi's timezone and returning wrong
+cutoffs. Rewrote all datetime queries in database.py to use Python-computed
+datetime.utcnow() - timedelta(...) cutoffs. This was unnecessary. The original
+datetime('now') queries were correct throughout. The cause of the gap was that the
+monitor simply wasn't writing data during that window (real outage ~1:09 AM local).
+Database.py reverted in v3.2.86 to the exact original state.
+
+CRITICAL: database.py datetime('now') queries are correct. SQLite datetime('now') is
+UTC on this Pi. Data written via datetime.utcnow(). They agree. Do not replace with
+Python cutoffs. See Gotchas.txt entry (added this session to append file).
+
+Bucket startMs = oldest data (v3.2.82–v3.2.83): Two attempts to "fix" the 24H gap by
+setting startMs to the oldest data point returned. This hid the real gap (monitor
+downtime) and made the x-axis start at 1:09 AM instead of midnight, concealing the
+gap. Wrong approach. Correct behavior: always anchor startMs to now - requestedHours
+so the x-axis shows the full requested window and gaps appear as breaks in the line.
+Reverted in v3.2.86.
+
+Tooltip box hardcoded width (v3.2.80): boxW hardcoded at 160px. Timestamp header
+string for bucketed ranges (e.g. "Avg: Mar 7, 2:00 AM – 2:30 AM") overflows.
+Fixed in v3.2.81 with ctx.measureText().
+
+
+WHAT WORKED
+-----------
+Package v3.2.78 — metrics.html only:
+- CrosshairPlugin: custom Chart.js plugin registered once, applies to all 4 charts.
+  Vertical dashed line follows cursor. Floating tooltip box shows timestamp header +
+  one row per visible dataset (label, colored dot, value). Smart positioning: box
+  flips left if near right edge, stays within chart bounds vertically. Native Chart.js
+  tooltip disabled to avoid conflict.
+
+Package v3.2.79 — metrics.html only:
+- _rawLabels stored per chart alongside data update:
+  chart._rawLabels = makeBucketRawLabels(buckets)
+- CrosshairPlugin reads chart._rawLabels[idx] for tooltip timestamp instead of
+  chart.data.labels[idx].
+- makeBucketRawLabels() applies fmtDateTime() to every single data point (no blanks).
+  X-axis display unchanged — only tooltip gets the full timestamp.
+
+Package v3.2.80 — metrics.html, database.py, webapp.py (API routes):
+sample() removed. Replaced by bucketAvg(arr, fields, numBuckets, startMs, endMs).
+- Time range divided into fixed-width time-anchored buckets.
+- All readings within a bucket are averaged.
+- Buckets anchored to the time range (e.g. 7D → 168 1-hour buckets).
+- Historical buckets stable on refresh — only rightmost bucket can change as new
+  data arrives.
+- Tooltip shows "Avg: Mar 7, 2:00 AM – 2:30 AM" style range label.
+- 1H range uses exact points (enough resolution that averaging would be lossy).
+
+ZoomDragPlugin: drag to select time window on any chart. All 4 charts redraw for
+the selected range with finer buckets. Reset Zoom button appears in toolbar.
+Auto-refresh pauses while zoomed (isZoomed flag).
+
+Backend: database.py get_health_history() and get_speedtest_history() accept optional
+start/end ISO parameters. webapp.py routes pass them through.
+
+numBuckets(hours): 1H→60, 6H→72, 24H→96, 7D→168, 30D→240.
+
+Package v3.2.81 — metrics.html only:
+- Tooltip box width: measures all text with ctx.measureText() (header, labels, values)
+  and sizes box to widest element + padding. Expands dynamically for any length of
+  avg range string.
+- valStr computed in measurement pass and draw pass independently (both needed for
+  two-pass rendering).
+
+Package v3.2.86 — metrics.html, database.py (revert):
+- Reverted bucket startMs/endMs to always anchor to now - requestedHours (not oldest
+  data point). Full requested window always shown. Data gaps display as line breaks.
+- Reverted all database.py datetime query changes from v3.2.80 and v3.2.85. Exactly
+  8 datetime('now') calls confirmed, same as canonical pre-session state.
+
+The 24H data gap: confirmed as a real gap — the monitor was not writing data for
+approximately 3 hours (gap around 01:09 AM local / 06:09 AM UTC). The old sample()
+accidentally hid this by picking evenly-spaced index positions. The new bucketing
+correctly shows the gap as a break in the line. As the monitor continued writing, the
+gap filled in progressively from the right.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+1H range still uses exact data points rather than bucketing. If 1H ever gets large
+enough to be crowded, bucketing can be applied. Currently not an issue.
+
+database.py daily summary (separate code path) still uses datetime.now() (local time)
+per code reading — was noted but not addressed this session. Low impact for this Pi
+since the timezone difference only affects the daily summary boundary, not the chart
+data.

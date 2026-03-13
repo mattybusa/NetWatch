@@ -1,0 +1,93 @@
+NETWATCH EXPANDED SUMMARY — BUG: METRICS CHART AND MONITOR CRASH
+=================================================================
+Name: Speedtest Chart Resize, Admin Collapse Regression, Monitor Crash Root Cause
+Type: Bug (multi-cause arc)
+Date: 2026-03-07 (v3.2.50–v3.2.50f)
+Sessions: Session 1.3
+Final outcome: Complete (v3.2.50f); [UNVERIFIED install confirmation]
+
+
+BACKGROUND
+----------
+At session start the user selected two quick wins: config.py snapshot exclusion and
+speedtest chart label overlap. What followed was a 7-package arc spanning chart
+regression, admin collapse breakage, two wrong root cause diagnoses, and finally
+the discovery that the monitor had been crash-looping since v3.2.49 was installed
+— the true cause of the 1H latency chart showing no data.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+autoSkip:true without changing makeLabels() — v3.2.50:
+Changed autoSkip from false to true. makeLabels() still returned blank strings for most
+entries. When autoSkip:true AND most labels are blank, Chart.js skips the sparse non-
+blank labels too. Most labels disappeared. 1H latency/loss plots went blank.
+Rule: autoSkip:false and blank-string makeLabels() are a paired design. See Gotchas.
+
+maintainAspectRatio:false on latency/loss canvases — v3.2.50b:
+Applied maintainAspectRatio:false to ALL four charts. Latency/loss use height="70" on
+the canvas element. With :false, the chart ignores the canvas height attribute →
+renders incorrectly. Only speedtest charts should use :false (they use wrapper divs).
+
+Wrong diagnosis — clock drift (first v3.2.50f build, reverted):
+1H chart showed no data (y-axis 0–1, no points). Diagnosed as Pi clock ahead of
+SQLite datetime('now'), pushing recent records outside the 1-hour window. Built
+package with a 5-minute query buffer. User: "this has worked until just recently, it
+was caused by a change we did. If you are looking for a solution unrelated to what we
+have changed and you're guessing, please don't." Package reverted, not shipped.
+
+Wrong diagnosis — DOMContentLoaded timing:
+Theorized chart init racing with CSS layout. Added DOMContentLoaded wrapper. Not the
+cause. Reverted.
+
+Admin.html omitted from v3.2.50d:
+v3.2.50c shipped admin.html with server-side JS. v3.2.50d fixed .id → ["id"] in
+webapp.py but omitted admin.html. Pi had inconsistent state for two packages.
+
+
+WHAT WORKED
+-----------
+ROOT CAUSE — monitor crash (v3.2.50f):
+database.py init_db() had the user_prefs CREATE TABLE appended as a second statement,
+separated by semicolon, inside the same c.execute() string as the alerts CREATE TABLE:
+
+  c.execute("""CREATE TABLE IF NOT EXISTS alerts (...);
+               CREATE TABLE IF NOT EXISTS user_prefs (...)""")
+
+Python sqlite3 raises ProgrammingError: "You can only execute one statement at a time."
+No try/except around it → init_db() crashed → monitor restart-looped → zero health
+records written since v3.2.49 installed. 6H showed pre-crash data; 1H had no rows.
+
+Fix: split into two separate c.execute() calls, one per table.
+All five tables now each in their own c.execute():
+  network_health, reset_events, speedtest_results, alerts, user_prefs.
+Package restarts BOTH monitor and web.
+
+FINAL CHART FIX — v3.2.50e:
+Split makeOpts() into two functions:
+  healthOpts() — latency/loss: maintainAspectRatio:true, autoSkip:false, spanGaps:true
+  speedOpts()  — speedtest: maintainAspectRatio:false, wrapper divs with explicit height
+
+admin.html reverted to localStorage in v3.2.50e.
+webapp.py: auth.get_current_user()["id"] confirmed in all pref routes.
+
+PACKAGES IN THIS ARC:
+- v3.2.50: patcher.py (config.py exclusion) + metrics.html (wrong autoSkip)
+- v3.2.50b: metrics.html (:false everywhere — wrong)
+- v3.2.50c: metrics.html + admin.html + webapp.py (.id bug present)
+- v3.2.50d: metrics.html + webapp.py (.id fixed) — admin.html OMITTED
+- v3.2.50e: metrics.html (split opts) + admin.html (localStorage) + webapp.py (["id"])
+- clock-drift v3.2.50f: database.py with query buffer — REVERTED, not shipped
+- v3.2.50f (final): database.py only — monitor crash fix — restarts monitor + web
+
+FILES:
+- database.py — user_prefs in own c.execute()
+- metrics.html — healthOpts/speedOpts, spanGaps, autoSkip:false restored
+- admin.html — localStorage collapse
+- webapp.py — ["id"] dict access in pref routes
+- patcher.py — SNAP_EXCLUDE = {"config.py"} (from v3.2.50, retained)
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- [UNVERIFIED] v3.2.50e install: transcript unclear if installed before v3.2.50f
+- [UNVERIFIED] v3.2.50f install: transcript ends with package presented, no confirmation

@@ -1,0 +1,1230 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — My Account{% endblock %}
+
+{% block content %}
+<div style="max-width:700px;">
+
+  <h2 style="font-family:var(--font-mono);color:var(--accent);font-size:1.1rem;
+             letter-spacing:2px;margin-bottom:24px;">MY ACCOUNT</h2>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       CONTACT & IDENTITY
+  ═══════════════════════════════════════════════════════════════════════ -->\
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-3">Contact &amp; Identity</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:500px;">
+      <div>
+        <label class="nw-label" style="display:block;margin-bottom:6px;font-size:0.75rem;">First Name</label>
+        <input class="nw-input" type="text" id="id-first" placeholder="First name">
+      </div>
+      <div>
+        <label class="nw-label" style="display:block;margin-bottom:6px;font-size:0.75rem;">Last Name</label>
+        <input class="nw-input" type="text" id="id-last" placeholder="Last name">
+      </div>
+      <div>
+        <label class="nw-label" style="display:block;margin-bottom:6px;font-size:0.75rem;">Username</label>
+        <input class="nw-input" type="text" id="id-username" placeholder="Username"
+               autocomplete="off" autocapitalize="none" spellcheck="false">
+      </div>
+    </div>
+    <div style="margin-top:16px;">
+      <button class="nw-btn nw-btn-primary" onclick="saveIdentity()">
+        ✓ Save Identity
+      </button>
+      <span id="identity-msg" style="font-size:0.82rem;margin-left:8px;display:none;"></span>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       CHANGE PASSWORD
+  ═══════════════════════════════════════════════════════════════════════ -->\
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-3">Change Password</div>
+    <div style="max-width:380px;">
+      <div style="margin-bottom:14px;">
+        <label class="nw-label" style="display:block;margin-bottom:6px;">Current Password</label>
+        <input class="nw-input" type="password" id="cp-current">
+      </div>
+      <div style="margin-bottom:14px;">
+        <label class="nw-label" style="display:block;margin-bottom:6px;">New Password</label>
+        <input class="nw-input" type="password" id="cp-new" oninput="checkPwStrength(this.value)">
+        <div style="height:4px;border-radius:2px;background:var(--border-color);margin-top:6px;overflow:hidden;">
+          <div id="pw-strength-bar" style="height:100%;border-radius:2px;width:0%;transition:all 0.3s;"></div>
+        </div>
+        <div id="pw-strength-label" style="font-size:0.7rem;color:var(--text-muted);margin-top:3px;">Minimum 8 characters</div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <label class="nw-label" style="display:block;margin-bottom:6px;">Confirm New Password</label>
+        <input class="nw-input" type="password" id="cp-confirm">
+      </div>
+      <button class="nw-btn nw-btn-primary" onclick="changePassword()">
+        ✓ Update Password
+      </button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       ALERT SUBSCRIPTIONS
+  ═══════════════════════════════════════════════════════════════════════ -->\
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-1">Alert Subscriptions</div>
+    <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px;">
+      Choose how you want to be notified. Configure your email and phone in Contact &amp; Identity above.
+    </p>
+
+    <!-- Email channel -->
+    <div style="background:var(--bg-input);border-radius:8px;padding:14px;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <input type="checkbox" id="my-email-enabled" onchange="myToggleEmailFields()"
+               style="width:16px;height:16px;cursor:pointer;">
+        <label for="my-email-enabled" style="font-size:0.88rem;font-weight:600;cursor:pointer;">
+          <i class="bi bi-envelope me-1"></i> Email Alerts
+        </label>
+        <span id="email-verif-badge" style="font-size:0.72rem;padding:3px 8px;border-radius:4px;
+              display:none;white-space:nowrap;margin-left:4px;"></span>
+      </div>
+      <div id="my-email-fields" style="display:none;">
+        <div style="margin-bottom:12px;">
+          <label class="nw-label" style="display:block;margin-bottom:6px;font-size:0.7rem;">Email Address</label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:420px;">
+            <input type="email" class="nw-input" id="my-email-addr" placeholder="you@example.com"
+                   style="flex:1;min-width:180px;" oninput="onEmailChange()">
+          </div>
+          <div id="email-verif-section" style="display:none;margin-top:10px;">
+            <p id="email-verif-prompt" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px;">
+              Enter the 6-digit code sent to your email to verify your address.
+            </p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <input type="text" class="nw-input" id="verif-code" placeholder="6-digit code"
+                     maxlength="6" style="width:120px;letter-spacing:4px;text-align:center;">
+              <button class="nw-btn" onclick="submitVerifCode()"
+                      style="border-color:var(--ok);color:var(--ok);" id="email-verif-submit-btn">Verify</button>
+              <button class="nw-btn" onclick="resendVerifCode()"
+                      id="email-verif-send-btn" style="font-size:0.75rem;">Send Code</button>
+            </div>
+            <div id="verif-msg" style="font-size:0.78rem;margin-top:6px;display:none;"></div>
+          </div>
+        </div>
+        <label class="nw-label" style="display:block;margin-bottom:8px;font-size:0.7rem;">Which alerts to receive by email</label>
+        <div id="email-type-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- SMS channel -->
+    <div style="background:var(--bg-input);border-radius:8px;padding:14px;margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <input type="checkbox" id="my-sms-enabled" onchange="myToggleSmsFields()"
+               style="width:16px;height:16px;cursor:pointer;">
+        <label for="my-sms-enabled" style="font-size:0.88rem;font-weight:600;cursor:pointer;">
+          <i class="bi bi-phone me-1"></i> SMS Alerts
+        </label>
+        <span id="sms-verif-badge" style="font-size:0.72rem;padding:3px 8px;border-radius:4px;
+              display:none;white-space:nowrap;margin-left:4px;"></span>
+      </div>
+      <div id="my-sms-fields" style="display:none;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div>
+            <label class="nw-label" style="display:block;margin-bottom:6px;font-size:0.7rem;">Phone Number</label>
+            <input type="tel" class="nw-input" id="my-phone" placeholder="10 digits, no dashes"
+                   oninput="myUpdateSmsPreview(); onPhoneChange()">
+          </div>
+          <div>
+            <label class="nw-label" style="display:block;margin-bottom:6px;font-size:0.7rem;">Carrier</label>
+            <select class="nw-input" id="my-carrier" onchange="myToggleCustomDomain()">
+              <!-- Populated by JS -->
+            </select>
+          </div>
+        </div>
+        <div id="my-custom-domain-row" style="display:none;margin-bottom:10px;">
+          <label class="nw-label" style="display:block;margin-bottom:6px;font-size:0.7rem;">Custom Gateway Domain</label>
+          <input type="text" class="nw-input" id="my-custom-domain"
+                 placeholder="e.g. sms.mycarrier.com" oninput="myUpdateSmsPreview()">
+        </div>
+        <div id="my-sms-preview" style="font-size:0.78rem;color:var(--text-muted);
+             padding:6px 10px;background:var(--bg-main);border-radius:4px;margin-bottom:8px;">
+          Enter phone number to see SMS address
+        </div>
+        <div id="sms-send-btn-row" style="margin-bottom:12px;">
+          <button class="nw-btn" style="font-size:0.78rem;" onclick="requestSmsVerif()">
+            <i class="bi bi-phone me-1"></i>Send Verification Code
+          </button>
+        </div>
+        <div id="sms-verif-section" style="display:none;margin-bottom:12px;">
+          <p id="sms-verif-prompt" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px;">
+            Enter the 6-digit code sent to your phone via text message.
+          </p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="text" class="nw-input" id="sms-verif-code" placeholder="6-digit code"
+                   maxlength="6" style="width:120px;letter-spacing:4px;text-align:center;">
+            <button class="nw-btn" onclick="submitSmsVerifCode()"
+                    id="sms-verif-submit-btn" style="border-color:var(--ok);color:var(--ok);">Verify</button>
+            <button class="nw-btn" onclick="requestSmsVerif()"
+                    id="sms-verif-send-btn" style="font-size:0.75rem;">Send Code</button>
+          </div>
+          <div id="sms-verif-msg" style="font-size:0.78rem;margin-top:6px;display:none;"></div>
+        </div>
+        <label class="nw-label" style="display:block;margin-bottom:8px;font-size:0.7rem;">Which alerts to receive by SMS</label>
+        <div id="sms-type-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <button class="nw-btn nw-btn-primary" onclick="saveMySubscription()">
+        ✓ Save Alert Preferences
+      </button>
+      <button class="nw-btn" id="test-email-btn" onclick="testMyChannel('email')"
+              style="border-color:var(--accent);color:var(--accent);display:none;">
+        ✉ Test Email
+      </button>
+      <button class="nw-btn" id="test-sms-btn" onclick="testMyChannel('sms')"
+              style="border-color:var(--accent);color:var(--accent);display:none;">
+        📱 Test SMS
+      </button>
+      <span id="my-test-msg" style="font-size:0.82rem;display:none;"></span>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       APPEARANCE
+  ═══════════════════════════════════════════════════════════════════════ -->\
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleAppearance()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;">
+      <div class="nw-label" style="margin:0;">Appearance</div>
+      <i class="bi bi-chevron-down" id="appearance-chevron" style="font-size:0.85rem;color:var(--text-muted);transition:transform 0.25s;"></i>
+    </div>
+    <div id="appearance-body" style="overflow:hidden;transition:max-height 0.3s ease,opacity 0.25s ease;">
+
+      <!-- Color Scheme -->
+      <div style="margin-top:18px;">
+        <div class="nw-label mb-3" style="font-size:0.75rem;letter-spacing:1px;">COLOR SCHEME</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+
+          <div class="pref-card {% if current_user.theme == 'dark-blue' %}selected{% endif %}"
+               onclick="selectColorScheme('dark-blue', this)"
+               style="background:#0f1923;border:2px solid {% if current_user.theme == 'dark-blue' %}#4fc3f7{% else %}#1e3a5f{% endif %};
+                      border-radius:10px;padding:16px;cursor:pointer;transition:all 0.2s;">
+            <div style="display:flex;gap:4px;margin-bottom:10px;">
+              <div style="width:8px;height:8px;border-radius:50%;background:#f44336;"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#ff9800;"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#4caf50;"></div>
+            </div>
+            <div style="background:#152330;border-radius:4px;padding:6px 8px;margin-bottom:6px;">
+              <div style="background:#1e3a5f;border-radius:2px;height:4px;width:60%;margin-bottom:4px;"></div>
+              <div style="background:#4fc3f7;border-radius:2px;height:8px;width:40%;"></div>
+            </div>
+            <div style="color:#e0e0e0;font-size:0.82rem;font-weight:600;">Dark Blue</div>
+            <div style="color:#607d8b;font-size:0.72rem;margin-top:2px;">Default dark theme</div>
+          </div>
+
+          <div class="pref-card {% if current_user.theme == 'dark-green' %}selected{% endif %}"
+               onclick="selectColorScheme('dark-green', this)"
+               style="background:#0a0f0a;border:2px solid {% if current_user.theme == 'dark-green' %}#00cc44{% else %}#0d2e0d{% endif %};
+                      border-radius:10px;padding:16px;cursor:pointer;transition:all 0.2s;">
+            <div style="display:flex;gap:4px;margin-bottom:10px;">
+              <div style="width:8px;height:8px;border-radius:50%;background:#f44336;"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#ff9800;"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#4caf50;"></div>
+            </div>
+            <div style="background:#0d1a0d;border-radius:4px;padding:6px 8px;margin-bottom:6px;">
+              <div style="background:#0d2e0d;border-radius:2px;height:4px;width:60%;margin-bottom:4px;"></div>
+              <div style="background:#00cc44;border-radius:2px;height:8px;width:40%;"></div>
+            </div>
+            <div style="color:#e0e0e0;font-size:0.82rem;font-weight:600;">Terminal</div>
+            <div style="color:#607d8b;font-size:0.72rem;margin-top:2px;">Green-on-black</div>
+          </div>
+
+          <div class="pref-card {% if current_user.theme == 'light' %}selected{% endif %}"
+               onclick="selectColorScheme('light', this)"
+               style="background:#f5f7fa;border:2px solid {% if current_user.theme == 'light' %}#1565c0{% else %}#d0d7de{% endif %};
+                      border-radius:10px;padding:16px;cursor:pointer;transition:all 0.2s;">
+            <div style="display:flex;gap:4px;margin-bottom:10px;">
+              <div style="width:8px;height:8px;border-radius:50%;background:#f44336;"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#ff9800;"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#4caf50;"></div>
+            </div>
+            <div style="background:#ffffff;border-radius:4px;padding:6px 8px;margin-bottom:6px;border:1px solid #d0d7de;">
+              <div style="background:#d0d7de;border-radius:2px;height:4px;width:60%;margin-bottom:4px;"></div>
+              <div style="background:#1565c0;border-radius:2px;height:8px;width:40%;"></div>
+            </div>
+            <div style="color:#24292f;font-size:0.82rem;font-weight:600;">Light</div>
+            <div style="color:#656d76;font-size:0.72rem;margin-top:2px;">Clean light theme</div>
+          </div>
+
+          <div class="pref-card {% if current_user.theme == 'high-contrast' %}selected{% endif %}"
+               onclick="selectColorScheme('high-contrast', this)"
+               style="background:#000000;border:2px solid {% if current_user.theme == 'high-contrast' %}#ffff00{% else %}#333333{% endif %};
+                      border-radius:10px;padding:16px;cursor:pointer;transition:all 0.2s;">
+            <div style="display:flex;gap:4px;margin-bottom:10px;">
+              <div style="width:8px;height:8px;border-radius:50%;background:#f44336;"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#ff9800;"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#4caf50;"></div>
+            </div>
+            <div style="background:#111111;border-radius:4px;padding:6px 8px;margin-bottom:6px;">
+              <div style="background:#333333;border-radius:2px;height:4px;width:60%;margin-bottom:4px;"></div>
+              <div style="background:#ffff00;border-radius:2px;height:8px;width:40%;"></div>
+            </div>
+            <div style="color:#ffffff;font-size:0.82rem;font-weight:600;">High Contrast</div>
+            <div style="color:#aaaaaa;font-size:0.72rem;margin-top:2px;">Accessibility theme</div>
+          </div>
+        </div>
+
+        {# Custom color schemes #}
+        {% set cs_themes = custom_themes | selectattr('color_scheme') | list %}
+        {% if cs_themes %}
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-color);">
+          <div class="nw-label mb-2" style="font-size:0.7rem;letter-spacing:1px;">CUSTOM COLOR SCHEMES</div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <div class="pref-card {% if active_custom_color %}selected{% endif %}"
+                 onclick="togglePrefCustomScheme()"
+                 style="padding:10px 14px;cursor:pointer;border-radius:8px;display:flex;align-items:center;gap:8px;font-size:0.82rem;background:var(--bg-input);">
+              <i class="bi bi-palette2"></i>
+              <span>Use Custom</span>
+            </div>
+            <select id="pref-custom-scheme-select"
+                    onchange="applyPrefCustomScheme(this.value)"
+                    style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:8px;
+                           padding:8px 12px;font-size:0.82rem;color:var(--text-primary);
+                           display:{% if active_custom_color %}block{% else %}none{% endif %};">
+              {% for t in cs_themes %}
+              <option value="{{ t.name }}" {% if active_custom_color == t.name %}selected{% endif %}>{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% if active_custom_color %}
+          <div style="margin-top:6px;font-size:0.75rem;color:var(--text-muted);">
+            Active: <strong style="color:var(--accent);">{{ active_custom_color }}</strong>
+            — <a href="#" onclick="clearPrefCustomScheme(); return false;" style="color:var(--warn);">Clear (use system scheme)</a>
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Layout -->
+      <div style="margin-top:20px;">
+        <div class="nw-label mb-2" style="font-size:0.75rem;letter-spacing:1px;">LAYOUT</div>
+        <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px;">Controls how the navigation and dashboard panels are arranged.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+
+          <div class="pref-card {% if current_user.layout == 'comfortable' %}selected{% endif %}"
+               onclick="selectLayout('comfortable', this)"
+               style="border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-input);">
+            <div style="display:flex;gap:3px;margin-bottom:8px;">
+              <div style="width:20%;background:var(--border-color);border-radius:2px;height:32px;"></div>
+              <div style="flex:1;background:var(--bg-card);border-radius:2px;padding:4px;">
+                <div style="background:var(--border-color);height:3px;border-radius:1px;margin-bottom:3px;width:70%;"></div>
+                <div style="background:var(--border-color);height:3px;border-radius:1px;width:50%;"></div>
+              </div>
+            </div>
+            <div style="font-size:0.82rem;font-weight:600;">Comfortable</div>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">Spacious top nav</div>
+          </div>
+
+          <div class="pref-card {% if current_user.layout == 'compact' %}selected{% endif %}"
+               onclick="selectLayout('compact', this)"
+               style="border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-input);">
+            <div style="display:flex;flex-direction:column;gap:2px;margin-bottom:8px;">
+              <div style="background:var(--border-color);border-radius:2px;height:10px;width:100%;"></div>
+              <div style="background:var(--bg-card);border-radius:2px;height:28px;padding:3px;">
+                <div style="background:var(--border-color);height:3px;border-radius:1px;margin-bottom:2px;width:70%;"></div>
+                <div style="background:var(--border-color);height:3px;border-radius:1px;width:50%;"></div>
+              </div>
+            </div>
+            <div style="font-size:0.82rem;font-weight:600;">Compact</div>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">Denser layout</div>
+          </div>
+
+          <div class="pref-card {% if current_user.layout == 'dashboard-first' %}selected{% endif %}"
+               onclick="selectLayout('dashboard-first', this)"
+               style="border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-input);">
+            <div style="display:flex;flex-direction:column;gap:2px;margin-bottom:8px;">
+              <div style="background:var(--bg-card);border-radius:2px;height:22px;padding:3px;margin-bottom:2px;">
+                <div style="background:var(--accent);height:8px;border-radius:1px;width:40%;"></div>
+              </div>
+              <div style="background:var(--border-color);border-radius:2px;height:8px;"></div>
+            </div>
+            <div style="font-size:0.82rem;font-weight:600;">Dashboard First</div>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">Status front and center</div>
+          </div>
+
+          <div class="pref-card {% if current_user.layout == 'sidebar' %}selected{% endif %}"
+               onclick="selectLayout('sidebar', this)"
+               style="border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-input);">
+            <div style="display:flex;gap:3px;margin-bottom:8px;">
+              <div style="width:25%;background:var(--border-color);border-radius:2px;height:32px;"></div>
+              <div style="flex:1;background:var(--bg-card);border-radius:2px;padding:4px;">
+                <div style="background:var(--border-color);height:3px;border-radius:1px;margin-bottom:3px;width:80%;"></div>
+                <div style="background:var(--accent);height:3px;border-radius:1px;width:60%;"></div>
+              </div>
+            </div>
+            <div style="font-size:0.82rem;font-weight:600;">Sidebar</div>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">Vertical nav panel</div>
+          </div>
+        </div>
+
+        {# Custom layouts #}
+        {% set layout_themes = custom_themes | selectattr('layout') | list %}
+        {% if layout_themes %}
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-color);">
+          <div class="nw-label mb-2" style="font-size:0.7rem;letter-spacing:1px;">CUSTOM LAYOUTS</div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <div class="pref-card {% if active_custom_layout %}selected{% endif %}"
+                 onclick="togglePrefCustomLayout()"
+                 style="padding:10px 14px;cursor:pointer;border-radius:8px;display:flex;align-items:center;gap:8px;font-size:0.82rem;background:var(--bg-input);">
+              <i class="bi bi-grid-1x2"></i>
+              <span>Use Custom</span>
+            </div>
+            <select id="pref-custom-layout-select"
+                    onchange="applyPrefCustomLayout(this.value)"
+                    style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:8px;
+                           padding:8px 12px;font-size:0.82rem;color:var(--text-primary);
+                           display:{% if active_custom_layout %}block{% else %}none{% endif %};">
+              {% for t in layout_themes %}
+              <option value="{{ t.name }}" {% if active_custom_layout == t.name %}selected{% endif %}>{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% if active_custom_layout %}
+          <div style="margin-top:6px;font-size:0.75rem;color:var(--text-muted);">
+            Active: <strong style="color:var(--accent);">{{ active_custom_layout }}</strong>
+            — <a href="#" onclick="clearPrefCustomLayout(); return false;" style="color:var(--warn);">Clear (use system layout)</a>
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Nav Style -->
+      <div style="margin-top:20px;">
+        <div class="nw-label mb-2" style="font-size:0.75rem;letter-spacing:1px;">NAVIGATION STYLE</div>
+        <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px;">
+          Controls what the navigation buttons show.
+          {% if current_user.layout == 'sidebar' %}
+          <span style="color:var(--warn);">⚠ Sidebar layout uses its own fixed style.</span>
+          {% endif %}
+        </p>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+          {% for style, label, icon_html, show_label in [
+            ('icons-labels', 'Icons + Labels', '<i class="bi bi-speedometer2"></i>', True),
+            ('icons-only',   'Icons Only',     '<i class="bi bi-speedometer2"></i>', False),
+            ('labels-only',  'Labels Only',    None, True),
+            ('compact',      'Compact',        '<i class="bi bi-speedometer2"></i>', True)
+          ] %}
+          <div class="pref-card {% if current_user.nav_style == style or (not current_user.nav_style and style == 'icons-labels') %}selected{% endif %}"
+               onclick="selectNavStyle('{{ style }}', this)"
+               style="border-radius:8px;padding:12px 8px;cursor:pointer;text-align:center;
+                      transition:all 0.2s;background:var(--bg-input);">
+            <div style="font-size:{% if style == 'compact' %}0.78rem{% else %}0.9rem{% endif %};
+                        margin-bottom:4px;color:var(--accent);display:flex;align-items:center;
+                        justify-content:center;gap:4px;">
+              {% if icon_html %}{{ icon_html | safe }}{% endif %}
+              {% if show_label %}<span style="font-size:0.72rem;color:var(--text-secondary);">Home</span>{% endif %}
+            </div>
+            <div style="font-size:0.72rem;color:var(--text-muted);">{{ label }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Content Alignment -->
+      <div style="margin-top:20px;margin-bottom:4px;">
+        <div class="nw-label mb-2" style="font-size:0.75rem;letter-spacing:1px;">CONTENT ALIGNMENT</div>
+        <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px;">Controls whether page content sits left-aligned or centered.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:300px;">
+          <div class="pref-card {% if not current_user.content_align or current_user.content_align == 'left' %}selected{% endif %}"
+               onclick="selectContentAlign('left', this)"
+               style="border-radius:8px;padding:14px;cursor:pointer;text-align:center;
+                      transition:all 0.2s;background:var(--bg-input);">
+            <div style="font-size:0.85rem;margin-bottom:4px;color:var(--text-secondary);">⬅ Left</div>
+            <div style="font-size:0.72rem;color:var(--text-muted);">Left-aligned</div>
+          </div>
+          <div class="pref-card {% if current_user.content_align == 'center' %}selected{% endif %}"
+               onclick="selectContentAlign('center', this)"
+               style="border-radius:8px;padding:14px;cursor:pointer;text-align:center;
+                      transition:all 0.2s;background:var(--bg-input);">
+            <div style="font-size:0.85rem;margin-bottom:4px;color:var(--text-secondary);">↔ Center</div>
+            <div style="font-size:0.72rem;color:var(--text-muted);">Centered</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end appearance-body -->
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DANGER ZONE
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="danger-zone-card" class="nw-card p-4 mb-4" style="border-color:var(--fail);border-width:1px;border-style:solid;">
+    <div class="nw-label mb-2" style="color:var(--fail);">⚠ Danger Zone</div>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:14px;">
+      Permanently delete your account. This cannot be undone.
+    </p>
+    <button class="nw-btn" style="border-color:var(--fail);color:var(--fail);"
+            onclick="showDeleteAccountDialog()">
+      <i class="bi bi-trash me-2"></i>Delete My Account
+    </button>
+  </div>
+
+  <!-- Delete Account Dialog -->
+  <div id="delete-account-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);
+       z-index:1000;display:none;align-items:center;justify-content:center;">
+    <div style="background:var(--bg-card);border-radius:12px;padding:28px;max-width:420px;width:90%;
+                border:1px solid var(--fail);">
+      <div class="nw-label mb-3" style="color:var(--fail);font-size:1rem;">Delete Account</div>
+      <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;">
+        This will permanently delete your account. You will be logged out immediately.
+      </p>
+      <div style="margin-bottom:14px;">
+        <label class="nw-label" style="display:block;margin-bottom:6px;font-size:0.75rem;">Confirm your password</label>
+        <input type="password" class="nw-input" id="delete-confirm-pw" placeholder="Your current password"
+               style="max-width:320px;">
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;
+                  background:var(--bg-input);border-radius:8px;padding:12px;">
+        <input type="checkbox" id="delete-keep-sub" style="width:16px;height:16px;flex-shrink:0;">
+        <label for="delete-keep-sub" style="font-size:0.82rem;color:var(--text-secondary);cursor:pointer;">
+          Keep my alert subscription after account deletion<br>
+          <span style="font-size:0.72rem;color:var(--text-muted);">
+            Your email/phone will remain subscribed to alerts as a standalone subscriber.
+          </span>
+        </label>
+      </div>
+      <div id="delete-account-msg" style="display:none;font-size:0.82rem;margin-bottom:12px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button class="nw-btn" style="border-color:var(--fail);color:var(--fail);flex:1;"
+                onclick="confirmDeleteAccount()">
+          <i class="bi bi-trash me-1"></i>Delete My Account
+        </button>
+        <button class="nw-btn" onclick="closeDeleteAccountDialog()" style="flex:1;">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end max-width -->
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+
+// ── Appearance collapse ────────────────────────────────────────────────────────
+const APPEAR_KEY = 'nw-appearance-collapsed';
+function toggleAppearance() {
+  const body    = document.getElementById('appearance-body');
+  const chevron = document.getElementById('appearance-chevron');
+  const isCollapsed = localStorage.getItem(APPEAR_KEY) === '1';
+  if (isCollapsed) {
+    body.style.maxHeight = body.scrollHeight + 'px';
+    body.style.opacity = '1';
+    chevron.style.transform = 'rotate(0deg)';
+    setTimeout(() => body.style.maxHeight = 'none', 300);
+    localStorage.removeItem(APPEAR_KEY);
+  } else {
+    body.style.maxHeight = body.scrollHeight + 'px';
+    requestAnimationFrame(() => { body.style.maxHeight = '0'; body.style.opacity = '0'; });
+    chevron.style.transform = 'rotate(-90deg)';
+    localStorage.setItem(APPEAR_KEY, '1');
+  }
+}
+function initAppearance() {
+  const body    = document.getElementById('appearance-body');
+  const chevron = document.getElementById('appearance-chevron');
+  if (localStorage.getItem(APPEAR_KEY) === '1') {
+    body.style.maxHeight = '0';
+    body.style.opacity = '0';
+    chevron.style.transform = 'rotate(-90deg)';
+  } else {
+    body.style.maxHeight = 'none';
+    body.style.opacity = '1';
+  }
+}
+
+// ── Identity ───────────────────────────────────────────────────────────────────
+async function loadIdentity() {
+  try {
+    const res = await fetch('/api/auth/me').then(r => r.json());
+    document.getElementById('id-first').value    = res.first_name || '';
+    document.getElementById('id-last').value     = res.last_name  || '';
+    document.getElementById('id-username').value = res.username   || '';
+    // Hide danger zone for system owner
+    if (res.is_owner) {
+      const dz = document.getElementById('danger-zone-card');
+      if (dz) dz.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+async function saveIdentity() {
+  const first    = document.getElementById('id-first').value.trim();
+  const last     = document.getElementById('id-last').value.trim();
+  const username = document.getElementById('id-username').value.trim();
+  const msg      = document.getElementById('identity-msg');
+
+  if (!username) {
+    msg.style.display = 'inline'; msg.style.color = 'var(--warn)';
+    msg.textContent = 'Username cannot be empty';
+    setTimeout(() => msg.style.display = 'none', 3000); return;
+  }
+
+  // Save name
+  const nameRes = await fetch('/api/auth/me/identity', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ first_name: first, last_name: last })
+  }).then(r => r.json());
+
+  if (nameRes.status !== 'ok') {
+    showToast(nameRes.message, 'error'); return;
+  }
+
+  // Save username (separate call since it needs duplicate check)
+  const unRes = await fetch('/api/auth/me/username', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ username })
+  }).then(r => r.json());
+
+  if (unRes.status === 'ok') {
+    showToast('Identity saved', 'success');
+    document.getElementById('id-username').value = unRes.username || username;
+  } else {
+    showToast(unRes.message, 'error');
+    // Revert username field to current value
+    const me = await fetch('/api/auth/me').then(r => r.json());
+    document.getElementById('id-username').value = me.username;
+  }
+}
+
+// ── Password ───────────────────────────────────────────────────────────────────
+function checkPwStrength(pwd) {
+  const bar   = document.getElementById('pw-strength-bar');
+  const label = document.getElementById('pw-strength-label');
+  let score = 0;
+  if (pwd.length >= 8)  score++;
+  if (pwd.length >= 12) score++;
+  if (/[A-Z]/.test(pwd)) score++;
+  if (/[0-9]/.test(pwd)) score++;
+  if (/[^A-Za-z0-9]/.test(pwd)) score++;
+  const levels = [
+    { w:'0%',   c:'#263238', t:'Too short' },
+    { w:'25%',  c:'#f44336', t:'Weak' },
+    { w:'50%',  c:'#ff9800', t:'Fair' },
+    { w:'75%',  c:'#ffeb3b', t:'Good' },
+    { w:'90%',  c:'#8bc34a', t:'Strong' },
+    { w:'100%', c:'#4caf50', t:'Very strong' },
+  ];
+  const l = levels[Math.min(score, 5)];
+  bar.style.width      = l.w;
+  bar.style.background = l.c;
+  label.textContent    = l.t;
+  label.style.color    = l.c;
+}
+
+async function changePassword() {
+  const current = document.getElementById('cp-current').value;
+  const newPwd  = document.getElementById('cp-new').value;
+  const confirm = document.getElementById('cp-confirm').value;
+  if (newPwd !== confirm) { showToast('Passwords do not match', 'error'); return; }
+  if (newPwd.length < 8)  { showToast('Password must be at least 8 characters', 'warning'); return; }
+  const res = await fetch('/api/auth/me/password', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ current_password: current, new_password: newPwd })
+  }).then(r => r.json());
+  showToast(res.status === 'ok' ? 'Password changed' : res.message,
+            res.status === 'ok' ? 'success' : 'error');
+  if (res.status === 'ok') {
+    document.getElementById('cp-current').value = '';
+    document.getElementById('cp-new').value     = '';
+    document.getElementById('cp-confirm').value = '';
+  }
+}
+
+// ── Email Verification ─────────────────────────────────────────────────────────
+let lastCheckedEmail = '';
+
+function onEmailChange() {
+  const email = (document.getElementById('my-email-addr')?.value || '').trim();
+  if (email !== lastCheckedEmail) {
+    document.getElementById('email-verif-badge').style.display = 'none';
+    document.getElementById('email-verif-section').style.display = 'none';
+  }
+}
+
+async function checkEmailVerifStatus(email) {
+  if (!email) return;
+  lastCheckedEmail = email;
+  let res;
+  try {
+    res = await fetch('/api/email/verify/status?email=' + encodeURIComponent(email)).then(r => r.json());
+  } catch(e) { return; }
+  const badge   = document.getElementById('email-verif-badge');
+  const section = document.getElementById('email-verif-section');
+  badge.style.display = 'inline';
+  const emailTestBtn = document.getElementById('test-email-btn');
+  if (res.status === 'verified') {
+    badge.textContent = '✓ Verified';
+    badge.style.background = 'rgba(76,175,80,0.15)';
+    badge.style.color  = 'var(--ok, #4caf50)';
+    badge.style.border = '1px solid var(--ok, #4caf50)';
+    section.style.display = 'none';
+    if (emailTestBtn) emailTestBtn.style.display = 'inline-block';
+  } else if (res.status === 'pending') {
+    badge.textContent = '⏳ Pending — enter code below';
+    badge.style.background = 'rgba(255,152,0,0.1)';
+    badge.style.color  = '#ff9800';
+    badge.style.border = '1px solid #ff9800';
+    section.style.display = 'block';
+    const sendBtn = document.getElementById('email-verif-send-btn');
+    const prompt  = document.getElementById('email-verif-prompt');
+    if (sendBtn) sendBtn.textContent = 'Resend';
+    if (prompt)  prompt.textContent  = 'Enter the 6-digit code sent to your email to verify your address.';
+    if (emailTestBtn) emailTestBtn.style.display = 'none';
+  } else {
+    badge.textContent = '✗ Not verified';
+    badge.style.background = 'rgba(244,67,54,0.1)';
+    badge.style.color  = 'var(--fail, #f44336)';
+    badge.style.border = '1px solid var(--fail, #f44336)';
+    // Show section so user can request a code
+    section.style.display = 'block';
+    const sendBtn = document.getElementById('email-verif-send-btn');
+    const prompt  = document.getElementById('email-verif-prompt');
+    const codeInput = document.getElementById('verif-code');
+    const submitBtn = document.getElementById('email-verif-submit-btn');
+    if (sendBtn)    sendBtn.textContent    = 'Send Code';
+    if (prompt)     prompt.textContent     = 'Your email address is not yet verified. Send a code to verify it.';
+    if (codeInput)  codeInput.style.display = 'none';
+    if (submitBtn)  submitBtn.style.display = 'none';
+    if (emailTestBtn) emailTestBtn.style.display = 'none';
+  }
+}
+
+async function resendVerifCode() {
+  const email = (document.getElementById('my-email-addr')?.value || '').trim();
+  if (!email) { showToast('Enter your email address first', 'warning'); return; }
+  const msg = document.getElementById('verif-msg');
+  msg.style.display = 'block'; msg.style.color = 'var(--text-muted)'; msg.textContent = 'Sending…';
+  try {
+    const res = await fetch('/api/email/verify/request', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email })
+    }).then(r => r.json());
+    msg.style.color = res.status === 'ok' ? 'var(--ok, #4caf50)' : res.status === 'alerts_disabled' ? 'var(--warn, #ff9800)' : 'var(--fail, #f44336)';
+    msg.textContent = res.message;
+    if (res.status === 'ok') {
+      // Code sent — show code entry field and switch to "pending" UI
+      const codeInput = document.getElementById('verif-code');
+      const submitBtn = document.getElementById('email-verif-submit-btn');
+      const sendBtn   = document.getElementById('email-verif-send-btn');
+      const prompt    = document.getElementById('email-verif-prompt');
+      if (codeInput) codeInput.style.display = '';
+      if (submitBtn) submitBtn.style.display = '';
+      if (sendBtn)   sendBtn.textContent = 'Resend';
+      if (prompt)    prompt.textContent  = 'Enter the 6-digit code sent to your email to verify your address.';
+      await checkEmailVerifStatus(email);
+    }
+  } catch(e) {
+    msg.style.color = 'var(--fail, #f44336)'; msg.textContent = 'Request failed';
+  }
+}
+
+async function submitVerifCode() {
+  const email = (document.getElementById('my-email-addr')?.value || '').trim();
+  const code  = document.getElementById('verif-code').value.trim();
+  const msg   = document.getElementById('verif-msg');
+  if (!email) { showToast('Enter your email address first', 'warning'); return; }
+  if (!code)  { showToast('Enter the 6-digit code from your email', 'warning'); return; }
+  msg.style.display = 'block'; msg.style.color = 'var(--text-muted)'; msg.textContent = 'Verifying…';
+  try {
+    const res = await fetch('/api/email/verify/confirm', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email, code })
+    }).then(r => r.json());
+    msg.style.color = res.status === 'ok' ? 'var(--ok, #4caf50)' : 'var(--fail, #f44336)';
+    msg.textContent = res.message;
+    if (res.status === 'ok') {
+      document.getElementById('verif-code').value = '';
+      await checkEmailVerifStatus(email);
+    }
+  } catch(e) {
+    msg.style.color = 'var(--fail, #f44336)'; msg.textContent = 'Verification failed';
+  }
+}
+
+// ── Alert Subscriptions ────────────────────────────────────────────────────────
+let ALERT_TYPES = [];
+let CARRIERS    = [];
+let origEmail   = '';
+let origPhone   = '';
+
+async function loadMySubscription() {
+  const [sub, carriers, atypes] = await Promise.all([
+    fetch('/api/alerts/my_subscription').then(r => r.json()),
+    fetch('/api/alerts/carriers').then(r => r.json()),
+    fetch('/api/alerts/type_settings_user').then(r => r.json()),
+  ]);
+
+  CARRIERS    = carriers;
+  ALERT_TYPES = Object.entries(atypes).map(([key, val]) => ({key, ...val}));
+
+  // Populate carrier dropdown
+  const sel = document.getElementById('my-carrier');
+  sel.innerHTML = carriers.map(c => '<option value="' + c.id + '">' + c.name + '</option>').join('');
+
+  // Build type checkboxes
+  const overrides = (sub && sub.alert_overrides) ? JSON.parse(sub.alert_overrides) : {};
+  buildAlertTypeGrids(atypes, overrides);
+
+  if (sub && Object.keys(sub).length) {
+    document.getElementById('my-email-enabled').checked = !!sub.email_enabled;
+    document.getElementById('my-email-addr').value      = sub.email_address || '';
+    document.getElementById('my-sms-enabled').checked   = !!sub.sms_enabled;
+    document.getElementById('my-phone').value           = sub.sms_phone || '';
+    sel.value = sub.sms_carrier || (carriers.length ? carriers[0].id : '');
+    document.getElementById('my-custom-domain').value   = sub.sms_custom_domain || '';
+    if (sub.email_address) await checkEmailVerifStatus(sub.email_address);
+    if (sub.sms_phone) await checkSmsVerifStatus(sub.sms_phone);
+    origEmail = sub.email_address || '';
+    origPhone = (sub.sms_phone || '').replace(/\D/g,'');
+  }
+
+  myToggleEmailFields();
+  myToggleSmsFields();
+  myToggleCustomDomain();
+  myUpdateSmsPreview();
+}
+
+function buildAlertTypeGrids(globalSettings, overrides) {
+  const emailGrid = document.getElementById('email-type-grid');
+  const smsGrid   = document.getElementById('sms-type-grid');
+  const groups = { network: [], security: [], maintenance: [] };
+  for (const [key, val] of Object.entries(globalSettings)) {
+    const g = val.group || 'network';
+    groups[g] = groups[g] || [];
+    groups[g].push({ key, ...val });
+  }
+  function renderGroup(group, channel) {
+    if (!group || group.length === 0) return '';
+    return group.map(a => {
+      const globalOn = channel === 'email' ? a.email_enabled : a.sms_enabled;
+      const override = overrides[a.key] || overrides[a.alert_type] || {};
+      const checked  = override[channel] !== undefined ? override[channel] : !!globalOn;
+      return '<label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;cursor:pointer;padding:3px 0;">'
+        + '<input type="checkbox" class="my-' + channel + '-override" data-key="' + a.key + '"'
+        + ' style="width:14px;height:14px;" ' + (checked ? 'checked' : '') + '>'
+        + (a.label || a.key) + '</label>';
+    }).join('');
+  }
+  function sectionHeader(label) {
+    return '<div style="grid-column:1/-1;font-size:0.68rem;font-weight:600;color:var(--text-muted);'
+         + 'letter-spacing:1px;text-transform:uppercase;margin:8px 0 4px;padding-top:6px;'
+         + 'border-top:1px solid var(--border-color);">' + label + '</div>';
+  }
+  function renderAll(channel) {
+    let html = renderGroup(groups.network, channel);
+    if ((groups.security || []).length > 0) {
+      html += sectionHeader('Security');
+      html += renderGroup(groups.security, channel);
+    }
+    if ((groups.maintenance || []).length > 0) {
+      html += sectionHeader('Maintenance');
+      html += renderGroup(groups.maintenance, channel);
+    }
+    return html;
+  }
+  emailGrid.innerHTML = renderAll('email');
+  smsGrid.innerHTML   = renderAll('sms');
+}
+
+function myToggleEmailFields() {
+  document.getElementById('my-email-fields').style.display =
+    document.getElementById('my-email-enabled').checked ? 'block' : 'none';
+}
+function myToggleSmsFields() {
+  document.getElementById('my-sms-fields').style.display =
+    document.getElementById('my-sms-enabled').checked ? 'block' : 'none';
+}
+function myToggleCustomDomain() {
+  const carrier = document.getElementById('my-carrier');
+  document.getElementById('my-custom-domain-row').style.display =
+    carrier && carrier.value === 'custom' ? 'block' : 'none';
+  myUpdateSmsPreview();
+}
+function myUpdateSmsPreview() {
+  const phone   = (document.getElementById('my-phone')?.value || '').replace(/\D/g,'').slice(-10);
+  const carrier = document.getElementById('my-carrier')?.value || '';
+  const custom  = document.getElementById('my-custom-domain')?.value || '';
+  let domain = '';
+  if (carrier === 'custom') { domain = custom; }
+  else { const c = CARRIERS.find(x => x.id === carrier); domain = c ? c.domain : ''; }
+  const el = document.getElementById('my-sms-preview');
+  if (el) {
+    el.textContent = phone.length === 10 && domain
+      ? 'SMS address: ' + phone + '@' + domain
+      : phone.length === 10 ? 'Select carrier to see SMS address'
+      : 'Enter 10-digit phone number';
+  }
+}
+
+async function testMyChannel(channel) {
+  const msg = document.getElementById('my-test-msg');
+  msg.style.display = 'inline'; msg.style.color = 'var(--text-muted)';
+  msg.textContent = 'Sending test ' + channel + '...';
+  const res = await fetch('/api/alerts/test_my/' + channel, {method:'POST'}).then(r => r.json());
+  msg.style.color   = res.status === 'ok' ? 'var(--ok)' : res.status === 'alerts_disabled' ? 'var(--warn)' : 'var(--fail)';
+  msg.textContent   = res.message;
+  setTimeout(() => msg.style.display = 'none', 5000);
+}
+
+async function saveMySubscription() {
+  const overrides = {};
+  document.querySelectorAll('.my-email-override').forEach(cb => {
+    if (!overrides[cb.dataset.key]) overrides[cb.dataset.key] = {};
+    overrides[cb.dataset.key].email = cb.checked;
+  });
+  document.querySelectorAll('.my-sms-override').forEach(cb => {
+    if (!overrides[cb.dataset.key]) overrides[cb.dataset.key] = {};
+    overrides[cb.dataset.key].sms = cb.checked;
+  });
+
+  const emailAddr = (document.getElementById('my-email-addr')?.value || '').trim();
+  const payload = {
+    email_address:     emailAddr,
+    email_enabled:     document.getElementById('my-email-enabled').checked,
+    sms_phone:         (document.getElementById('my-phone')?.value || '').replace(/\D/g,''),
+    sms_carrier:       document.getElementById('my-carrier')?.value || '',
+    sms_custom_domain: (document.getElementById('my-custom-domain')?.value || '').trim(),
+    sms_enabled:       document.getElementById('my-sms-enabled').checked,
+    alert_overrides:   overrides,
+  };
+
+  const res = await fetch('/api/alerts/my_subscription', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+  }).then(r => r.json());
+  showToast(res.status === 'ok' ? 'Alert preferences saved' : 'Save failed',
+            res.status === 'ok' ? 'success' : 'error');
+
+  if (res.status === 'ok') {
+    const newPhone = (document.getElementById('my-phone')?.value || '').replace(/\D/g,'');
+
+    if (emailAddr && emailAddr !== origEmail) {
+      // Email changed — reset verification and send new code
+      await fetch('/api/email/verify/request', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ email: emailAddr })
+      });
+      showToast('Email changed — verification code sent', 'info');
+      await checkEmailVerifStatus(emailAddr);
+    } else if (emailAddr) {
+      // Email unchanged — just refresh badge, no code sent
+      await checkEmailVerifStatus(emailAddr);
+    }
+
+    if (newPhone && newPhone !== origPhone) {
+      // Phone changed — reset SMS verification and send new code
+      await fetch('/api/sms/verify/request', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ phone: newPhone })
+      });
+      showToast('Phone changed — verification code sent via SMS', 'info');
+      await checkSmsVerifStatus(newPhone);
+    } else if (newPhone) {
+      // Phone unchanged — just refresh badge
+      await checkSmsVerifStatus(newPhone);
+    }
+
+    // Update baselines to newly saved values
+    origEmail = emailAddr;
+    origPhone = newPhone;
+  }
+}
+
+// ── Appearance ─────────────────────────────────────────────────────────────────
+let activeColorScheme = "{{ current_user.theme or 'dark-blue' }}";
+let activeLayout   = "{{ current_user.layout or 'comfortable' }}";
+let activeNavStyle = "{{ current_user.nav_style or 'icons-labels' }}";
+let activeAlign    = "{{ current_user.content_align or 'left' }}";
+
+function selectColorScheme(scheme, el) {
+  activeColorScheme = scheme;
+  document.body.className = document.body.className.replace(/theme-\S+/, 'theme-' + scheme);
+  el.closest('.nw-card').querySelectorAll('.pref-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  savePrefs();
+}
+function selectLayout(layout, el) {
+  activeLayout = layout;
+  el.closest('.nw-card').querySelectorAll('.pref-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  savePrefs().then(() => location.reload());
+}
+function selectNavStyle(style, el) {
+  activeNavStyle = style;
+  document.body.className = document.body.className.replace(/nav-style-\S+/, 'nav-style-' + style);
+  el.closest('.nw-card').querySelectorAll('.pref-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  savePrefs();
+}
+function selectContentAlign(align, el) {
+  activeAlign = align;
+  document.body.className = document.body.className.replace(/content-\S+/, 'content-' + align);
+  el.closest('.nw-card').querySelectorAll('.pref-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  fetch('/api/preferences', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ content_align: align })
+  });
+}
+async function savePrefs() {
+  await fetch('/api/preferences', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ theme: activeColorScheme, layout: activeLayout,
+                           nav_style: activeNavStyle, content_align: activeAlign })
+  });
+}
+
+// ── SMS Verification ──────────────────────────────────────────────────────────
+let lastCheckedPhone = '';
+
+function onPhoneChange() {
+  const phone = (document.getElementById('my-phone')?.value || '').replace(/\D/g,'').slice(-10);
+  if (phone !== lastCheckedPhone) {
+    document.getElementById('sms-verif-badge').style.display = 'none';
+    document.getElementById('sms-verif-section').style.display = 'none';
+  }
+}
+
+async function checkSmsVerifStatus(phone) {
+  if (!phone || phone.length !== 10) return;
+  lastCheckedPhone = phone;
+  let res;
+  try {
+    res = await fetch('/api/sms/verify/status?phone=' + encodeURIComponent(phone)).then(r => r.json());
+  } catch(e) { return; }
+  const badge   = document.getElementById('sms-verif-badge');
+  const section = document.getElementById('sms-verif-section');
+  const sendRow = document.getElementById('sms-send-btn-row');
+  badge.style.display = 'inline';
+  const smsTestBtn = document.getElementById('test-sms-btn');
+  if (res.status === 'verified') {
+    badge.textContent = '✓ Verified';
+    badge.style.background = 'rgba(76,175,80,0.15)';
+    badge.style.color  = 'var(--ok, #4caf50)';
+    badge.style.border = '1px solid var(--ok, #4caf50)';
+    section.style.display = 'none';
+    if (sendRow) sendRow.style.display = 'none';
+    if (smsTestBtn) smsTestBtn.style.display = 'inline-block';
+  } else if (res.status === 'pending') {
+    badge.textContent = '⏳ Pending — enter code below';
+    badge.style.background = 'rgba(255,152,0,0.1)';
+    badge.style.color  = '#ff9800';
+    badge.style.border = '1px solid #ff9800';
+    section.style.display = 'block';
+    if (sendRow) sendRow.style.display = 'block';
+    const sendBtn = document.getElementById('sms-verif-send-btn');
+    const prompt  = document.getElementById('sms-verif-prompt');
+    if (sendBtn) sendBtn.textContent = 'Resend';
+    if (prompt)  prompt.textContent  = 'Enter the 6-digit code sent to your phone via text message.';
+    if (smsTestBtn) smsTestBtn.style.display = 'none';
+  } else {
+    badge.textContent = '✗ Not verified';
+    badge.style.background = 'rgba(244,67,54,0.1)';
+    badge.style.color  = 'var(--fail, #f44336)';
+    badge.style.border = '1px solid var(--fail, #f44336)';
+    // Show section so user can request a code
+    section.style.display = 'block';
+    if (sendRow) sendRow.style.display = 'none'; // legacy send row replaced by section
+    const sendBtn   = document.getElementById('sms-verif-send-btn');
+    const prompt    = document.getElementById('sms-verif-prompt');
+    const codeInput = document.getElementById('sms-verif-code');
+    const submitBtn = document.getElementById('sms-verif-submit-btn');
+    if (sendBtn)   sendBtn.textContent    = 'Send Code';
+    if (prompt)    prompt.textContent     = 'Your phone number is not yet verified. Send a code to verify it.';
+    if (codeInput) codeInput.style.display = 'none';
+    if (submitBtn) submitBtn.style.display = 'none';
+    if (smsTestBtn) smsTestBtn.style.display = 'none';
+  }
+}
+
+async function requestSmsVerif() {
+  const phone   = (document.getElementById('my-phone')?.value || '').replace(/\D/g,'').slice(-10);
+  const carrier = document.getElementById('my-carrier')?.value || '';
+  const custom  = (document.getElementById('my-custom-domain')?.value || '').trim();
+  if (!phone || phone.length !== 10) { showToast('Enter a valid 10-digit phone number first', 'warning'); return; }
+  const msg = document.getElementById('sms-verif-msg');
+  msg.style.display = 'block'; msg.style.color = 'var(--text-muted)'; msg.textContent = 'Sending…';
+  try {
+    const res = await fetch('/api/sms/verify/request', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ phone, carrier, custom_domain: custom })
+    }).then(r => r.json());
+    msg.style.color = res.status === 'ok' ? 'var(--ok, #4caf50)' : res.status === 'alerts_disabled' ? 'var(--warn, #ff9800)' : 'var(--fail, #f44336)';
+    msg.textContent = res.message;
+    if (res.status === 'ok') {
+      const codeInput = document.getElementById('sms-verif-code');
+      const submitBtn = document.getElementById('sms-verif-submit-btn');
+      const sendBtn   = document.getElementById('sms-verif-send-btn');
+      const prompt    = document.getElementById('sms-verif-prompt');
+      if (codeInput) codeInput.style.display = '';
+      if (submitBtn) submitBtn.style.display = '';
+      if (sendBtn)   sendBtn.textContent = 'Resend';
+      if (prompt)    prompt.textContent  = 'Enter the 6-digit code sent to your phone via text message.';
+      await checkSmsVerifStatus(phone);
+    }
+  } catch(e) {
+    msg.style.color = 'var(--fail, #f44336)'; msg.textContent = 'Request failed';
+  }
+}
+
+async function submitSmsVerifCode() {
+  const phone = (document.getElementById('my-phone')?.value || '').replace(/\D/g,'').slice(-10);
+  const code  = document.getElementById('sms-verif-code').value.trim();
+  const msg   = document.getElementById('sms-verif-msg');
+  if (!phone) { showToast('Enter your phone number first', 'warning'); return; }
+  if (!code)  { showToast('Enter the 6-digit code from your text message', 'warning'); return; }
+  msg.style.display = 'block'; msg.style.color = 'var(--text-muted)'; msg.textContent = 'Verifying…';
+  try {
+    const res = await fetch('/api/sms/verify/confirm', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ phone, code })
+    }).then(r => r.json());
+    msg.style.color = res.status === 'ok' ? 'var(--ok, #4caf50)' : 'var(--fail, #f44336)';
+    msg.textContent = res.message;
+    if (res.status === 'ok') {
+      document.getElementById('sms-verif-code').value = '';
+      await checkSmsVerifStatus(phone);
+    }
+  } catch(e) {
+    msg.style.color = 'var(--fail, #f44336)'; msg.textContent = 'Verification failed';
+  }
+}
+
+// ── Delete Account ─────────────────────────────────────────────────────────────
+function showDeleteAccountDialog() {
+  document.getElementById('delete-confirm-pw').value = '';
+  document.getElementById('delete-keep-sub').checked = false;
+  document.getElementById('delete-account-msg').style.display = 'none';
+  document.getElementById('delete-account-modal').style.display = 'flex';
+}
+function closeDeleteAccountDialog() {
+  document.getElementById('delete-account-modal').style.display = 'none';
+}
+async function confirmDeleteAccount() {
+  const password = document.getElementById('delete-confirm-pw').value;
+  const keepSub  = document.getElementById('delete-keep-sub').checked;
+  const msg      = document.getElementById('delete-account-msg');
+  if (!password) { showToast('Please enter your password to confirm', 'warning'); return; }
+  msg.style.display = 'block'; msg.style.color = 'var(--text-muted)';
+  msg.textContent = 'Deleting account…';
+  try {
+    const res = await fetch('/api/auth/me/delete', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ password, delete_subscription: !keepSub })
+    }).then(r => r.json());
+    if (res.status === 'ok') {
+      window.location.href = '/login';
+    } else {
+      msg.style.color = 'var(--fail, #f44336)';
+      msg.textContent = res.message;
+    }
+  } catch(e) {
+    msg.style.color = 'var(--fail, #f44336)';
+    msg.textContent = 'Delete failed — please try again';
+  }
+}
+// Close modal on backdrop click
+document.getElementById('delete-account-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeDeleteAccountDialog();
+});
+
+// ── Custom color scheme (preferences page) ────────────────────────────────────
+function togglePrefCustomScheme() {
+  const sel = document.getElementById("pref-custom-scheme-select");
+  if (!sel) return;
+  const isVisible = (sel.style.display !== "none" && sel.style.display !== "");
+  if (isVisible) {
+    clearPrefCustomScheme();
+  } else {
+    sel.style.display = "block";
+    if (sel.value) applyPrefCustomScheme(sel.value);
+  }
+}
+
+async function applyPrefCustomScheme(name) {
+  const res = await fetch("/api/preferences/custom_scheme", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name })
+  });
+  const data = await res.json();
+  if (data.status === "ok") {
+    window.location.reload();
+  } else {
+    alert("Could not apply custom color scheme: " + (data.message || "Unknown error"));
+  }
+}
+
+async function clearPrefCustomScheme() {
+  const res = await fetch("/api/preferences/custom_scheme", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "" })
+  });
+  const data = await res.json();
+  if (data.status === "ok") {
+    window.location.reload();
+  } else {
+    alert("Could not clear custom color scheme: " + (data.message || "Unknown error"));
+  }
+}
+
+// ── Custom layout (preferences page) ─────────────────────────────────────────
+function togglePrefCustomLayout() {
+  const sel = document.getElementById("pref-custom-layout-select");
+  if (!sel) return;
+  const isVisible = (sel.style.display !== "none" && sel.style.display !== "");
+  if (isVisible) {
+    clearPrefCustomLayout();
+  } else {
+    sel.style.display = "block";
+    if (sel.value) applyPrefCustomLayout(sel.value);
+  }
+}
+
+async function applyPrefCustomLayout(name) {
+  const res = await fetch("/api/preferences/custom_layout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name })
+  });
+  const data = await res.json();
+  if (data.status === "ok") {
+    window.location.reload();
+  } else {
+    alert("Could not apply custom layout: " + (data.message || "Unknown error"));
+  }
+}
+
+async function clearPrefCustomLayout() {
+  const res = await fetch("/api/preferences/custom_layout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "" })
+  });
+  const data = await res.json();
+  if (data.status === "ok") {
+    window.location.reload();
+  } else {
+    alert("Could not clear custom layout: " + (data.message || "Unknown error"));
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+loadIdentity();
+loadMySubscription();
+initAppearance();
+</script>
+{% endblock %}

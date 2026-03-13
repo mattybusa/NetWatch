@@ -1,0 +1,330 @@
+MBASE — FORWARD PLAN
+=====================
+Created: 2026-03-13 | Session 10
+Revised: 2026-03-13 | Session 10 (added module system and integration standards)
+Status: Planning phase. Audit session required before extraction begins.
+
+PURPOSE
+-------
+mBase is a personal application framework extracted from NetWatch. The goal is to
+build the hard, reusable infrastructure once — authentication, security, package
+management, backup, configuration, alerting — so that each new project starts from
+a solid, proven foundation rather than from scratch.
+
+Every future project (NetWatch features that need external servers, new standalone
+apps, etc.) will be built on mBase. Decisions made in mBase are inherited by
+everything built on it, so correctness and clean design matter more here than
+anywhere else.
+
+
+WHAT MBASE PROVIDES
+--------------------
+Core (every project needs this):
+- User authentication and session management
+- Role-based access control (admin / user / guest)
+- First-run setup wizard
+- Configuration system (schema-driven, validated, editable via UI)
+- Package installer / patcher workflow (deploy updates without SSH)
+- Backup and restore (GPG encrypted, scheduled)
+- Rollback (atomic snapshot restore)
+- Security logging
+- SSL/TLS with self-signed CA
+- Service account (netwatch-svc pattern)
+- Systemd service management
+- Module system (see MODULE SYSTEM section below)
+- Dev docs and AI context system
+- Session documentation workflow
+
+Optional (included in mBase, activated per-project):
+- Alert / notification system (email, extensible to SMS etc.)
+- Package update scheduling (apt-get, cron-based)
+- User management UI
+- Delivery history tracking
+
+
+WHAT MBASE IS NOT
+------------------
+mBase contains no application logic. No network monitoring, no device telemetry,
+no external service integrations. Those live in the projects built on top of it.
+mBase is the room, not the furniture.
+
+
+RELATIONSHIP TO NETWATCH
+-------------------------
+NetWatch = mBase + network monitoring application layer.
+
+After extraction, NetWatch continues as before but its core is now mBase. When
+mBase gets a bug fix or improvement, NetWatch can pull it in as a package update.
+Other projects built on mBase get the same benefit.
+
+NetWatch-specific components that stay in NetWatch only:
+- main.py (monitor daemon)
+- monitor.py, network.py, relay.py, button.py (monitoring logic)
+- Ping/speed/event database tables and routes
+- Dashboard charts and network-specific UI
+- Router reset logic
+
+
+MODULE SYSTEM
+-------------
+mBase includes a module system that allows new capabilities to be added to any
+project without modifying the core. This is the answer to the extensibility
+problem -- how to design for features you haven't thought of yet.
+
+CORE PRINCIPLE: The module system defines a standard structure that every module
+follows. Within that structure, each module speaks whatever external protocol or
+standard is appropriate for what it integrates with. The core doesn't need to know
+what the module does -- it just needs to know how to load it.
+
+HOW IT WORKS:
+A modules/ directory is scanned at startup. Each module is a self-contained folder
+that declares what it needs from the core and what it contributes back. The core
+provides the infrastructure; the module provides the application logic.
+
+WHAT A MODULE CAN DECLARE:
+- Database tables it needs created
+- Web routes it adds to the application
+- Dashboard cards/widgets it contributes
+- Configuration schema entries (user-configurable settings)
+- Scheduled tasks (cron-style recurring work)
+- Alert rules (conditions that trigger the alert system)
+- Which integration standard(s) it uses (see INTEGRATION STANDARDS below)
+
+WHAT THE CORE PROVIDES TO EVERY MODULE:
+- Database access
+- The alert system
+- The configuration system
+- The security log
+- The user/session context
+- The web framework (Flask routes, templates)
+- The scheduler
+
+This means a new module author doesn't build any of that infrastructure -- they
+just write the logic specific to what they're integrating with.
+
+
+INTEGRATION STANDARDS
+----------------------
+mBase is built to speak several integration standards. Each project and each module
+uses whichever standard fits what it's integrating with. The plumbing for each
+standard is provided by mBase -- modules don't implement it from scratch.
+
+The standards mBase will support, and when each is the right choice:
+
+OPENTELEMETRY
+  What: The emerging universal standard for observability data -- metrics, logs,
+  and traces. Backed by CNCF (same foundation as Kubernetes). Supported by every
+  major observability vendor and increasingly by all serious software.
+  When to use: Any module that collects performance/health data. Host monitoring,
+  service health, application performance, infrastructure metrics.
+  Example: Host monitoring module collects CPU, memory, disk, network via
+  OpenTelemetry. Node Exporter on each device emits OTel-compatible metrics.
+  Note: Prometheus is an OTel-compatible collector. OTel can feed Prometheus as
+  one of its outputs. Start with Prometheus for NetWatch host monitoring, with
+  OTel as the longer-term standard.
+
+ONVIF
+  What: The standard protocol for IP cameras and video devices. Almost every
+  IP camera regardless of brand speaks ONVIF.
+  When to use: Any project involving cameras, video streams, or NVR functionality.
+  Example: An mBase NVR project uses ONVIF to discover and connect to cameras.
+  A video analytics module plugs into the same ONVIF plumbing.
+
+MATTER / ZIGBEE / Z-WAVE
+  What: Standards for smart home device control and automation. Matter is the
+  newest and is backed by Apple, Google, Amazon, Samsung. Zigbee and Z-Wave are
+  established for lower-level devices.
+  When to use: Any project involving smart home device control, automation,
+  sensors, lights, locks, thermostats.
+  Example: A home automation project built on mBase uses Matter plumbing to
+  control devices without writing device-specific code.
+
+WEBHOOKS / REST API
+  What: The universal integration layer for software that exposes an HTTP API.
+  Not a single standard but a pattern -- almost every modern application has one.
+  When to use: Any module integrating with software that has an API but doesn't
+  speak one of the more specific standards above. Most web services, most SaaS
+  tools, most open source applications.
+  Example: A Frigate (NVR software) module talks to Frigate's REST API for
+  event data and its webhook system for real-time motion notifications.
+
+GRPC (PLUGIN COMMUNICATION)
+  What: A high-performance RPC framework with a defined contract (proto file).
+  Used by HashiCorp (Terraform, Vault) and others for plugin systems where plugins
+  run as separate processes.
+  When to use: Modules that need to run as separate processes rather than inside
+  the mBase application. Provides language-agnostic plugin interface -- a plugin
+  could be written in Go, Rust, Python, anything.
+  Example: A computationally intensive video analytics module that needs to run
+  independently rather than inside the Python web process.
+
+SNMP (LEGACY DEVICES)
+  What: The old standard for network device monitoring. Every managed switch,
+  router, and enterprise device speaks it. SNMPv3 is secure.
+  When to use: Monitoring legacy network infrastructure that doesn't speak
+  modern standards. Routers, switches, UPS devices, printers.
+  Example: A network infrastructure module that monitors managed switches and
+  reports interface stats, error rates, and device health.
+
+KEY PRINCIPLE: mBase provides the plumbing for all of these. A new project or
+module looks at what it's integrating with, identifies which standard that thing
+speaks, and uses the corresponding mBase plumbing. Standards the project doesn't
+need sit unused and out of the way.
+
+This is the answer to the chicken-and-egg problem. You don't need to know all
+future modules in advance. You build the plumbing for the standards that matter
+in your domain, and future modules self-select which pipe to connect to.
+
+
+WHAT THIS MEANS FOR NETWATCH HOST MONITORING (FIRST MODULE)
+------------------------------------------------------------
+The host monitoring feature will be the first module built on the mBase module
+system. It validates the slot design with a real use case.
+
+Architecture:
+- Node Exporter runs on each device (including the Pi) as a system service.
+  It is NOT a NetWatch module -- it's external infrastructure, like gunicorn.
+- Prometheus runs inside NetWatch as a module. It scrapes Node Exporter endpoints
+  on a schedule and stores the data.
+- The NetWatch host monitoring module registers:
+    - Prometheus scrape config (which devices, how often)
+    - Dashboard cards (CPU, memory, disk, network per device)
+    - Alert rules (device offline, disk > 90%, etc.)
+    - Config entries (device list, scrape interval, thresholds)
+
+This design means adding a new device to monitor is a configuration change,
+not a code change. And adding a new type of data source (say, SNMP for a router)
+is a new module, not a core change.
+
+Sequence:
+1. Audit session (evaluate NetWatch, design module system structure)
+2. Design brief for module system (options, recommendation, approval)
+3. Design brief for host monitoring module (options, recommendation, approval)
+4. Build module system in mBase
+5. Build host monitoring as first module (proves the system works)
+6. mBase extraction carries proven module system forward
+
+
+PREREQUISITE: AUDIT SESSION
+-----------------------------
+Before any extraction work begins, a dedicated audit session must evaluate each
+NetWatch subsystem against the questions in Audit_PreMBase.txt. The audit will:
+1. Identify what is generic as-is vs needs cleanup vs stays in NetWatch
+2. Surface any design decisions that should be revisited before being locked into
+   a framework (these are much cheaper to fix now than after 5 projects inherit them)
+3. Evaluate whether the current codebase can accommodate the module system design
+4. Produce a concrete extraction plan with a specific order of operations
+
+The audit session should NOT write any code. It reads, evaluates, and plans.
+The output is a decision document, not a package.
+
+
+PROPOSED EXTRACTION ORDER (PROVISIONAL)
+-----------------------------------------
+This order is provisional and subject to change after the audit. The principle is:
+extract the foundation first, then the things that depend on it.
+
+Phase 1 -- Core infrastructure (no UI dependencies)
+  1. database.py (generic tables only)
+  2. auth.py
+  3. config.py + config_schema.py
+  4. security_log.py
+
+Phase 2 -- Web framework
+  5. webapp.py (generic routes only: auth, user mgmt, config, security log)
+  6. wsgi.py, gunicorn.conf.py
+  7. Base templates and static assets
+  8. Theme system
+
+Phase 3 -- Operations
+  9. patcher.py + updater.py
+  10. backup.sh + restore.sh + rollback.sh
+  11. install.sh
+  12. certmanager.py + generate_certs.sh
+  13. Systemd unit files + service account setup
+
+Phase 4 -- Module system
+  14. Module loader and registration system
+  15. Integration standard plumbing (OTel, webhooks/REST first; others as needed)
+  16. Dashboard card/widget slot system
+
+Phase 5 -- Optional modules
+  17. alerts.py + alert_subscribers.py
+  18. pkg_update.sh + scheduling UI
+
+Phase 6 -- Documentation and AI context system
+  19. Dev docs structure
+  20. AI_Session_Process.txt (mBase version)
+  21. SummaryInstructions.txt (mBase version)
+  22. Starter context doc template
+
+
+MBASE PROJECT STRUCTURE (PROPOSED)
+------------------------------------
+mbase/
+  core/           -- auth, database, config, security_log
+  web/            -- webapp, wsgi, gunicorn config
+  templates/      -- base templates (generic, no app-specific UI)
+  static/         -- base CSS, JS, theme system
+  ops/            -- patcher, updater, backup, restore, rollback, install, certs
+  alerts/         -- alert system (optional module)
+  modules/        -- module loader + integration standard plumbing
+    standards/    -- OTel, ONVIF, Matter, webhook, gRPC, SNMP plumbing
+  dev_docs/       -- AI context, summaries, gotchas (mBase-specific)
+  docs/           -- human-readable documentation
+
+
+OPEN QUESTIONS (TO BE RESOLVED IN AUDIT SESSION)
+--------------------------------------------------
+- Should mBase live on a separate Pi, or is it a separate directory/repo on the
+  same Pi as NetWatch? (Separate Pi is cleaner but adds hardware cost. Separate
+  repo on same Pi is pragmatic for now.)
+- Should mBase have its own version numbering independent of NetWatch?
+- How does a new project "inherit" from mBase -- copy the files, or reference them?
+  (Copy is simpler for the Pi deployment model. Reference requires more infrastructure.)
+- Should the AI context system be part of mBase or treated as a separate concern
+  that each project manages independently?
+- Which integration standards should be built in Phase 4 vs deferred to when a
+  module actually needs them? (OpenTelemetry and webhooks/REST are clearly first.
+  ONVIF, Matter, gRPC can wait until a project needs them.)
+- Should Prometheus be embedded in mBase or run as a separate system service
+  alongside mBase applications?
+
+
+DESIGN STANDARD REFERENCE
+--------------------------
+All mBase and NetWatch architectural decisions must be evaluated against:
+
+  Networked_App_Standards_Summary.txt
+
+This document classifies every major concern as BORROW (use existing tool),
+BUILD (implement yourself), MIXED (tool + domain logic), or ADOPT (implement
+against an open specification). It also contains 29 non-negotiable rules
+covering security, architecture, UI/UX, data, IoT, and compliance.
+
+Before making any design decision in mBase -- authentication approach, session
+management, API design, logging format, error handling, database choice,
+UI stack -- check the standards document first. The goal is for mBase and all
+projects built on it to conform to these standards from the start, so that
+decisions made early don't need to be reversed later.
+
+Key standards directly relevant to mBase:
+- Authentication: MIXED -- use an IdP (Keycloak for self-hosted). Never roll
+  your own auth from scratch.
+- TLS: BORROW -- Let's Encrypt + Certbot. Already partially in place.
+- Logging: MIXED -- structured JSON logging, OpenTelemetry for observability.
+- API design: BUILD -- REST, OpenAPI spec, versioned from day one (/v1/).
+- Input validation: MIXED -- Pydantic for Python schema validation.
+- IoT/device protocols: ADOPT -- ONVIF, MQTT/Mosquitto, Matter/Zigbee, SNMP.
+- UI stack: Tailwind CSS + shadcn/ui (replaces hand-rolled CSS).
+
+DESIGN-FIRST REMINDER
+----------------------
+When the time comes to build mBase, every subsystem gets a design brief before any
+code is written. This is especially important here because mBase decisions propagate
+to every future project. The cost of a wrong design decision in mBase is multiplied
+by every project that inherits it.
+
+The module system and integration standards in particular must go through a thorough
+design brief before any code is written. These are the decisions that determine
+whether future modules are easy or hard to build.

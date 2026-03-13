@@ -1,0 +1,71 @@
+Feature_DeliveryHistory.txt
+===========================
+FEATURE/BUG HEADER
+------------------
+Name: Delivery History — Friendly Labels, Pagination, Time Range, Transactional Logging
+Type: Feature + Bug fix
+Date worked on: 2026-03-07
+Sessions: Session 2
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+The Delivery History card in alert_settings.html showed raw snake_case alert_type keys
+(e.g. "brute_force" instead of "Brute Force Attempt"). The user requested friendly
+labels. After that fix was confirmed, the user requested pagination (currently all
+records shown), a time-range selector, and investigation of why password reset emails
+were not appearing in the delivery history when filtering by subscriber.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+No failed approaches.
+
+
+WHAT WORKED
+-----------
+Package v3.2.72 — alert_settings.html only:
+- New FRIENDLY_LABELS JS object mapping raw keys to human-readable labels:
+  outage→"Network Outage", brute_force→"Brute Force Attempt", password_reset→
+  "Password Reset", etc.
+- New friendlyType(rawKey) helper — looks up label, falls back to auto-title-casing
+  the key for any unknown future types.
+- renderHistory() updated to call friendlyType() for the Type column.
+- Filter dropdown was already correct (used typeSettings labels from API).
+
+Package v3.2.73 — alert_settings.html, alert_subscribers.py (get_delivery_history),
+  webapp.py (api_delivery_history route):
+- Time range selector: dropdown with Last 1 hr / Last 6 hrs / Last 24 hrs (default) /
+  Last 7 days / Last 30 days / All time. Filter applied server-side via SQLite
+  datetime comparison.
+- Pagination: 20 rows per page. Footer shows "Showing 1–20 of 47 records" with
+  numbered page buttons, sliding window of 5 with ellipsis. Controls hide when
+  all records fit one page.
+- Changing any filter (type, subscriber, time range) resets to page 1 and re-fetches.
+- database.py get_delivery_history() updated to accept hours parameter.
+- webapp.py api_delivery_history route passes hours through.
+
+Package v3.2.74 — alerts.py, webapp.py:
+Root cause of missing transactional sends in delivery history:
+The force_email path in send_alert() returned early before ever reaching log_delivery.
+Password reset sends and email verification sends were completely off the books.
+
+Fix:
+- send_alert() gained optional subscriber_id parameter.
+- force_email path now calls log_delivery() with the subscriber_id.
+- forgot_password route in webapp.py looks up subscriber_id via
+  get_subscriber_by_username() before calling send_alert.
+- Email verification path similarly updated.
+
+After v3.2.74: password reset sends appear in delivery history when filtering by
+the subscriber who requested the reset.
+
+User confirmed all changes working.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+SMS delivery logging via the reset path: logged when the SMS send is attempted but
+whether the SMS actually delivered is not tracked (no delivery receipt from gateway).
+History shows "sent" not "delivered."

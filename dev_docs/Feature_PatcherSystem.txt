@@ -1,0 +1,119 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: PATCH SYSTEM
+==================================================
+Name: Zip-Based Package Installer (Patcher) with Rollback
+Type: Feature
+Date: 2026-03-01 (initial v2.1); rebuilt v2.4; rollback added v3.2.2
+Sessions: Session 1.2 (initial + v2.4 rebuild); Session 1.3 (rollback, config.py
+  exclusion from snapshots v3.2.50, Package History row limit v3.2.49)
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+User requested a zip-based update system after the initial SCP + unzip + nano workflow
+proved tedious. The patcher became the primary development workflow for all sessions:
+every code change is delivered as a versioned zip package installed via the web UI.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+JSON patch format (initial approach, dropped at v2.4):
+Used .jsonpatch files for partial line-level replacements. Brittle: text matching with
+no context awareness. Multiple patches on the same file caused orphaned references.
+Classic failure: username change patch left a JavaScript reference to a DOM element
+that a subsequent patch removed → TypeError on modal open. Dropped entirely at v2.4.
+Rule going forward: full-file replace only.
+
+Duplicate routes after patching webapp.py (v2.4):
+Incremental patching of webapp.py introduced duplicate @app.route('/preferences')
+decorators. Flask silently uses the first definition, so the patched behavior never
+applied. Symptom: fixed code present in file, old behavior persisting. Fixed by
+manually removing duplicate route block. Rule: after patching webapp.py, always grep
+for duplicate route decorators. See Gotchas.
+
+Admin page missing after v2.4 deploy:
+The v2.4 package included webapp.py but the admin.html template was not updated to
+match. Admin page loaded but showed old cards without the new Package Installer and
+Config Editor links. Fixed with v2.4.1 hotfix package (admin.html only).
+Because the web UI was broken, had to SCP v2.4.1.zip directly and install via SSH.
+Rule: always verify that template + backend changes are in the same package.
+
+
+WHAT WORKED
+-----------
+MANIFEST.JSON SCHEMA:
+{
+  "version": "3.2.50",
+  "description": "Human-readable description of changes",
+  "files": [
+    {"action": "replace", "file": "webapp.py"},
+    {"action": "replace", "file": "templates/admin.html"},
+    {"action": "replace", "file": "dev_docs/NetWatch_AI_Context.txt"}
+  ],
+  "restart": ["web"]   // "monitor", "web", or "both"
+}
+
+PATH RESOLUTION in patcher.py (_resolve_path()):
+- .html files → templates/
+- .css, .js → static/
+- Files with dev_docs/ prefix → dev_docs/ (must include prefix explicitly)
+- All other .py files → netwatch root
+Note: dev_docs/ prefix must be spelled out in the file field. The auto-detection only
+applies to known extensions. (Gotcha added — patcher v3.2.90 fixed this for dev_docs.)
+
+SERVICE_MAP in updater.py:
+Controls which services restart for which files. Must be correct per package.
+- monitor.py, network.py, relay.py, button.py, database.py, alerts.py, main.py → monitor
+- webapp.py, auth.py, templates/, static/ → web
+- config.py, configeditor.py → both
+- alerts.py is imported by BOTH services; packages including alerts.py MUST restart both.
+
+VERSION CHECKING:
+Patcher reads VERSION file from Pi. Warns if package version is not the next sequential
+version (out-of-order install). Warning only — does not block install.
+
+INSTALL HISTORY:
+Each install appended to install_log table in SQLite. Package History UI in admin shows
+last N installs (configurable, added v3.2.49). Fields: version, date, description,
+files_changed, restart_performed.
+
+PRE-INSTALL SNAPSHOT (v3.2.2):
+Before installing any package, patcher zips all current files to:
+  ~/netwatch/snapshots/snapshot_vX.X.XX_TIMESTAMP.zip
+SNAP_EXCLUDE set: config.py excluded from snapshots (v3.2.50) — live credentials must
+not be written to snapshot archives.
+
+ROLLBACK (v3.2.2):
+Web UI: "Rollback" button in Package Installer restores the most recent snapshot.
+SSH emergency: rollback.sh script in netwatch root. Usage: bash ~/netwatch/rollback.sh
+Script: finds most recent snapshot zip, extracts all files to ~/netwatch/, restarts
+both services. No web UI required — works even when Flask is down.
+User requested this after recognizing risk of being stuck with a broken server at
+session limit with no way to recover without Claude.
+
+PACKAGE HISTORY ROW LIMIT (v3.2.49):
+Selector in Package History UI: 5 / 10 / 20 / 50 / All. Default 10.
+Stored server-side in user_prefs table (per-account). ?limit= query parameter.
+NOTE: v3.2.49 also introduced the monitor crash bug (see Bug_MetricsChartAndAdminCollapse.txt).
+
+CONFIG.PY EXCLUDED FROM SNAPSHOTS (v3.2.50):
+SNAP_EXCLUDE = {"config.py"} added to _take_snapshot() in patcher.py.
+Prevents live credentials and SECRET_KEY from being written into snapshot zip files.
+
+ZIP PACKAGING RULE (from Gotchas, added later):
+Always build packages from inside the package directory:
+  cd /package_dir && zip -r ../output.zip .
+If zipped from outside (zip -r pkg.zip ./package_dir/), all files land inside a
+subdirectory and patcher can't find manifest.json at the zip root.
+
+FILES:
+- patcher.py — package installer, snapshot, rollback
+- updater.py — file-level service restart logic, SERVICE_MAP
+- rollback.sh — emergency SSH restore script
+- templates/patch_manager.html — Package Installer + Package History UI
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Snapshot storage grows unbounded. No automatic pruning of old snapshots.
+  Manual cleanup via SSH if disk space becomes a concern.
+- Rollback only goes back one version (most recent snapshot). No multi-step rollback.

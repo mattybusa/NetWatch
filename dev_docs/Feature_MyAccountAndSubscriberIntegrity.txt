@@ -1,0 +1,123 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: MY ACCOUNT REFACTOR AND SUBSCRIBER INTEGRITY
+==================================================================================
+Name: My Account Contact/Identity, Subscriber Integrity Rules, Merge Logic
+Type: Feature
+Date: 2026-03-05 (v3.2.16); extended v3.2.17–v3.2.20 (integrity rules)
+Sessions: Session 1.3
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+The My Account page had grown organically with appearance settings, password change,
+and alert subscriptions stacked without clear organization. The user also identified
+that account holders needed full contact info (name, email, phone) on their account
+which should sync automatically to their subscriber record for alerts. Additionally,
+the system had no rules about when admins could/couldn't modify account-linked
+subscribers — those rules were designed and implemented.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Email/phone fields missing from Alert Subscriptions card:
+An earlier refactor had removed the email and phone fields from the My Account →
+Alert Subscriptions section (they were moved to Contact & Identity). Users had no
+way to enter delivery contact info from the subscriptions view. Fixed in v3.2.17
+by restoring email + phone + carrier fields with inline verification badges and
+test buttons to the Alert Subscriptions card, separate from Contact & Identity
+which shows the same values for reference.
+
+Account deletion not touching subscriber record:
+When an admin deleted an account, the subscriber record was left intact with the
+old user_id. This orphaned the subscriber record (still linked to a non-existent
+user_id). Fixed: account deletion prompts "also remove alert subscription?" Dialog
+required before deletion completes.
+
+SMS verification confusion:
+Initial SMS "verified" badge was unclear — there was no actual verification flow.
+Clarified and implemented: SMS verification sends a 6-digit code via the email-to-SMS
+gateway to the user's phone. User enters the code in the UI. If it matches (within
+10 minutes), phone is marked verified. Verification badge turns green.
+User confirmed: "sms sent via email arrives via text with code, user enters code
+received via sms, phone number verified."
+
+
+WHAT WORKED
+-----------
+MY ACCOUNT PAGE REORGANIZATION:
+Final card order (top to bottom):
+1. Contact & Identity — first_name, last_name, email, username (read-only label)
+2. Alert Subscriptions — email/phone fields (with verification badges and test buttons),
+   per-type checkboxes, channel toggles
+3. Change Password
+4. Appearance — theme, layout, nav style (bottom, least frequently changed)
+
+CONTACT & IDENTITY CARD (v3.2.16):
+New database columns: first_name, last_name on users table and alert_subscribers table.
+POST /api/auth/me/identity: saves name + email + phone, auto-syncs to subscriber record.
+When either the users record or the alert_subscribers record is updated, the other is
+updated automatically (bidirectional sync).
+
+GET_DISPLAY_NAME() helper in alert_subscribers.py:
+Returns: first_name if set, else username if account-linked, else "there" (fallback).
+Used in personalized alert email greetings: "Hi Matt," or "Hi mboynton," etc.
+get_display_name() added to the recipients dict before building alert email body.
+
+AUTH.PY ADDITIONS (v3.2.16):
+- first_name, last_name returned in get_current_user(), get_all_users(), get_user_by_id()
+- update_identity(user_id, first_name, last_name, email, phone) — syncs to subscriber
+- update_user() accepts first_name, last_name parameters
+
+SUBSCRIBER INTEGRITY RULES (v3.2.17–v3.2.20):
+
+1. Account holders always have a subscriber record:
+   Created at account creation time (user_id linked, all fields empty, no subscriptions).
+   Previously only created when the account holder saved their preferences.
+   Both api_create_user() and api_register() now call subscriber creation.
+
+2. Admin cannot delete account-linked subscriber:
+   Delete button hidden/disabled when subscriber.user_id is not NULL.
+   Only shown when user_id is NULL (standalone subscriber, no account).
+
+3. Account deletion dialog:
+   When deleting a user account, dialog asks: "Also remove alert subscription?"
+   - Yes → subscriber record deleted too
+   - No → subscriber record preserved, user_id cleared → becomes standalone
+   After user_id is cleared, admin can delete the standalone subscriber if needed.
+
+4. Duplicate detection on add subscriber:
+   Before creating a new standalone subscriber, check_duplicate(email, phone) runs.
+   If email or phone matches an existing account-linked subscriber:
+     "An account already exists: username 'mboynton'"
+   If matches a standalone subscriber:
+     "A subscriber already exists: Name"
+   Add is blocked in both cases.
+
+5. Merge on account create with matching email:
+   When a new account is created with an email that matches a standalone subscriber,
+   merge_standalone_into_account() runs: copies the standalone's subscription settings
+   to the new account's subscriber record, deletes the standalone record.
+
+SMS VERIFICATION (v3.2.18):
+POST /api/auth/me/verify-phone: generates 6-digit code, sends via email-to-SMS gateway
+  to subscriber.phone@carrier_gateway. Code stored in session, 10-minute expiry.
+POST /api/auth/me/verify-phone/confirm: checks code, sets phone_verified=True.
+Green badge shown in Alert Subscriptions card when verified.
+
+FILES:
+- auth.py — identity update, first/last name in user dicts
+- alert_subscribers.py — check_duplicate, merge_standalone_into_account, get_display_name,
+  upsert_subscriber with first/last name, phone verification
+- alerts.py — display_name parameter in body builders (restart BOTH services)
+- webapp.py — /api/auth/me/identity, account deletion with subscription dialog,
+  /api/auth/me/verify-phone routes
+- templates/preferences.html — Contact & Identity card, reordered Alert Subscriptions,
+  email/phone with verification badges and test buttons
+- templates/admin_users.html — subscriber delete protection, account deletion dialog
+- database.py — first_name/last_name columns on both tables, schema migration
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- If an admin manually clears an email address from a user's Contact & Identity, the
+  subscriber record is updated immediately. If the user had a verified email, it is
+  cleared. No "are you sure" on clearing verified contact info.

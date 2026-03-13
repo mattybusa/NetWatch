@@ -1,0 +1,108 @@
+NETWATCH SESSION SUMMARY
+========================
+Session: 3 | Date: 2026-03-08
+Starting version: v3.2.88 | Ending version: v3.2.95
+This session built the Dev Documents system to solve context loss between sessions,
+fixed the export code 500 error, and designed the full session continuity infrastructure.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- Dev Documents system (v3.2.89-v3.2.95): New dev_docs/ directory on Pi, Deployed Files
+  page (replacing File Update Manager), Dev Docs section in that page for managing AI
+  context files, download button that exports code + dev_docs together.
+  (see Feature_DevDocuments.txt)
+
+- Export code 500 error fixed (v3.2.94): os.walk was picking up gunicorn.ctl (a Unix
+  socket file) and zf.write() threw OSError. Fixed by adding gunicorn.ctl to EXCLUDE_FILES
+  in both export routes. (see Feature_DevDocuments.txt — detail in EXPORT FIX section)
+
+- Duplicate download buttons merged (v3.2.95): "Download Current Code" and
+  "Download Code + Dev Documents" did the same thing. Merged into one button pointing
+  to export_code_full. Description updated to clarify purpose.
+  (see Feature_DevDocuments.txt — detail in ADMIN PAGE section)
+
+- Backlog corrected: Several items were incorrectly listed as incomplete. Verified from
+  code: IP geo popover complete, password reset via email+SMS complete, delivery history
+  friendly labels complete, auto-disable after lockouts complete. SMS change detection
+  was initially dismissed as not implemented — user screenshots proved it was working.
+  Verified in code after correction.
+
+- Orphaned context doc files removed from Pi root (manual rm command by user).
+
+- Session continuity infrastructure designed and created: SummaryInstructions.txt,
+  AI_Session_Process.txt, Gotchas.txt, CurrentTask.txt. See design discussion below.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- v3.2.89 first zip was broken — files were inside a subdirectory instead of at zip root.
+  manifest.json not found by patcher. Rebuilt correctly. See Gotchas.txt.
+
+- SMS change detection incorrectly dismissed as not implemented after shallow code read.
+  User provided screenshots showing it working. Full code read confirmed it was complete.
+  This is a canonical example of the "do not diagnose from surface reads" rule.
+
+- v3.2.90 context doc placement failed — patcher _resolve_path() fix only applies to
+  future packages, not the one that introduced the fix. Docs landed correctly in v3.2.91.
+
+
+DECISIONS MADE
+--------------
+- DB registry for Deployed Files deferred. Was on original backlog but reasoning was
+  unknown (context lost from earlier session). Deferred until reasoning can be recovered.
+  Current functionality works without it.
+
+- Context doc updates ride with real packages, never installed alone. Exception allowed
+  only at session end with no pending code changes, clearly noted.
+
+- Expanded summaries grouped by feature/bug, not by package. Packages are implementation
+  details; features and bugs are the meaningful unit.
+
+- Base summary must be complete enough that expanded summaries are rarely needed.
+  Expanded summaries are a safety net, not a crutch.
+
+- Project vision statement to be added to AI_Session_Process.txt once drafted by user.
+  Placeholder noted in process doc.
+
+- Two-tier summary structure adopted: base (always loaded) + expanded (loaded on demand).
+  Gotchas.txt always loaded. CurrentTask.txt always loaded. Expanded summaries only when
+  directly relevant to the active task.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+-----------------------------------
+- Summaries for Sessions 1 and 2 do not yet exist. User to provide transcripts.
+  Instructions for creating them are in SummaryInstructions.txt.
+
+- DB registry for Deployed Files: original reasoning unknown. Revisit when prior
+  session transcripts are available.
+
+- v3.2.96 package staged but not yet installed. Contains updated context doc.
+  Must be updated to include all new dev_docs files before install.
+
+
+BACKLOG CHANGES
+---------------
+Marked complete this session:
+  - Security log IP geo popover
+  - Password reset via email+SMS
+  - Delivery history friendly labels
+  - Auto-disable after repeated lockouts (implemented, not tested — retains that note)
+  - SMS change detection
+  - Dev Documents system (core complete, DB registry deferred)
+  - Export code 500 error (gunicorn.ctl)
+
+No new backlog items added.
+
+
+EXPANDED SUMMARIES PRODUCED
+---------------------------
+Feature_DevDocuments.txt — Full detail on the Dev Documents system, export fix, and
+  download button merge. Covers v3.2.89–v3.2.95.
+-------------
+Pi version: v3.2.95
+Known issues: None
+v3.2.96 package staged, not installed. Waiting for session-end docs to be finalized
+before rebuilding and installing.
+Next task: Create Sessions 1 and 2 summaries, then pick next backlog item.

@@ -1,0 +1,100 @@
+FEATURE: ABOUT / SYSTEM INFO POPOVER
+=====================================
+
+FEATURE/BUG HEADER
+------------------
+- Name: About / System Info Popover
+- Type: Feature
+- Date: 2026-03-11
+- Session: 5
+- Versions: v3.3.0, v3.3.1, v3.3.5
+- Final outcome: Complete
+
+
+BACKGROUND
+----------
+Backlog item: "About/system info popover in navbar." Goal was to give any user a way to
+quickly see the running version, a brief description of the project, the author, and the
+software dependencies with licenses. The popover was to be accessible from the brand
+name in the top navbar without navigating away.
+
+Design constraints discussed: the NETWATCH brand text in the sidebar also needed the
+popover, but the existing "Dashboard" nav link behavior should not change. The solution
+was to change only the brand text click behavior; the nav menu Dashboard entry was left
+untouched.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+v3.3.0 color regression: the popover trigger button used font:inherit and color:inherit
+in its CSS, which caused it to pick up the wrong color from the parent context in some
+themes. Visually the brand text appeared discolored relative to the rest of the navbar.
+Fixed in v3.3.1 by removing those inheritance rules.
+
+v3.3.0 popover too narrow: initial width of 340px was not wide enough to display the
+dependency table without cramping. Fixed in v3.3.1 by widening to 400px and reducing
+the table font size to 0.77rem.
+
+v3.3.5 position regression (introduced by v3.3.1): navbar layout popover was anchored
+at top:8px which caused it to overlap the navbar bar itself. The correct position is
+top:52px (below the navbar). This had been correct in an earlier iteration but was
+accidentally reverted when other positioning changes were made in v3.3.1.
+
+
+WHAT WORKED
+-----------
+All changes are in templates/base.html only. No Python changes.
+
+IMPLEMENTATION (v3.3.0 + v3.3.1 + v3.3.5):
+
+Trigger mechanism:
+- The NETWATCH brand text in the top navbar and in the sidebar is wrapped in a
+  <button> element with id="aboutTriggerNavbar" (navbar) and id="aboutTriggerSidebar"
+  (sidebar). These replace the prior <a href="/dashboard"> links.
+- Clicking either trigger calls showAboutPopover(anchorEl) in inline JS.
+
+Popover element:
+- A single <div id="aboutPopover"> is present in the DOM once, positioned fixed.
+- showAboutPopover(anchorEl) reads the bounding rect of the clicked trigger and sets
+  the popover's top/left accordingly:
+  - Navbar trigger: top = 52px, left = 8px (below navbar, left-aligned)
+  - Sidebar trigger: top = anchorEl.bottom + 4px, left = anchorEl.left
+- The popover is shown by toggling display from none to block.
+- Clicking the x button or clicking outside the popover calls hideAboutPopover().
+
+Popover content:
+- Header: "NETWATCH" with a small shield icon, subheading "Home Network Monitor"
+- Version: rendered from Jinja2 as {{ version }} (passed from webapp.py context)
+- Description: trimmed North Star statement ("Self-hosted home network monitoring
+  and automation. Monitors internet health, automates recovery, and gives homeowners
+  visibility and control through a single interface.")
+- Author: M. Boynton
+- Dependencies table: two-column (Package / License), 13 rows:
+  Flask (BSD-3), flask-session (BSD-3), Gunicorn (MIT), bcrypt (Apache-2.0),
+  cryptography (Apache-2.0 / BSD), requests (Apache-2.0), packaging (Apache-2.0 / BSD),
+  RPi.GPIO (MIT), lgpio (LGPL-2.1), speedtest-cli (Apache-2.0),
+  SQLite3 (Public Domain), Chart.js (MIT), Bootstrap Icons (MIT)
+
+Styling:
+- Popover width: 400px
+- Dependencies table font: 0.77rem, row padding 3px vertical
+- Header icon and font sizes reduced from defaults to keep layout compact
+- Outer padding: 16px
+- z-index high enough to appear above navbar and sidebar overlays
+
+Files changed across v3.3.0/3.3.1/3.3.5:
+- templates/base.html (all three versions)
+
+Package history:
+- v3.3.0: initial About popover implementation
+- v3.3.1: UI fixes (color, width, font, padding, anchor position)
+- v3.3.5: navbar popover position corrected to top:52px (web restart only)
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+-----------------------------------
+- Version is rendered via Jinja2 {{ version }}. If the version variable is not passed
+  from a particular route, it will render as empty or raise a template error. Confirmed
+  working for all tested pages, but not exhaustively checked for every route.
+- No accessibility attributes (aria-*) on the trigger buttons or popover. Not flagged
+  as a requirement; noted for awareness.

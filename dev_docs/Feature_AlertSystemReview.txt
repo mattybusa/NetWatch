@@ -1,0 +1,100 @@
+Feature_AlertSystemReview.txt
+==============================
+FEATURE/BUG HEADER
+------------------
+Name: Alert System Review + Themed Emails + Email Icon + Restart Feedback
+Type: Feature (review) + Bug fixes
+Date worked on: 2026-03-07
+Sessions: Session 2
+Final outcome: Complete (all six original review items fixed, icon resolved, restart
+  feedback fixed)
+
+
+BACKGROUND
+----------
+The alert system was the first item on the backlog after a code export was loaded at
+session start. A full review was requested before proceeding with any new features.
+The email template was designed entirely by the AI in a prior session and the user had
+never inspected it. An additional request was made to have email appearance match the
+recipient's chosen dashboard theme.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Email favicon PNG (v3.2.53): Generated a Pi-side PNG from the SVG favicon using pure
+Python (no network access available). Embedded it as a base64 data URI in the email
+HTML. Rendered broken in Gmail. Root cause: Gmail strips data:image/png base64 src
+attributes as a security policy. Multiple debugging packages were built investigating
+the wrong cause before the web service restart issue was discovered.
+
+Emoji ghost debugging (v3.2.53–v3.2.56): Packages v3.2.53–v3.2.56 updated the emoji
+(📡→🛜→📶→UTF-8 fix) but every test email showed the original 📡. Extensive
+investigation of the Pi file, bytecode, monitor restarts, and UTF-8 encoding. None of
+these were the cause. Root cause identified at v3.2.57: alerts.py is imported by both
+the monitor daemon AND the web service (webapp.py calls alerts.send_test() directly
+for test emails). Packages v3.2.53–v3.2.56 only restarted the monitor — the web
+service continued serving the old cached module. See Gotchas.txt entry
+"ALERTS.PY REQUIRES BOTH SERVICES TO RESTART."
+
+PNG retry (v3.2.59): After discovering the web restart was the missing piece, the
+embedded PNG was retried. This time it rendered — but Gmail displayed it tiny and
+misplaced. Reverted to emoji (v3.2.60). Gmail's handling of base64 image data is
+unreliable regardless of service restart.
+
+
+WHAT WORKED
+-----------
+Package: v3.2.52 — three files: alerts.py, webapp.py, alert_settings.html
+
+alerts.py changes:
+- New _get_theme_for_subscriber(subscriber_id) — looks up theme via user_id from
+  users table; falls back to owner's theme for standalone subscribers; defaults to
+  dark-blue.
+- New _THEMES palette dict — mirrors patcher.py's four themes (background, card,
+  border, font, accent, header text colours).
+- _build_html_body() redesigned to take theme= param. Left accent border on message
+  body, NetWatch branding in header, cleaner typography.
+- send_alert(), send_test(), and the force_email path all resolve theme before calling
+  _build_html_body().
+- MIMEText charset specified as "utf-8": MIMEText(html_body, "html", "utf-8")
+  — needed for correct emoji rendering in email clients.
+
+webapp.py changes:
+- /api/alerts changed from @auth.guest_allowed to @auth.login_required +
+  @auth.requires_permission("view_logs").
+- Owner subscriber PUT route: removed redundant update_owner_subscription() call
+  (upsert_subscriber() already handles owner correctly).
+- api_test_alert_my: replaced inline sqlite3.connect() with
+  alert_subscribers.get_subscriber_by_username().
+- Broadcast route: respects ?channel= query param (email/sms/all).
+
+alert_settings.html changes:
+- History type filter dropdown uses friendly labels (via typeSettings[k].label) not
+  raw keys.
+- Broadcast test passes channel selector value to server.
+
+v3.2.57 — patch_manager.html feedback fix:
+- JS condition JSON.stringify(data).includes("web") only triggered polling/reload when
+  web service restarted. Monitor-only restarts produced no UI feedback at all.
+- Fix: always include both services in restart action. The full polling/reload sequence
+  fires, user sees "waiting for server... ✓ Server is back — reloading..."
+- This was the session's canonical example of why always restarting both services
+  matters.
+
+v3.2.58 — Final emoji: 🛜 (WiFi symbol). Confirmed correct rendering in Gmail once
+web service restarts were included.
+
+SERVICE_MAP note discovered during this arc: alerts.py was mapped to "monitor" only
+in updater.py SERVICE_MAP. Should be "both" since webapp.py imports it. Fixed
+separately in v3.2.63.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+Email header icon: currently 🛜 emoji. Proper branded favicon PNG not achievable
+without external hosting (Gmail strips base64 data URIs). Could revisit if a public
+CDN is used in a future production hardening session.
+
+Alert history filter: type filter was confirmed working. History rows show raw
+brute_force in DB — friendly labels are display-only on the dropdown. The row Type
+column in the delivery history table was fixed separately in v3.2.72.

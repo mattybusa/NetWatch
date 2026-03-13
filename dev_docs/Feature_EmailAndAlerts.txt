@@ -1,0 +1,98 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: EMAIL AND ALERT SYSTEM
+=============================================================
+Name: Email Configuration Consolidation and Alert Delivery
+Type: Feature
+Date: 2026-03-01 (email consolidation v2.9.6–v2.9.8); alert subscriptions v3.0.0+
+Sessions: Session 1.2 (consolidation); Session 1.3 (full alert subscription system)
+Final outcome: Complete (v3.0.0+ covered in Feature_AlertSubscriptions.txt)
+
+
+BACKGROUND
+----------
+Two separate email systems had grown independently during early development:
+1. Alert email: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, ALERT_FROM, ALERT_TO
+2. Transactional email (verification, password reset): a separate Gmail-specific config
+
+The user noticed that SMTP username and "Send From" address were effectively the same
+for Gmail, and that having two parallel systems with overlapping purpose was confusing.
+Consolidation was done at v2.9.6–v2.9.8.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Config editor badge count mismatch:
+The config editor banner showed "7 settings need attention" but only 4 were highlighted
+in the editor. Root cause: unconfigured_keys was counting all keys against the schema
+but the FIELDS list in configeditor.py was a separate hardcoded list that didn't match.
+Fixed by making the badge count match what's actually displayed (count only fields in
+the FIELDS list, not all schema keys).
+
+SMTP_USER vs ALERT_FROM confusion:
+User correctly identified that these were nearly always the same for Gmail. They CAN
+differ (SMTP allows "send as" alias), but in practice they're identical. Resolved by
+consolidating to GMAIL_USER as both the auth credential and the From address. The
+SMTP_USERNAME / ALERT_FROM split was removed.
+
+
+WHAT WORKED
+-----------
+EMAIL CONSOLIDATION (v2.9.6–v2.9.8):
+Single email configuration replacing both systems:
+- GMAIL_USER — Gmail address, used as both SMTP auth username and From address
+- GMAIL_APP_PASSWORD — Google App Password (not the Gmail login password)
+- ALERT_TO — default recipient for network alerts (single address; per-user
+  subscriptions added in v3.0.0)
+- ALERTS_ENABLED — master on/off switch
+
+Removed from config.py:
+- SMTP_HOST, SMTP_PORT (hardcoded to Gmail's: smtp.gmail.com:587)
+- SMTP_USER, SMTP_PASSWORD (replaced by GMAIL_USER, GMAIL_APP_PASSWORD)
+- ALERT_FROM (same as GMAIL_USER)
+- Separate Gmail verification config keys
+
+GMAIL APP PASSWORD:
+Google's security model requires an App Password for SMTP access (not the main Gmail
+password). This is a 16-character password generated in Google Account → Security →
+2-Step Verification → App Passwords. User advised to generate one specific to NetWatch.
+The App Password is stored in config.py as GMAIL_APP_PASSWORD.
+
+ALERTS.PY:
+Sends alerts via smtplib with TLS. Uses GMAIL_USER as both login and From.
+Subject line format: "NetWatch Alert: {alert_type}" for network alerts.
+Transactional subjects (v3.2.5): verification and password reset emails have
+meaningful subjects: "NetWatch: Verify your email address" etc.
+
+IMPORTANT — alerts.py IS IMPORTED BY BOTH SERVICES:
+netwatch-monitor imports alerts.py to send network alerts.
+netwatch-web imports alerts.py to send transactional email (verification, reset).
+Any package that includes alerts.py MUST restart BOTH services.
+Packages that only restart the web service leave the monitor running the old module.
+This was a recurring gotcha — see Gotchas.txt entry "alerts.py requires both services."
+
+SMS VIA EMAIL GATEWAY:
+SMS alerts sent via carrier email-to-SMS gateways:
+- Verizon: {phone}@vtext.com
+- AT&T: {phone}@txt.att.net
+- T-Mobile: {phone}@tmomail.net
+- (others: see carrier_gateways dict in alerts.py)
+Gateway address constructed as: f"{phone_number}@{carrier_domain}"
+No separate SMS API or Twilio — just SMTP to the carrier gateway address.
+User confirmed: "the sms alert address would actually be 703555123@vtext.com"
+(i.e., phone number only in the local part, not a username)
+
+ALERT TYPES (v2.9.8 and earlier, pre-subscription system):
+- WAN_DOWN — internet unreachable
+- LAN_DOWN — LAN gateway unreachable
+- DEGRADED — high latency or packet loss above threshold
+- RESET_TRIGGERED — auto power cycle executed
+Delivered to ALERT_TO only. Per-user subscriptions added in v3.0.0 (see
+Feature_AlertSubscriptions.txt).
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Single ALERT_TO recipient for v2.9.x. Per-user multi-channel subscriptions in v3.0.0.
+  [COMPLETED — see Feature_AlertSubscriptions.txt]
+- LATENCY_WARN_MS and PACKET_LOSS_WARN thresholds configurable in config.py.
+  DEGRADED_ALERT_TIME: how long degraded state must persist before alert fires.
+- Gmail only. If user switches email provider, SMTP_HOST/PORT would need to be
+  re-exposed in config.py. Currently hardcoded to smtp.gmail.com:587.

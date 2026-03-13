@@ -1,0 +1,92 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: AUTHENTICATION AND ROLES
+==============================================================
+Name: Authentication System with Role-Based Permissions
+Type: Feature
+Date: 2026-02-28
+Sessions: Session 1.1; later hardened in Session 1.3 (v3.2.0–v3.2.4)
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+The initial NetWatch deployment had no authentication — the dashboard was open to any
+device on the LAN. The user requested role-based access so a Monitor display could be
+left open indefinitely without timeout and without access to settings or controls.
+
+Built in the same sub-session as the initial codebase, baked into the templates from the
+start rather than bolted on after (user correctly anticipated the cost of doing auth as a
+retrofit to existing templates).
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Manual file editing approach (before auth was built):
+User attempted to manually edit the navbar in existing templates to add auth links.
+"I'm not having the best of luck with replacing portions of files." The assistant
+recognized this and proposed rebuilding all templates with auth + themes + layouts in one
+pass rather than having the user edit files piecemeal. This was the right call.
+
+
+WHAT WORKED
+-----------
+auth.py module — key functions:
+- get_current_user() — returns dict with id, username, role_name, and all permission
+  flags from session. Returns None if not logged in or session expired.
+  Returns a DICT, not an object. Access with ["id"], not .id.
+  (This distinction caused a recurring bug in v3.2.49–v3.2.50d — see Gotchas.)
+- login_user(user_id, username, role_name, session_minutes, permissions...) — writes to
+  Flask session
+- logout_user() — clears session
+- login_required decorator — redirects to /login if not authenticated
+- requires_permission(perm) decorator — returns 403 if missing permission
+- authenticate(username, password) — checks password hash, returns user dict or None
+- create_user(), update_user(), delete_user() — admin user management
+- hash_password(), verify_password() — bcrypt
+
+ROLE MODEL:
+- Roles stored in roles table: id, name, session_minutes (0 = never expire),
+  permissions as boolean columns
+- Users stored in users table: id, username, password_hash, role_id, must_change_pass
+- Built-in system roles (cannot be deleted):
+  - Admin: full access, 480 min (8hr) timeout
+  - Monitor: read-only dashboard + metrics only, 0 min (never expires)
+  - Operator: dashboard + metrics + controls, 1440 min (24hr) timeout
+
+PERMISSION COLUMNS (boolean per role):
+- view_dashboard — see main dashboard
+- view_metrics — see metrics/charts page
+- manage_controls — trigger relay resets
+- manage_users — create/edit/delete users and roles (admin page)
+- manage_admin — access admin settings (config, backup, etc.)
+- view_logs — see system logs
+
+SESSION MANAGEMENT:
+- Login time stored in session; checked on every request in get_current_user()
+- If elapsed > role's session_minutes and session_minutes > 0 → logout_user(), return None
+- Monitor role: session_minutes = 0 → never checked → truly indefinite session
+- must_change_pass flag: if True, every route redirects to /change-password?forced=1
+  (exploit for bypassing this was fixed in v3.1.1–v3.1.2; see Feature_SecurityHardening.txt)
+
+AUTH ROUTES in webapp.py:
+- GET/POST /login — login form
+- GET /logout — clears session, redirects to login
+- GET/POST /change-password — self-service; forced=1 variant for must_change_pass
+- /admin/users — admin user management UI
+
+FIRST USER:
+- Default admin account created at first run (username: admin, password: admin)
+- must_change_pass = True forces immediate password change on first login
+
+LATER HARDENING (v3.2.0–v3.2.4, Session 1.3):
+- Account locking: locked_until timestamp column; authenticate() checks before verify
+- Brute force: failed_attempts counter; threshold configurable (default 5)
+- Forced change timeout: 10-minute deadline stored in session; logout on expiry
+- Email verification for account email address
+- Self-service password reset via email link
+- login_user/logout_user were initially missing from auth.py in v3.2.0 → NameError crash
+  on startup; hotfixed in v3.2.1 (see Feature_SecurityHardening.txt)
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Guest self-registration added in v2.6 (sub-session 1.2) — see Feature_GuestAccessAndSessionFixes.txt
+- Activity-based session timeout (reset on API call) added in v3.2.25 (sub-session 1.3)

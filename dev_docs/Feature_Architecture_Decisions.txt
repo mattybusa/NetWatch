@@ -1,0 +1,105 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: ARCHITECTURE DECISIONS
+=============================================================
+Name: Project Architecture, Hardware, and Network Decisions
+Type: Feature (foundational)
+Date: 2026-02-28
+Sessions: Session 1.1
+Final outcome: Complete — all decisions made and permanent
+
+
+BACKGROUND
+----------
+The project began with a user who had a prior AI session (not available in transcripts)
+that recommended InfluxDB + Grafana for a Raspberry Pi-based network monitor. The user
+brought this recommendation to a new session to evaluate and proceed. The first session
+began with a recommendation review and architecture selection before any code was written.
+
+The user's goal: a Pi-based device that monitors home network health (LAN, WAN, DNS),
+controls two relays (modem and router power cycle), logs metrics, and serves a web
+dashboard accessible from the LAN. The Pi would be a standalone device — no cloud, no
+external dependencies, LAN-only access.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Nothing failed in the architecture decision process — it was a deliberate evaluation
+followed by a clear selection. Documented here for completeness.
+
+InfluxDB + Grafana evaluated and rejected: Grafana alone consumes 300-400MB RAM on a
+Pi 3B+ (1GB total). With InfluxDB and all monitor processes running, memory pressure
+would be constant. The user's stated preference was "open to recommendation" — the
+recommendation was Flask + SQLite with Chart.js. User accepted immediately.
+
+
+WHAT WORKED
+-----------
+STACK SELECTION:
+- Flask — lightweight Python web framework, appropriate for Pi 3B+ memory constraints
+- SQLite — zero-config, single-file DB, appropriate for this write volume (~1 record/30s)
+- Chart.js — client-side charting, runs in browser not on Pi, no extra Pi memory cost
+- Python 3 throughout — consistent language for monitor daemon, web app, and all modules
+
+HARDWARE CONFIRMED:
+- Raspberry Pi 3B+ (1GB RAM, 4-core ARM)
+- USB SSD adapter with SATA SSD recommended for production (SD card write wear from
+  SQLite logging would degrade SD card over months). Pi boots from SD but app runs on SSD.
+- Two GPIO-controlled relays for modem (Relay 1) and router (Relay 2) power cycling
+- NC (normally closed) wiring selected: relays are normally closed, Pi GPIO HIGH opens
+  them. This means a Pi crash or power loss does not inadvertently trigger a reset.
+  Active-HIGH relay logic confirmed.
+
+NETWORK TOPOLOGY:
+- Primary subnet: 192.168.17.0/24 (gateway 192.168.17.254) — "DarkMatter" WiFi
+- Wired automation subnet: 192.168.100.0/24 — for wired devices including Pi eth0
+- Wireless automation subnet: 192.168.110.0/24 — for wireless automation devices
+- Verizon network extender subnet: 192.168.80.0/24 (separate, no inter-VLAN routing)
+- Pi static IPs: 192.168.100.10 (eth0, wired) and 192.168.110.10 (wlan0, wireless)
+- Dashboard accessible from .100 (wired) and .110 (wireless) subnets
+- Cisco 3750 switch intended for future inter-VLAN routing (not yet installed at session start)
+- Username: mboynton. Working directory: /home/mboynton/netwatch/
+
+MONITORING ARCHITECTURE (network check hierarchy):
+Checks run inside-out to identify what is broken:
+  1. LAN check — can Pi reach router gateway (192.168.100.254)?
+  2. WAN check — can Pi reach 8.8.8.8?
+  3. DNS check — can Pi resolve a hostname?
+  4. Latency / packet loss — ICMP ping to WAN target, averaged
+  5. Speedtest — periodic (configurable interval) via speedtest-cli
+Logic: if LAN fails, do not attempt WAN reset; if WAN fails but LAN is fine, reset modem
+then router in sequence with boot delay between.
+
+MODULAR FILE STRUCTURE (16 files, final state after modular rebuild):
+- config.py — all runtime configuration
+- main.py — process entry point, starts monitor and web
+- monitor.py — main monitor loop, check scheduling
+- network.py — ICMP ping, DNS check, speedtest
+- relay.py — GPIO relay control
+- button.py — physical button GPIO handler
+- database.py — SQLite schema, all read/write functions
+- alerts.py — email/SMS alert delivery
+- webapp.py — Flask routes, dashboard, admin
+- auth.py — authentication, session management, roles
+- templates/ — Jinja2 HTML templates (base.html + per-page)
+- static/ — CSS, JS, favicon
+- systemd service files — netwatch-monitor.service, netwatch-web.service
+
+SERVICE SPLIT:
+- netwatch-monitor — runs monitor.py, network checks, relay control
+- netwatch-web — runs webapp.py (Flask), serves dashboard
+- Separate services allow restarting web without affecting monitoring and vice versa
+- config.py is read by both → changes to config.py require restarting both services
+
+OS SETUP:
+- Raspberry Pi OS Lite (headless) provisioned via Raspberry Pi Imager on Windows
+- SSH enabled at imaging time via advanced settings
+- Initial SSH access via .110 WiFi subnet (eth0 physically disconnected at first)
+- Pi Imager used for SD card imaging (not manual dd)
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- SD-to-SSD migration: intended but not performed during this session. Pi ran on SD card
+  throughout Session 1. Migration to SSD noted as a future task.
+- Cisco 3750 inter-VLAN routing: not yet installed. Cross-subnet dashboard access limited
+  during Session 1.
+- GPIO relay pin assignments: hardcoded in config.py (RELAY_MODEM_PIN, RELAY_ROUTER_PIN).
+  Final values set during relay debugging in sub-session 1.2.

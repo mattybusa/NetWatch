@@ -1,0 +1,74 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: NETWORK INTERFACE CHECKS
+=============================================================
+Name: Interface-Bound Network Checks
+Type: Feature
+Date: 2026-03-13
+Sessions: Session 9
+Final outcome: Complete (v3.3.22)
+
+
+BACKGROUND
+----------
+Matt's home network has two subnets: .100 (LAN) and .110 (WiFi). Both are on the same
+VLAN. Without interface binding, an unbound ping to the LAN gateway could route out
+either NIC depending on the routing table. This made the LAN vs WiFi health checks
+unreliable — a "WiFi check" could succeed via the LAN interface and return a false
+positive. The fix forces pings to exit via the correct physical interface using
+ping -I <iface>.
+
+Two new config keys were needed: LAN_INTERFACE and WIFI_INTERFACE. WAN checks remain
+unbound because they test internet reachability, not a specific NIC.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Nothing failed. Design was straightforward once the routing problem was understood.
+
+
+WHAT WORKED
+-----------
+FILES MODIFIED:
+- network.py — added interface binding support
+- config_schema.py — added LAN_INTERFACE and WIFI_INTERFACE keys
+
+FUNCTIONS ADDED/CHANGED in network.py:
+
+get_interface_ip(iface):
+  Uses `ip addr show <iface>` and parses the output for an inet line. Returns the
+  IPv4 address string if found, or None if the interface has no IP or doesn't exist.
+
+ping(host, count=1, timeout=2, interface=None):
+  Existing function gained an optional `interface` parameter. When set, appends
+  -I <iface> to the ping command. No change to callers that don't pass interface.
+
+_bound_ping(host, iface, count, label):
+  New helper. Calls get_interface_ip(iface) first — if the interface has no IP,
+  logs a clear message ("wlan0 has no IP address") and returns a failed result
+  immediately without attempting the ping. If IP is present, calls ping() with
+  interface=iface. This pre-flight check prevents misleading "ping timed out"
+  errors when the real problem is a downed interface.
+
+check_network():
+  Now reads LAN_INTERFACE and WIFI_INTERFACE from config. If a value is set,
+  uses _bound_ping() for that check. If blank, falls back to the original unbound
+  ping behavior. WAN checks always use unbound ping regardless.
+
+CONFIG SCHEMA (config_schema.py):
+  New section "Network Interfaces" with two keys:
+  - LAN_INTERFACE  — default "", required=False
+  - WIFI_INTERFACE — default "", required=False
+
+  Both are optional. Blank means unbound (backwards compatible with existing installs).
+  Users set these to e.g. "eth0" and "wlan0" to enable interface binding.
+
+PACKAGE: v3.3.22 (monitor-only restart)
+CONFIRMED WORKING by user.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- WIFI_GATEWAY is also optional/blank by default. It follows the same blank=valid
+  pattern. No binding issue since it's just the gateway IP, not a NIC specifier.
+- Interface name validation is not enforced — if a user types a wrong interface name,
+  get_interface_ip() returns None and _bound_ping() fails with a clear log message.
+  No crash, just a logged failure.

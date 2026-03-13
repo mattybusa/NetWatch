@@ -1,0 +1,478 @@
+{% extends "base.html" %}
+{% block title %}NetWatch — Package Installer{% endblock %}
+
+{% block content %}
+
+<div style="max-width:860px;">
+
+  <h2 style="font-family:var(--font-mono);color:var(--accent);font-size:1.1rem;letter-spacing:2px;margin-bottom:6px;">
+    PACKAGE INSTALLER
+  </h2>
+  <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:24px;">
+    Drop a <code style="font-family:var(--font-mono);color:var(--accent);">.zip</code> update package here.
+    The installer reads the manifest, validates every step, shows you a full preview,
+    and only applies changes after you confirm.
+    All modified files are backed up automatically.
+  </p>
+
+  <!-- ── Upload Zone ── -->
+  <div id="drop-zone" class="nw-card"
+       style="padding:48px; text-align:center; cursor:pointer;
+              border:2px dashed var(--border-color); border-radius:12px;
+              transition:all 0.2s; background:var(--bg-input);"
+       onclick="document.getElementById('pkg-input').click()"
+       ondragover="onDragOver(event)"
+       ondragleave="onDragLeave(event)"
+       ondrop="onDrop(event)">
+    <div style="font-size:2.5rem; margin-bottom:12px;">📦</div>
+    <div style="font-size:1rem; color:var(--text-secondary); font-weight:600; margin-bottom:6px;">
+      Drop a .zip update package here
+    </div>
+    <div style="font-size:0.78rem; color:var(--text-muted);">
+      or click to browse &nbsp;·&nbsp; single files also accepted (drag a .py or .html)
+    </div>
+  </div>
+  <input type="file" id="pkg-input" style="display:none;"
+         accept=".zip,.py,.html,.css,.js,.json,.sh"
+         onchange="onFileSelected(this.files[0])">
+
+  <!-- ── Validation spinner ── -->
+  <div id="validating" style="display:none; text-align:center; padding:24px; color:var(--text-muted);">
+    <div style="font-size:1.5rem; margin-bottom:8px; animation:spin 1s linear infinite; display:inline-block;">⟳</div>
+    <div>Validating package...</div>
+  </div>
+
+  <!-- ── Preview panel ── -->
+  <div id="preview-panel" style="display:none; margin-top:20px;">
+
+    <!-- Package header -->
+    <div class="nw-card p-4 mb-3">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+        <div>
+          <div style="font-size:1rem;font-weight:700;color:var(--text-primary);" id="pkg-name"></div>
+          <div style="font-size:0.82rem;color:var(--text-muted);margin-top:4px;" id="pkg-desc"></div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:0.72rem;color:var(--text-label);">PACKAGE VERSION</div>
+          <div style="font-family:var(--font-mono);font-size:1.1rem;color:var(--accent);" id="pkg-ver"></div>
+          <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;" id="installed-ver"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Version warning -->
+    <div id="version-warning" style="display:none;margin-bottom:16px;padding:12px 16px;
+                                      border-radius:8px;background:rgba(255,152,0,0.1);
+                                      border:1px solid var(--warn);color:var(--text-primary);
+                                      font-size:0.83rem;">
+      ⚠ <strong>Version Warning:</strong> <span id="version-warning-text"></span>
+    </div>
+
+    <!-- Validation error -->
+    <div id="validation-error" style="display:none;margin-bottom:16px;padding:12px 16px;
+                                       border-radius:8px;background:var(--fail-glow);
+                                       border:1px solid var(--fail);font-size:0.83rem;">
+      ✗ <strong>Package has errors and cannot be applied:</strong>
+      <div id="validation-error-text" style="margin-top:6px;font-family:var(--font-mono);font-size:0.78rem;"></div>
+    </div>
+
+    <!-- Step preview list -->
+    <div class="nw-card p-4 mb-3">
+      <div class="nw-label mb-3">Installation Steps</div>
+      <div id="steps-list"></div>
+    </div>
+
+    <!-- Confirm / Cancel -->
+    <div id="confirm-bar" style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="nw-btn" onclick="resetUI()">✕ Cancel</button>
+      <button class="nw-btn nw-btn-primary" id="apply-btn" onclick="applyPackage()" style="flex:1;">
+        ✓ Confirm &amp; Apply Package
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ── Progress / Result panel ── -->
+  <div id="result-panel" style="display:none;margin-top:20px;">
+    <div class="nw-card p-4 mb-3">
+      <div class="nw-label mb-3" id="result-title">Applying...</div>
+      <div id="result-steps"></div>
+    </div>
+    <button class="nw-btn" onclick="resetUI()">Install Another Package</button>
+  </div>
+
+  <!-- ── Patch History ── -->
+  <div class="nw-card p-4 mt-4">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="nw-label" style="margin-bottom:0;">Package History</div>
+        <a href="/admin/patch/changelog" target="_blank"
+           style="font-size:0.75rem;color:var(--accent);text-decoration:none;white-space:nowrap;">
+          Full Changelog ↗
+        </a>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:0.82rem;color:var(--text-muted);">
+        Show
+        <select id="history-limit" onchange="onHistoryLimitChange()"
+                style="background:var(--input-bg,var(--card-bg));color:var(--text-primary);
+                       border:1px solid var(--border-color);border-radius:4px;
+                       padding:2px 6px;font-size:0.82rem;cursor:pointer;">
+          <option value="5">5</option>
+          <option value="10">10</option>
+          <option value="20" selected>20</option>
+          <option value="50">50</option>
+          <option value="0">All</option>
+        </select>
+        entries
+      </div>
+    </div>
+    <div class="overflow-auto">
+      <table class="nw-table">
+        <thead><tr>
+          <th>Date</th><th>Version</th><th>Description</th><th>By</th><th>Steps</th><th>Result</th><th></th>
+        </tr></thead>
+        <tbody id="history-tbody">
+          <tr><td colspan="7" style="color:var(--text-muted);text-align:center;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.83rem;
+}
+.step-row:last-child { border-bottom: none; }
+.step-icon  { width: 20px; flex-shrink: 0; text-align: center; margin-top: 1px; }
+.step-body  { flex: 1; }
+.step-main  { color: var(--text-primary); }
+.step-sub   { color: var(--text-muted); font-size: 0.75rem; margin-top: 3px; }
+.step-warn  { color: var(--warn); font-size: 0.75rem; margin-top: 3px; }
+.step-err   { color: var(--fail); font-size: 0.75rem; margin-top: 3px; }
+.action-tag {
+  font-size: 0.65rem; padding: 1px 7px; border-radius: 8px;
+  background: var(--accent-glow); color: var(--accent);
+  border: 1px solid var(--border-color);
+  font-family: var(--font-mono); margin-left: 8px;
+}
+</style>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentFile     = null;
+let previewData     = null;
+let isZipPackage    = false;
+
+// ── Drag/drop ─────────────────────────────────────────────────────────────────
+function onDragOver(e) {
+  e.preventDefault();
+  document.getElementById("drop-zone").style.borderColor = "var(--accent)";
+  document.getElementById("drop-zone").style.background  = "var(--accent-glow)";
+}
+function onDragLeave(e) {
+  document.getElementById("drop-zone").style.borderColor = "var(--border-color)";
+  document.getElementById("drop-zone").style.background  = "var(--bg-input)";
+}
+function onDrop(e) {
+  e.preventDefault();
+  onDragLeave(e);
+  onFileSelected(e.dataTransfer.files[0]);
+}
+
+// ── File selected ─────────────────────────────────────────────────────────────
+async function onFileSelected(file) {
+  if (!file) return;
+  currentFile  = file;
+  isZipPackage = file.name.endsWith(".zip");
+
+  document.getElementById("validating").style.display    = "block";
+  document.getElementById("preview-panel").style.display = "none";
+  document.getElementById("result-panel").style.display  = "none";
+
+  const form = new FormData();
+  form.append("file", file);
+
+  const endpoint = isZipPackage ? "/api/patch/preview" : "/api/update/preview_single";
+  const res  = await fetch(endpoint, { method: "POST", body: form });
+  const data = await res.json();
+
+  document.getElementById("validating").style.display = "none";
+  previewData = data;
+  renderPreview(data, file.name);
+}
+
+// ── Render preview ────────────────────────────────────────────────────────────
+function renderPreview(data, filename) {
+  const panel = document.getElementById("preview-panel");
+  panel.style.display = "block";
+
+  // Package header
+  if (isZipPackage && data.manifest) {
+    document.getElementById("pkg-name").textContent = filename;
+    document.getElementById("pkg-desc").textContent = data.manifest.description || "No description";
+    document.getElementById("pkg-ver").textContent  = data.package_version || "—";
+    document.getElementById("installed-ver").textContent = `Installed: ${data.installed_version || "unknown"}`;
+  } else {
+    document.getElementById("pkg-name").textContent = filename;
+    document.getElementById("pkg-desc").textContent = "Single file update";
+    document.getElementById("pkg-ver").textContent  = "—";
+    document.getElementById("installed-ver").textContent = "";
+  }
+
+  // Version warning
+  const vw = document.getElementById("version-warning");
+  if (data.version_warning) {
+    vw.style.display = "block";
+    document.getElementById("version-warning-text").textContent = data.version_warning;
+  } else {
+    vw.style.display = "none";
+  }
+
+  // Validation errors
+  const ve = document.getElementById("validation-error");
+  if (!data.valid) {
+    ve.style.display = "block";
+    document.getElementById("validation-error-text").textContent = data.error || "Unknown error";
+    document.getElementById("apply-btn").disabled = true;
+    document.getElementById("apply-btn").style.opacity = "0.4";
+  } else {
+    ve.style.display = "none";
+    document.getElementById("apply-btn").disabled = false;
+    document.getElementById("apply-btn").style.opacity = "1";
+  }
+
+  // Steps
+  const steps  = data.preview || [];
+  const icons  = { replace:"📄", patch:"🔧", json_patch:"🔧", mkdir:"📁", run_sql:"🗄", restart:"⟳", skipped:"⊘" };
+  const colors = { ok:"var(--text-muted)", warning:"var(--warn)", error:"var(--fail)" };
+
+  document.getElementById("steps-list").innerHTML = steps.length ? steps.map(s => `
+    <div class="step-row">
+      <div class="step-icon">${icons[s.action] || "•"}</div>
+      <div class="step-body">
+        <div class="step-main">
+          ${s.detail || s.action}
+          <span class="action-tag">${s.action}</span>
+          ${s.is_new ? '<span class="action-tag" style="background:rgba(76,175,80,0.1);color:var(--ok);">NEW FILE</span>' : ''}
+        </div>
+        ${s.warning ? `<div class="step-warn">⚠ ${s.warning}</div>` : ""}
+        ${s.status === "error" ? `<div class="step-err">✗ ${s.detail}</div>` : ""}
+        ${s.exists === false && s.action === "replace" ? `<div class="step-sub">Will be created as a new file</div>` : ""}
+      </div>
+      <div style="color:${colors[s.status] || 'var(--text-muted)'}; font-size:0.75rem; flex-shrink:0;">
+        ${s.status}
+      </div>
+    </div>`).join("") :
+    `<div style="color:var(--text-muted); font-size:0.83rem;">No steps in manifest</div>`;
+}
+
+// ── Apply ─────────────────────────────────────────────────────────────────────
+async function applyPackage() {
+  if (!currentFile) return;
+
+  document.getElementById("preview-panel").style.display = "none";
+  document.getElementById("result-panel").style.display  = "block";
+  document.getElementById("result-title").textContent    = "Applying package...";
+
+  const form = new FormData();
+  form.append("file", currentFile);
+
+  const endpoint = isZipPackage ? "/api/patch/apply" : "/api/update/apply";
+  const res  = await fetch(endpoint, { method: "POST", body: form });
+  const data = await res.json();
+
+  const title = document.getElementById("result-title");
+  const steps = document.getElementById("result-steps");
+
+  title.textContent = data.success ? "✓ Package Applied Successfully" : "✗ Package Failed";
+  title.style.color = data.success ? "var(--ok)" : "var(--fail)";
+
+  if (data.results) {
+    // Zip package results
+    const icons = { ok:"✓", error:"✗", skipped:"—" };
+    const cols  = { ok:"var(--ok)", error:"var(--fail)", skipped:"var(--text-muted)" };
+    steps.innerHTML = data.results.map(r => `
+      <div class="step-row">
+        <div class="step-icon" style="color:${cols[r.status]};">${icons[r.status] || "?"}</div>
+        <div class="step-body">
+          <div class="step-main">${r.message || r.action}</div>
+        </div>
+        <div style="color:${cols[r.status]};font-size:0.75rem;">${r.status}</div>
+      </div>`).join("");
+
+    // Add restart results if any
+    if (data.restart_results && data.restart_results.length) {
+      steps.innerHTML += data.restart_results.map(r => `
+        <div class="step-row">
+          <div class="step-icon">⟳</div>
+          <div class="step-body">
+            <div class="step-main">Restart ${r.service}: ${r.message}</div>
+          </div>
+          <div style="color:${r.status==='ok'?'var(--ok)':'var(--fail)'};font-size:0.75rem;">${r.status}</div>
+        </div>`).join("");
+    }
+
+    steps.innerHTML += `<div style="margin-top:14px;padding:12px;border-radius:6px;
+                                    background:${data.success?'var(--ok-glow)':'var(--fail-glow)'};
+                                    border:1px solid ${data.success?'var(--ok)':'var(--fail)'};
+                                    font-size:0.83rem;color:var(--text-primary);">
+      ${data.message}
+      ${data.rollback_available ? '<br><span style="color:var(--text-muted);font-size:0.75rem;">All modified files were backed up. Use the File Update Manager to roll back individual files if needed.</span>' : ""}
+    </div>`;
+  } else {
+    // Single file result
+    steps.innerHTML = `<div style="padding:12px;border-radius:6px;
+                                   background:${data.success?'var(--ok-glow)':'var(--fail-glow)'};
+                                   border:1px solid ${data.success?'var(--ok)':'var(--fail)'};
+                                   font-size:0.83rem;color:var(--text-primary);">
+      ${data.message}
+    </div>`;
+  }
+
+  // Service restart feedback
+  if (data.success) {
+    const dataStr = JSON.stringify(data);
+    const webRestart     = dataStr.includes("netwatch-web");
+    const monitorRestart = dataStr.includes("netwatch-monitor");
+
+    if (webRestart) {
+      // Web service restarting — poll until server responds
+      setTimeout(() => {
+        const notice = document.createElement('div');
+        notice.style.cssText = 'color:var(--warn);font-size:0.82rem;margin-top:12px;';
+        notice.textContent = '⚠ Web service is restarting — waiting for server...';
+        steps.appendChild(notice);
+
+        let elapsed = 0;
+        const MAX_WAIT = 30000;
+        const POLL_INTERVAL = 1500;
+
+        function updateNotice(msg) { notice.textContent = msg; }
+
+        function poll() {
+          elapsed += POLL_INTERVAL;
+          if (elapsed > MAX_WAIT) {
+            updateNotice('⚠ Restart taking longer than expected — reloading now...');
+            setTimeout(() => window.location.reload(), 1000);
+            return;
+          }
+          fetch('/api/auth/me', { cache: 'no-store' })
+            .then(r => {
+              if (r.ok) {
+                updateNotice('✓ Server is back — reloading...');
+                setTimeout(() => window.location.reload(), 800);
+              } else {
+                updateNotice(`⚠ Restarting... (${Math.round(elapsed/1000)}s)`);
+                setTimeout(poll, POLL_INTERVAL);
+              }
+            })
+            .catch(() => {
+              updateNotice(`⚠ Restarting... (${Math.round(elapsed/1000)}s)`);
+              setTimeout(poll, POLL_INTERVAL);
+            });
+        }
+        // Give the process a couple seconds to actually go down before polling
+        setTimeout(poll, 2500);
+      }, 500);
+    } else if (monitorRestart) {
+      // Monitor restarting — show confirmation then reload
+      setTimeout(() => {
+        const notice = document.createElement('div');
+        notice.style.cssText = 'color:var(--ok);font-size:0.82rem;margin-top:12px;';
+        notice.textContent = '✓ Monitor service restarted — reloading...';
+        steps.appendChild(notice);
+        setTimeout(() => window.location.reload(), 1000);
+      }, 3000);
+    } else {
+      // No restarts — reload after a short pause so history updates cleanly
+      setTimeout(() => {
+        const notice = document.createElement('div');
+        notice.style.cssText = 'color:var(--ok);font-size:0.82rem;margin-top:12px;';
+        notice.textContent = '✓ Package applied — reloading...';
+        steps.appendChild(notice);
+        setTimeout(() => window.location.reload(), 1000);
+      }, 1500);
+    }
+  }
+
+  showToast(data.message || (data.success ? "Applied" : "Failed"),
+            data.success ? "success" : "error");
+  loadHistory();
+}
+
+// ── Reset ─────────────────────────────────────────────────────────────────────
+function resetUI() {
+  currentFile  = null;
+  previewData  = null;
+  document.getElementById("pkg-input").value        = "";
+  document.getElementById("preview-panel").style.display = "none";
+  document.getElementById("result-panel").style.display  = "none";
+  document.getElementById("validating").style.display    = "none";
+}
+
+// ── History ───────────────────────────────────────────────────────────────────
+async function loadHistoryLimit() {
+  try {
+    const res = await fetch('/api/prefs/history_limit').then(r => r.json());
+    const val = res.value || '20';
+    const sel = document.getElementById('history-limit');
+    if (sel) {
+      // ensure option exists (e.g. 'all' stored as '0')
+      const opt = [...sel.options].find(o => o.value === val);
+      if (opt) sel.value = val;
+    }
+  } catch {}
+}
+
+function onHistoryLimitChange() {
+  const val = document.getElementById('history-limit').value;
+  fetch('/api/prefs/history_limit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: val })
+  }).catch(() => {});
+  loadHistory();
+}
+
+async function loadHistory() {
+  const sel   = document.getElementById('history-limit');
+  const limit = sel ? sel.value : '20';
+  const url   = `/api/patch/history?limit=${limit}`;
+  const rows  = await fetch(url).then(r => r.json());
+  const tb    = document.getElementById("history-tbody");
+
+  if (!rows.length) {
+    tb.innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);text-align:center;">No packages installed yet</td></tr>`;
+    return;
+  }
+
+  tb.innerHTML = rows.map(r => `
+    <tr>
+      <td style="white-space:nowrap;color:var(--text-muted);">${new Date(r.timestamp).toLocaleString()}</td>
+      <td style="font-family:var(--font-mono);">${r.package_version || "—"}</td>
+      <td style="color:var(--text-muted);font-size:0.8rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+          title="${(r.description||'').replace(/"/g,'&quot;')}">${r.description ? r.description.split('\n')[0].substring(0,80) + (r.description.length>80?'…':'') : "—"}</td>
+      <td style="color:var(--text-muted);">${r.applied_by || "—"}</td>
+      <td style="color:var(--text-muted);">${r.steps_ok}/${r.steps_total}</td>
+      <td style="color:${r.success?'var(--ok)':'var(--fail)'};">${r.success?"✓ OK":"✗ Failed"}</td>
+      <td><a href="/admin/patch/release-notes/${r.id}" target="_blank"
+             style="font-size:0.75rem;color:var(--accent);text-decoration:none;white-space:nowrap;">
+        Notes ↗
+      </a></td>
+    </tr>`).join("");
+}
+
+loadHistoryLimit().then(() => loadHistory());
+</script>
+{% endblock %}

@@ -1,0 +1,446 @@
+NETWATCH CHAT SUMMARY — SESSION 1.2
+=====================================
+Date: 2026-02-28 (evening) – 2026-03-02
+Starting version: v2.0
+Ending version: v2.9.8
+Session focus: File upload manager, config editor, HTTPS/CA, intelligent patch system,
+  v2.4 patcher rebuild, navigation style customization, relay debugging, guest access,
+  layout/CSS fixes, UTC timestamp migration, metrics chart fixes, database backup/restore,
+  GPG encrypted backup, dual backup schedules, first-run setup wizard, config validation,
+  distributable package generator, email configuration overhaul planning, and beginning of
+  multi-channel alert subscription system planning.
+
+SCOPE NOTE: This sub-session covered 14+ distinct arcs across 9 transcripts spanning
+Feb 28 evening through Mar 2. Major items each have expanded summaries. Minor UI fixes and
+bug repairs during the same transcript as a feature are documented in that feature's file.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- File upload manager (v2.3-ish): Web-based drag-and-drop file replacement with smart
+  service restart detection. File types: all (user determined LAN-only + password protected
+  was sufficient). Automatic .bak backup before overwriting. Restart logic: monitor.py/
+  network.py/relay.py/button.py/database.py/alerts.py/main.py → netwatch-monitor;
+  webapp.py/auth.py/templates/static → netwatch-web; config.py → both services.
+  (see Feature_FileUploaderAndConfigEditor.txt)
+
+- Config editor (v2.3-ish): Browser-based config.py editing with form validation and
+  field descriptions. Syntax checking on Python files before saving. Service restart on save.
+  (see Feature_FileUploaderAndConfigEditor.txt)
+
+- HTTPS / Private CA (v2.1-v2.3): Self-signed certificate with private CA for LAN HTTPS.
+  CA certificate generation script (generate_certs.sh). CA backup encrypted. Browser
+  certificate installation instructions for Windows + iOS. Favicon added via package
+  installer during this arc.
+  (see Feature_HTTPSAndCA.txt)
+
+- Intelligent zip-based patch system / patcher (v2.1-v2.4): manifest.json-driven package
+  installer with version checking, per-file service restart logic, in-browser progress UI,
+  install history log. Replaced the manual SCP + unzip workflow. User installs all future
+  updates via the web UI. This became the primary development workflow for all sessions.
+  (see Feature_PatcherSystem.txt)
+
+- v2.4 patcher rebuild: Smarter patcher with duplicate route detection. Username change
+  feature added to admin user management. Debugging of duplicate routes (webapp.py
+  conflicts from incremental patching). JSON patch format bugs fixed.
+  (see Feature_PatcherSystem.txt — updated v2.4 section)
+
+- Navigation style customization (v2.5): User-selectable nav style per account: Top nav,
+  Wide sidebar, Labels + icons, Labels only, Icons only, Compact. Stored in user prefs.
+  Admin page restored after being dropped in v2.4 patch.
+  (see Feature_ThemesAndLayouts.txt — updated v2.5 section)
+
+- Relay/controls debugging (v2.5): NC (normally closed) wiring confirmed. Active-HIGH
+  relay logic with Pi GPIO. Relay 1 = modem reset, Relay 2 = router reset. GPIO pin
+  assignments hardcoded in config.py. Manual relay toggle and auto-reset-on-failure logic.
+  Relay test sequences documented for both individual and sequential resets.
+  (see Feature_RelayAndControls.txt)
+
+- Guest access (v2.6): Self-registration link on login page. Guest role auto-assigned.
+  Admin can promote guests to other roles. After registration: redirect to login form
+  (not auto-login). Redirect loop bug on login with guest credentials fixed (session
+  state not cleared between redirects).
+  (see Feature_GuestAccessAndSessionFixes.txt)
+
+- Layout/CSS fixes (v2.6-v2.7): Dashboard-first layout col sizing, sidebar width in Wide
+  Sidebar mode, preference card selection visual bugs, nav style preview rendering.
+  CSS cache headers added. Numerous small fixes across templates.
+  (see Feature_ThemesAndLayouts.txt — updated v2.6-v2.7 section)
+
+- Session timeout additions (v2.7): Per-role session timeout configured in admin. Monitor
+  role set to never time out. Session timeout enforced on every request (checked in
+  get_current_user()). Canonical baseline sync performed.
+
+- UTC timestamp migration (v2.7.x-v2.8): Timestamps were stored in local time (EST);
+  queries used datetime('now') which is UTC → mismatch caused 1H metrics to return 6H of
+  data. Migrated to storing timestamps as UTC with datetime.utcnow(). All queries use
+  datetime('now') which is UTC. Existing data not migrated (pre-migration data shows wrong
+  on 1H chart briefly). This was the right long-term fix over the localtime() workaround.
+  (see Bug_UTCTimestampMigration.txt)
+
+- Metrics page chart optimization (v2.8): Chart.js label optimization for time ranges
+  (1H/6H/24H/7D). x-axis blank-string pre-spacing approach established. autoSkip:false
+  confirmed as required. This is the label architecture that remained through v3.2.50.
+  (see Bug_UTCTimestampMigration.txt — chart context section)
+
+- Database backup/restore (v2.8): Manual backup download from admin page, restore from
+  uploaded file, backup/restore confirmation UI. GPG-encrypted full system backup script
+  (weekly cron). netwatch.db backup + full tar.gz.gpg.
+
+- Dual backup schedules (v2.8-v2.9): Daily DB backup + weekly full system backup.
+  Both schedule-configurable from admin UI. Crontab managed by Flask (crontab -l / 
+  crontab -). Web-based backup download (no SCP needed). Browser JavaScript orphaned code
+  fix during this arc.
+  (see Feature_BackupAndRestore.txt)
+
+- First-run setup wizard (v2.9): On first run (SECRET_KEY = placeholder), wizard
+  prompts for essential config: SITE_NAME, network targets, relay assignment, timezone,
+  alert email. Wizard writes to config.py. After wizard, normal dashboard. Config validation
+  system added to detect unconfigured settings (notification banner + visual badges in
+  config editor). Browser caching issues with wizard resolved.
+  (see Feature_FirstRunWizardAndConfigValidation.txt)
+
+- Network topology wizard (v2.9.3): Simple vs advanced topology selection. Simple: one
+  router + ISP. Advanced: user's multi-subnet setup (17/100/110 subnets). Multi-subnet
+  support built in from the start.
+
+- Favicon + PWA support (v2.9.4): favicon.ico, favicon.svg, favicon-32.png generated.
+  Web app manifest for PWA install prompt. Added to all pages including change_password
+  (standalone HTML, not extending base.html).
+
+- Version display (v2.9.5): VERSION file on disk, displayed in footer + admin page.
+
+- Distributable update package generator (v2.9.5): Generates installable zip from
+  current codebase. This is separate from the incremental patch packages — it's a full
+  baseline for new installs.
+
+- Config validation system (v2.9.5): config_validator.py checks config.py keys against
+  schema. Notification banner in dashboard header shows count of unconfigured settings.
+  Visual badges in config editor highlight fields needing attention. Schema-driven — new
+  config keys added to schema automatically appear as unconfigured when first introduced.
+
+- Hardcoded IP cleanup: Scanned codebase for hardcoded IPs and replaced with config.py
+  variables. User identified a SECRET_KEY issue (had been set to actual value, restored
+  to placeholder).
+
+- Email configuration consolidation (v2.9.6-v2.9.8): Two separate email systems had grown
+  independently (SMTP_USER/SMTP_PASSWORD/ALERT_FROM/ALERT_EMAIL for alerts; separate Gmail
+  config for verification). Consolidated to single set: GMAIL_USER, GMAIL_APP_PASSWORD,
+  ALERT_TO. Alert email sending migrated to Gmail App Password. SMTP config settings
+  removed from config.py and config editor. Config validator updated.
+  (see Feature_EmailAndAlerts.txt — background section)
+
+- Multi-channel alert subscription system (v2.9.8/v3.0 planning): Designed but not yet
+  implemented in this sub-session. Plan: per-user email + SMS subscriptions with carrier
+  gateway selection, per-alert-type granularity, global alert type defaults, admin
+  subscriber management. Implementation begins in sub-session 1.3.
+  [COMPLETED IN LATER SUB-SESSION — see ChatSummary_1.3.txt]
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- Browser-based config editor save failures (ongoing at end of this sub-session): The
+  config editor was built and deployed but had persistent save failures. Root causes
+  investigated but not fully resolved in this sub-session: SCP not taking effect (pyc
+  cache), UTF-8 encoding issue on file open/write, service restart chaining bug (restart
+  was called before new file was flushed). Multiple repair attempts. Fully resolved in
+  v3.2.37 in sub-session 1.3.
+  (see Bug_ConfigEditorSave.txt)
+
+- JSON patch format: The first patcher implementation used JSON patch format for partial
+  file updates. This had edge cases with quote escaping and whitespace. v2.4 moved to
+  full-file replace with no partial patching — simpler and more reliable.
+
+- Favicon manual deploy (no-package): First favicon implementation required manual SCP
+  copy to three locations. User correctly pushed back ("can't the package installer handle
+  that?"). Fixed to use the patcher for subsequent deployments.
+
+- Self-introduced regression (webapp.py duplicate routes): During v2.4 patcher rebuild,
+  incremental patching introduced duplicate Flask route decorators. Flask silently ignores
+  the second definition, causing old route behavior to persist. Fixed by cleaning duplicate
+  route blocks from webapp.py. Rule established: after patching webapp.py, always check
+  for duplicate @app.route decorators.
+
+- Redirect loop on guest login (v2.6): After registering as a guest, the login redirect
+  looped. Root cause: session was not cleared after registration before the redirect to
+  login. Fixed by explicitly clearing session state. Took one debug cycle with journalctl
+  output from user.
+
+- Backup cron JavaScript orphan code (v2.8-v2.9): A JavaScript function for cron
+  management was left in the template after its associated HTML section was moved. Caused
+  a JS parse error that silently broke unrelated functionality. Fixed by removing orphaned
+  function.
+
+- Browser caching of wizard config (v2.9): After completing the wizard and restarting,
+  some browsers showed the old (unconfigured) state. Cache-Control headers added to all
+  Flask responses to prevent this.
+
+
+DECISIONS MADE
+--------------
+- UTC over localtime for timestamp storage: right long-term approach despite requiring
+  a migration and brief chart disruption on existing data.
+
+- Full-file replace over JSON patch: simpler, fewer edge cases, easier to reason about.
+  All packages from v2.4 onward ship complete files.
+
+- SSD confirmed as production target: SD card backup exists but SSD is the working device.
+
+- Multi-channel alert system architecture planned and deferred: decided to implement a
+  proper per-user subscription system (not just a global alert_email setting) in the next
+  major work arc.
+
+- GMAIL_APP_PASSWORD as the only email authentication method: no SMTP username/password
+  split. Cleaner, matches Gmail's actual security model.
+
+- config.py as the single source of truth for all runtime configuration. No hardcoded
+  values anywhere in the codebase.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- Config editor save failures: still broken at the end of this sub-session. Multiple root
+  causes identified but not all resolved. Final fix in v3.2.37.
+  [COMPLETED IN LATER SUB-SESSION — see Feature_ConfigEditorSave.txt]
+
+- Multi-channel alert subscription system: designed, not implemented.
+  [COMPLETED IN LATER SUB-SESSION — see ChatSummary_1.3.txt]
+
+- [TRANSCRIPT NOTE] Several transcripts contain "Show more" rendering artifacts
+  (collapsed content from the original chat UI). In all cases the surrounding content
+  makes the arc clear enough to summarize. No evidence of genuinely missing critical
+  decisions. Approximately 15+ artifacts across this sub-session's transcripts; treated
+  as cosmetic.
+
+- Relay 2 (router) boot delay value: set in config.py as ROUTER_BOOT_DELAY. User noted
+  "still figuring out" the exact timing needed for their specific router. Not a code issue.
+
+
+BACKLOG CHANGES
+---------------
+Completed this sub-session:
+- File upload manager (web-based, drag-and-drop)
+- Config editor (initial version — save broken, final fix in v3.2.37)
+- HTTPS with private CA
+- Intelligent zip-based patch system (the core development workflow going forward)
+- Username change in admin
+- Navigation style customization (v2.5)
+- Relay/GPIO controls with NC wiring and active-HIGH logic
+- Guest self-registration
+- UTC timestamp migration
+- Database backup/restore
+- GPG encrypted full system backup
+- Dual backup schedules with web UI cron management
+- First-run setup wizard
+- Config validation system with notification banner
+- Hardcoded IP cleanup
+- Favicon + PWA support
+- Version display
+- Email config consolidation (GMAIL_USER / GMAIL_APP_PASSWORD / ALERT_TO)
+
+Identified and deferred:
+- Multi-channel alert subscription system (v3.0 scope)
+- Config editor save fully fixed (v3.2.37)
+- About page (mentioned in passing, not built)
+- mBase bootstrapper project (PC-side SD card provisioning tool) — raised and discussed
+  conceptually; no implementation; deferred indefinitely
+  [NOTE: mBase referred to as Matt's initials prefix; PiForge considered as codename]
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Feature_FileUploaderAndConfigEditor.txt — Web-based file manager, browser config editor,
+  service restart detection, initial config editor save failures.
+- Feature_HTTPSAndCA.txt — Private CA, certificate generation, browser installation,
+  HTTPS on Flask.
+- Feature_PatcherSystem.txt — Zip-based patch system, manifest.json schema, version
+  checking, patcher rebuild at v2.4, install history.
+- Feature_RelayAndControls.txt — GPIO relay wiring (NC, active-HIGH), pin assignments,
+  reset sequences, manual toggle.
+- Feature_GuestAccessAndSessionFixes.txt — Guest self-registration, redirect loop fix,
+  session state cleanup.
+- Bug_UTCTimestampMigration.txt — Local→UTC migration, query fix, Chart.js label
+  architecture established (autoSkip:false + blank-string pre-spacing).
+- Feature_BackupAndRestore.txt — DB backup/restore, GPG full backup, dual schedules,
+  cron web UI.
+- Feature_FirstRunWizardAndConfigValidation.txt — Wizard, config validation, notification
+  banner, config badges, network topology wizard.
+- Feature_EmailAndAlerts.txt — Email consolidation, GMAIL_APP_PASSWORD migration,
+  planning for multi-channel alert subscription system.
+
+
+NEW GOTCHAS ADDED
+-----------------
+These entries are in Gotchas.txt (merged from Gotchas_Append_Session1.txt in Session 6):
+- DUPLICATE FLASK ROUTES AFTER PATCHING webapp.py (v2.4)
+- SCP FILE TRANSFER NOT TAKING EFFECT — PYCOM CACHE (config editor arc)
+- CONFIG EDITOR SAVE: THREE SEPARATE ROOT CAUSES (encoding, service restart chaining,
+  path resolution)
+- CRON JAVASCRIPT ORPHAN CODE CAN SILENTLY BREAK UNRELATED FUNCTIONALITY
+
+
+CURRENT STATE
+-------------
+- Pi version at end of sub-session: v2.9.8
+- Continuing to sub-session 1.3: multi-channel alert subscription system (v3.0 scope),
+  security hardening, role system maturation, My Account refactor, subscriber integrity,
+  notification center, changelog system, config editor final fix, and all v3.x development
+  through v3.2.50f.
+
+
+=============================================================================
+ADDENDUM — SESSION 1.2.1
+=============================================================================
+Additional findings from a deeper re-read of Session 1.2 transcripts.
+These items were not present in the original expanded summaries above.
+=============================================================================
+
+ADDITIONAL FINDINGS — Feature_PatcherSystem.txt
+------------------------------------------------
+
+DUPLICATE ROUTE PREFLIGHT CHECK (v2.4):
+After the duplicate @app.route('/preferences') issue (see original summary and Gotchas),
+the patcher was updated to perform a preflight check on webapp.py specifically:
+Before applying any package that includes webapp.py, patcher.py now scans the
+replacement file for duplicate @app.route decorators and refuses to apply if any are
+found, reporting the duplicate route names. This prevents deploying a broken webapp.py.
+Rule: duplicate route detection runs in apply_package() on any .py file that uses
+@app.route.
+
+API RESPONSE FORMAT — GET /api/auth/roles (v2.4):
+The roles API route initially returned {"roles": [...]} (a wrapper object).
+The admin_users.html JavaScript called roles.map() directly on the response —
+it expected a plain array, not a wrapper object. This caused "roles.map is not a
+function" TypeError. Fixed by changing the API to return a plain array: jsonify([...])
+instead of jsonify({"roles": [...]}). Rule: check whether template JS expects a
+wrapped or plain response format when adding new API endpoints.
+
+
+ADDITIONAL FINDINGS — Feature_RelayAndControls.txt
+---------------------------------------------------
+
+RELAY ACTIVE-LOW VS ACTIVE-HIGH (corrected detail):
+The original summary stated user's boards were Active-HIGH. The deeper read of the
+v2.5 transcript reveals the actual debugging sequence:
+- config.py initially had RELAY_ACTIVE_LOW = False
+- User's relay boards have a DIP switch for low/high trigger; user had "low trigger selected"
+- Active-LOW means GPIO LOW fires the relay (energizes the coil, opens NC contact)
+- Code confirmed: relay.py was written for NO (Normally Open) wiring with comments
+  saying as much, but user's wiring is NC (Normally Closed)
+- Two separate fixes needed: (1) flip RELAY_ACTIVE_LOW = True, (2) invert relay.py
+  logic to match NC behavior
+- Final state: RELAY_ACTIVE_LOW = True (GPIO LOW fires relay), NC wiring confirmed
+  (GPIO LOW = relay energized = NC contact open = power OFF)
+NOTE: The original Feature_RelayAndControls.txt had this backwards (stated Active-HIGH).
+This is the correct state: RELAY_ACTIVE_LOW = True, GPIO LOW cuts power.
+
+
+ADDITIONAL FINDINGS — Bug_UTCTimestampMigration.txt
+----------------------------------------------------
+
+ISO 8601 'T' SEPARATOR BUG (additional detail):
+After the UTC migration, the 1H chart still showed wrong record counts. The root cause
+was that datetime.utcnow().isoformat() stores timestamps as "2026-03-01T09:24:11"
+(with a 'T' separator), but SQLite's datetime('now') returns "2026-03-01 09:24:11"
+(with a space separator). SQLite string comparison sees 'T' (ASCII 84) as greater than
+space (ASCII 32), so nearly all records passed the >= check regardless of their actual
+timestamp. Fix: normalize stored timestamps to use space separator instead of 'T', or
+replace() in the query. The fix chosen was to use replace() in all get_health_history()
+and get_speedtest_history() queries: WHERE timestamp >= datetime('now', '-N hours')
+works because we additionally convert stored timestamps to space-separated format.
+This is a separate issue from the original UTC migration and was fixed in the same session.
+
+TIMEZONE DISPLAY FIX — 'Z' SUFFIX:
+After UTC migration, metric chart timestamps displayed 5 hours ahead of local time.
+Cause: JavaScript's new Date("2026-03-01T09:24:11") treats a timestamp without
+timezone suffix as local time, not UTC. Fix: append 'Z' to all timestamps when
+sending them from Flask to the browser: timestamp + 'Z'. JavaScript then parses as
+UTC and toLocaleTimeString() displays in the browser's local timezone automatically.
+Applied in all JSON responses that include timestamp fields.
+
+SPEEDTEST CHART RANGE NOT UPDATING (v2.8):
+Separate from the UTC migration: when the user changed the time range selector
+(1H/6H/24H), the speedtest charts were not re-fetching data. The chart data was
+fetched once on page load and the range selector change event was not wired to
+re-fetch. Fix: add a change event listener on the range selector that calls
+loadSpeedtestData() with the new range parameter.
+
+
+ADDITIONAL FINDINGS — Feature_BackupAndRestore.txt
+---------------------------------------------------
+
+ORPHANED doRestore() FUNCTION (v2.9):
+During the full system backup implementation, the doRestore() function body was
+inserted into admin.html without its async function declaration header. The raw
+function body appeared as loose code after saveSchedule() closed, causing a JavaScript
+parse error that killed the entire <script> block. Symptom: saveSchedule is not
+defined error even though the function was present and correct.
+Fix: found orphaned code block after saveSchedule(), wrapped it in its proper
+async function doRestore() { declaration.
+This is a different JavaScript orphaned code bug from the one logged in the base summary
+(which was about a cron JS function). Both occurred in admin.html, both during this arc.
+
+DATA CLEANUP PAGE:
+Admin page has a Data Cleanup card for pruning old health check records:
+- Input field: "Delete records older than N days"
+- POST /api/admin/clear_health with {"older_than_days": N} payload
+- Returns count of deleted rows
+Health checks accumulate at one row every 30 seconds (~2,880/day, ~1M/year).
+Pruning recommended annually or when the Pi's storage is under pressure.
+
+
+ADDITIONAL FINDINGS — Feature_FirstRunWizardAndConfigValidation.txt
+--------------------------------------------------------------------
+
+/api/config/network ENDPOINT:
+New endpoint added to expose current config.py network values to the dashboard UI:
+GET /api/config/network returns: {"lan_gateway": "192.168.100.254", "wan_primary": "8.8.8.8", ...}
+index.html was updated to fetch these values on load and display them in the dashboard
+status cards (replacing hardcoded IPs). This way the dashboard reflects whatever is
+actually in config.py rather than the values from the initial deployment.
+
+BOOTSTRAP ICONS CDN (confirmed in code):
+base.html uses Bootstrap Icons from CDN only (no Bootstrap CSS):
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+The project uses its own themes.css (CSS custom properties system) rather than
+Bootstrap's grid/spacing. Only the icon font is from Bootstrap. This is relevant for
+any future offline/LAN-only deployment — Bootstrap Icons CDN is the only external
+dependency remaining in the HTML templates.
+
+FAVICON + PWA (additional detail):
+favicon.ico, favicon-32.png, favicon.svg all placed in static/ directory.
+Base.html <head> includes standard favicon link tags. Initially omitted — generate_certs.sh
+indirectly prompted adding them because the user noticed the browser tab showed a generic
+globe icon. Added via patcher package and included in all distributable packages going
+forward.
+
+
+ADDITIONAL FINDINGS — Feature_EmailAndAlerts.txt
+-------------------------------------------------
+
+GMAIL APP PASSWORD SPACES BUG:
+When the user first entered the Gmail App Password, authentication failed despite correct
+credentials. Root cause: Gmail displays App Passwords as "xxxx xxxx xxxx xxxx" (19 chars
+with spaces). The user copy-pasted with spaces, resulting in 19 characters stored in
+config.py instead of 16. Fix: trim all spaces from GMAIL_APP_PASSWORD before storing.
+The Config Editor was updated to strip spaces from App Password field on save.
+Rule: GMAIL_APP_PASSWORD must be exactly 16 characters with no spaces.
+
+EMAIL FOOTER HARDCODED IP:
+The alert email template footer contained a hardcoded http://192.168.110.10:5000.
+Fixed during email consolidation: footer link changed to use SITE_NAME from config.py
+(no IP address in email body). This ensures emails are correct regardless of Pi network
+configuration.
+
+DISTRIBUTABLE AND UPDATE CHAIN DISCUSSION (v2.9.5):
+The user asked how a distributable given to a friend would handle sequential package
+updates. Discussion resulted in a design decision: a manifest-driven update checker
+should eventually be built into the dashboard (similar to how software update systems
+work — check a hosted manifest, show available versions, install in sequence). This
+was not implemented in Session 1. Noted as a future feature.
+
+DEVELOPMENT SERVER WARNING (recurring):
+Flask's built-in dev server shows "WARNING: This is a development server" in journalctl
+throughout early sessions. This was noted but not resolved until the Gunicorn migration
+(timing per context doc). The warning is expected behavior for Flask's app.run() but
+the user asked about it twice. Added here for completeness.

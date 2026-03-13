@@ -1,0 +1,104 @@
+NETWATCH EXPANDED SUMMARY — DEV DOCUMENTS SYSTEM
+==================================================
+Type: Feature | Date: 2026-03-08
+Sessions: Session 3
+Outcome: Complete (DB registry deferred)
+
+
+BACKGROUND
+----------
+Context loss between Claude chat sessions was causing hours of wasted setup time per
+session. Chat logs grew too large to upload (892KB + 251KB from prior sessions) and hit
+context window limits immediately. No persistent storage for AI context existed on the Pi.
+
+The solution was a Dev Documents system built into NetWatch that stores AI context files
+and session summaries on the Pi, included automatically in the code export zip.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+First zip package (v3.2.89 attempt 1): Files were zipped from outside the package
+directory, landing inside a subdirectory in the zip. patcher.py looks for manifest.json
+at zip root and could not find it. Package failed silently. Fix: always cd into the
+package directory before running zip.
+
+Context doc placement (v3.2.90): patcher _resolve_path() was updated to recognize the
+dev_docs/ prefix, but the fix only applies to packages installed after v3.2.90. The
+v3.2.90 package itself could not place files in dev_docs/ using the new logic. Files
+landed in the wrong location. Fix: context docs placed correctly in v3.2.91 after the
+patcher fix was already live on the Pi.
+
+admin.html not updating correctly: The first broken zip attempt may have caused
+admin.html to not install. Required explicit re-delivery in v3.2.92.
+
+deployed_files.html sizing inconsistency: Initial version had visual sizing issues.
+Root cause was that it was not built from the original update_manager.html as a base.
+Fixed in v3.2.92 by rebuilding from the original as an exact base.
+
+
+WHAT WORKED
+-----------
+BACKEND (updater.py)
+  New directory: ~/netwatch/dev_docs/
+  New constant:  DEV_DOCS_DIR = ~/netwatch/dev_docs/
+  New functions:
+    list_dev_docs()         — returns list of dicts: filename, size_bytes, modified
+    save_dev_doc(fn, bytes) — returns (True, None) or (False, error)
+    delete_dev_doc(fn)      — returns (True, None) or (False, error)
+    rename_dev_doc(old, new)— returns (True, None) or (False, error)
+    get_dev_doc_path(fn)    — returns full path or None
+
+ROUTES (webapp.py)
+  GET  /api/devdocs/list           — list all dev docs
+  POST /api/devdocs/upload         — upload a new doc
+  POST /api/devdocs/delete         — delete a doc by filename
+  POST /api/devdocs/rename         — rename a doc
+  GET  /api/devdocs/download       — download a single doc
+  GET  /api/admin/export_code_full — export code + dev_docs as zip
+
+FRONTEND (templates/deployed_files.html)
+  New file replacing update_manager.html entirely.
+  Built from update_manager.html as exact base — title and header changed, Dev Documents
+  section inserted before Upload History. Rename modal uses box-shadow:var(--shadow)
+  matching other modals. All original functionality preserved.
+
+ADMIN PAGE (templates/admin.html)
+  "File Update Manager" renamed to "Deployed Files" throughout.
+  Single "Download Current Code (.zip)" button pointing to export_code_full.
+  Description updated: "Download a zip of the current code and Dev Documents."
+  Previous dual-button design (separate download code / download code + dev docs)
+  removed — dev docs always included, no reason to ever exclude them.
+
+PATCH MANAGER (templates/patch_manager.html)
+  Reference updated from "File Update Manager" to "Deployed Files".
+
+PATCHER (patcher.py) — v3.2.90
+  _resolve_path() updated to handle dev_docs/ prefix.
+  Files with "dev_docs/" prefix in manifest action are placed in ~/netwatch/dev_docs/.
+
+EXPORT FIX (webapp.py) — v3.2.94
+  gunicorn.ctl added to EXCLUDE_FILES in both export_code and export_code_full routes.
+  gunicorn.ctl is a Unix socket file in the netwatch root — os.walk picks it up but
+  zf.write() throws OSError: [Errno 6] No such device or address.
+
+PACKAGES
+  v3.2.89 — Initial deploy (second zip, correct structure)
+  v3.2.90 — patcher _resolve_path() fix
+  v3.2.91 — deployed_files.html header fix, context docs placed in dev_docs/
+  v3.2.92 — admin.html rename fix, deployed_files.html rebuilt from original base
+  v3.2.93 — context doc updates (backlog corrections, critical section updated)
+  v3.2.94 — gunicorn.ctl export fix
+  v3.2.95 — merged duplicate download buttons into single button
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+DB-driven registry for Deployed Files was on the original backlog before this session.
+The reasoning behind it was lost when prior session context was unavailable. Current
+file-based approach works correctly. Deferred until original reasoning can be recovered
+from Session 1 or 2 transcripts. Does not affect current functionality.
+
+patcher.py creates .bak files for every replaced file, including dev docs. This creates
+noise (e.g. NetWatch_AI_Context_latest.txt.bak) but is harmless. The dated files
+(NetWatch_AI_Context_2026-03-08.txt) serve as the intentional backup mechanism.
+Suppressing .bak behavior would require modifying patcher core — not worth it.

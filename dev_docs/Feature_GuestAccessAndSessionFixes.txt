@@ -1,0 +1,80 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: GUEST ACCESS AND SESSION FIXES
+====================================================================
+Name: Guest Self-Registration and Session Management
+Type: Feature
+Date: 2026-03-01 (v2.6–v2.7); session timeout extended v3.2.25
+Sessions: Session 1.2 (v2.6–v2.7); Session 1.3 (v3.2.25 activity timeout)
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+User wanted an optional guest self-registration flow so visitors could create accounts
+without admin intervention. Also needed session timeout enforcement that allowed the
+Monitor role to stay open indefinitely on a display.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Redirect loop on guest login (v2.6):
+After registering as a guest and being redirected to the login page, the login itself
+looped. journalctl showed rapid redirect cycles: GET / → 302 /login?next=/ → 302 /
+repeatedly. Root cause: the registration handler was not clearing session state before
+redirecting to /login. If a partial session existed from a previous visit, Flask
+inherited it and immediately redirected the "logged-in" session back to /. Fix: 
+explicitly clear session before redirect to login after successful registration.
+
+Guest badge popover not opening (v2.6):
+Clicking the "Guest" badge in the navbar did nothing visible. The click event was
+being caught by the document-level "close on outside click" handler before the popover
+could open. The logic for detecting whether a click was on the badge vs outside it
+was fragile. Fixed by improving the click-outside detection to check badge ancestry
+properly, and simplifying the toggleGuestMenu() function.
+
+API routes still requiring login for guest users (v2.6):
+After fixing the page routes with @guest_allowed, the dashboard data (API endpoints
+like /api/status, /api/health) still returned the login page HTML as their response,
+causing "Unexpected token '<'" JSON parse errors in the browser JS. Fix: API routes
+for read-only data (status, health history, speedtest history) explicitly allow
+unauthenticated access. Guest users get data; write/control endpoints still require auth.
+
+
+WHAT WORKED
+-----------
+SELF-REGISTRATION:
+- /register GET: shows registration form (username, password, confirm password)
+- /register POST: creates account with Guest role auto-assigned
+- "Create Account" link on login page (only shown if guest registration is enabled,
+  controlled by GUEST_REGISTRATION_ENABLED in config.py)
+- After registration: redirect to /login (not auto-login — user enters credentials)
+- Guest role: view_dashboard=True, view_metrics=True, all others False
+- Admin can promote guest to any other role from /admin/users
+
+@GUEST_ALLOWED DECORATOR:
+- Applied to page routes that guests (unauthenticated or Guest-role) can access
+- Distinct from @login_required (requires any authenticated user)
+- Dashboard (/) and metrics (/metrics) use @guest_allowed
+- All admin, controls, logs routes use @login_required + requires_permission()
+
+SESSION TIMEOUT (v2.7):
+- Per-role session_minutes: 0 = never expire
+- Checked in get_current_user() on every request
+- If elapsed > session_minutes and session_minutes > 0: logout_user(), return None
+- Monitor role = 0 minutes (truly indefinite — display screen use case)
+- Admin role = 480 minutes (8 hours)
+- Operator role = 1440 minutes (24 hours)
+
+ACTIVITY-BASED TIMEOUT WITH COUNTDOWN (v3.2.25):
+- Session deadline reset on each authenticated API call (activity extends session)
+- Client-side countdown timer shown in navbar when session is near expiry
+- Warning modal at N minutes before expiry with "Extend Session" button
+- Monitor role: completely exempt from countdown and warning (session_minutes = 0)
+- Polling heartbeat endpoints (live polling) exempt from triggering session extension
+  to avoid Monitor sessions appearing to be active when they're just auto-refreshing
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Guest registration can be disabled in config.py (GUEST_REGISTRATION_ENABLED = False).
+  Default: True. User may want to disable for a more controlled environment.
+- No email verification on guest registration. Anyone on the LAN can create an account.
+  Acceptable given LAN-only access model.

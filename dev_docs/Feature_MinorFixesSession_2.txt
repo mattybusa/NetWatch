@@ -1,0 +1,104 @@
+Feature_MinorFixesSession_2.txt
+================================
+FEATURE/BUG HEADER
+------------------
+Name: Minor Fixes Session 2 — backfill created_at, webapp.py logging, SERVICE_MAP,
+      SMS Change Detection
+Type: Bug fix (first three) + Feature (SMS change detection)
+Date worked on: 2026-03-07
+Sessions: Session 2
+Final outcome: All complete
+
+
+--- ARC 1: backfill_account_subscribers() NOT NULL bug (v3.2.61) ---
+
+BACKGROUND:
+On web service startup (confirmed by log after v3.2.52 install):
+"Subscriber backfill failed: NOT NULL constraint failed: alert_subscribers.created_at"
+The backfill_account_subscribers() function in alert_subscribers.py creates subscriber
+records for account users who don't have one. Its INSERT was missing created_at.
+
+WHAT WORKED:
+Package v3.2.61 — alert_subscribers.py:
+- Added created_at to INSERT column list and values.
+- Value: datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S") inline (no helper function
+  available in that module).
+- Testing required: delete a subscriber record, restart web service, verify record
+  recreated and log shows "Backfilled 1 account subscriber record(s)".
+- Important: backfill_account_subscribers() is called by the web service (webapp.py
+  init), not the monitor. Initially tested against monitor log — nothing appeared.
+  Had to retest against netwatch-web journal.
+
+
+--- ARC 2: webapp.py startup logging silent in journald (v3.2.62) ---
+
+BACKGROUND:
+After v3.2.61 testing revealed the backfill was working but producing no log output
+visible in journald, the root cause was traced: webapp.py had no logging.basicConfig()
+call. It creates a logger with getLogger("netwatch.webapp") but never attaches a
+handler. Log messages from init() (including backfill output) went nowhere.
+main.py calls logging.basicConfig() before importing anything — webapp.py did not.
+
+WHAT WORKED:
+Package v3.2.62 — webapp.py only:
+- Added logging.basicConfig() call at top of file (before logger instantiation).
+- After install, backfill message appears in journald:
+  "2026-03-07 17:07:21 [INFO] netwatch.subscribers — Backfilled 1 account subscr>"
+- Note: log source shows "netwatch.subscribers" not "netwatch.webapp" — expected,
+  since the log.info() call is inside alert_subscribers.py's module logger.
+
+Testing confirmation: delete User123 subscriber record → restart web service →
+check journald → "Backfilled 1 account subscriber record(s)" visible → record 
+confirmed recreated in DB.
+
+
+--- ARC 3: SERVICE_MAP comprehensive fix (v3.2.63) ---
+
+BACKGROUND:
+alerts.py was mapped to "monitor" only in updater.py SERVICE_MAP. The correct mapping
+is "both" because webapp.py imports alerts.py directly for test email sends from the
+web UI (alerts.send_test() called from routes). This was discovered during the emoji
+ghost investigation earlier in the session.
+
+During review, additional mapping gaps were found beyond just alerts.py.
+
+WHAT WORKED:
+Package v3.2.63 — updater.py only:
+Changes to SERVICE_MAP:
+- alerts.py: "monitor" → "both"
+- alert_subscribers.py: not in map → "both" (imported by both services)
+- security_log.py: not in map → "web" (imported by web service)
+- patcher.py: not in map → "web"
+- certmanager.py: not in map → "web"
+- config_validator.py: not in map → "web"
+- auth.py: was "web" → "both" (monitor imports it indirectly via alerts)
+
+Validation: both services restarted at same time (17:12:54 and 17:12:55) after install.
+
+
+--- ARC 4: SMS Change Detection (v3.2.71) ---
+
+BACKGROUND:
+My Account (preferences.html) allowed saving email and phone without detecting whether
+the values actually changed. On every save, it would re-check verification status
+regardless of whether email/phone changed. If email changed, it should trigger
+re-verification; if unchanged, it should leave verified status alone. Phone/SMS had
+no change detection at all.
+
+WHAT WORKED:
+Package v3.2.71 — preferences.html only (no backend changes):
+- origEmail and origPhone captured as baselines on page load (after fields populated).
+- On save:
+  - Email changed from origEmail → sends new verification code, "Email changed —
+    verification code sent" toast, refreshes badge.
+  - Email unchanged → silently refreshes badge only, no code sent.
+  - Phone changed from origPhone → sends new SMS verification code, "Phone changed —
+    verification code sent via SMS" toast, refreshes badge.
+  - Phone unchanged → silently refreshes badge only, no code sent.
+  - After either path: baselines update to newly saved values.
+- All JS, no backend changes needed.
+
+Packaging note: v3.2.71 had a failed first package (no manifest.json found in zip)
+because the package was inadvertently built as a full pi_current/ tree zip. Rebuilt
+cleanly as a patch package (manifest.json + templates/preferences.html only).
+See Gotchas.txt for zip packaging rules (cd /package_dir && zip -r output.zip .).

@@ -1,0 +1,183 @@
+NETWATCH CHAT SUMMARY — SESSION 1.1
+=====================================
+Date: 2026-02-28
+Starting version: Pre-versioning (project inception)
+Ending version: v2.0 (first functional deployment with auth, roles, themes, layouts)
+Session focus: Project conception → architecture decision → initial code generation →
+  Pi deployment → authentication system → themes/layouts/user preferences → planning
+  for file uploader and config editor.
+
+SCOPE NOTE: This session covered 6+ distinct arcs: (1) architecture selection and initial
+design, (2) initial code generation and deployment, (3) OS/network setup, (4) authentication
+system with role-based permissions, (5) themes/layouts/user preferences, and (6) planning
+for update manager and config editor. Expanded summaries produced for architecture, initial
+codebase, and auth/roles.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- Architecture decision: Flask + SQLite chosen over InfluxDB + Grafana. User was open to
+  recommendation. Flask/SQLite selected for Pi 3B+ RAM constraints (Grafana alone ~300-400MB);
+  Chart.js added for visualization. This is the foundational decision that all subsequent
+  development builds on.
+  (see Feature_Architecture_Decisions.txt)
+
+- Initial code generation (pre-v2.0): Full modular NetWatch codebase generated across
+  multiple context compaction events. The session went through two rebuild cycles before a
+  clean 16-file modular structure was established. Files: monitor.py, network.py, relay.py,
+  button.py, database.py, alerts.py, main.py, webapp.py, auth.py (later), config.py,
+  templates/ (index.html, login.html, etc.), static/, systemd service files.
+  (see Feature_InitialCodebaseAndDeployment.txt)
+
+- OS/Pi setup: User started with old SD card image, formatted and provisioned from scratch.
+  Hardware: Pi 3B+, USB SSD adapter (SSD recommended over SD for SQLite write durability).
+  Network: 192.168.17.0/24 primary subnet, 192.168.100.0/24 wired automation, 
+  192.168.110.0/24 wireless automation. Pi static IP assigned at 192.168.100.10 (wired)
+  and 192.168.110.10 (wireless). Username: mboynton. Home dir: /home/mboynton/netwatch/.
+  
+- Deployment: Files transferred via SCP from Windows to Pi. Initial service startup.
+  Button GPIO edge detection error encountered and resolved (service file fix).
+  Services: netwatch-monitor and netwatch-web (systemd units).
+  (see Feature_InitialCodebaseAndDeployment.txt)
+
+- Authentication system (v2.0): Role-based auth with session management. Built-in roles:
+  Admin (full access, 8hr timeout), Monitor (read-only, never times out), Operator
+  (dashboard+controls, 24hr timeout). Roles are user-configurable: name, permissions, and
+  session timeout all editable from admin. Users assigned a role. Passwords hashed. Login
+  page, forced password change on first login, admin user management UI.
+  (see Feature_AuthAndRoles.txt)
+
+- Themes and layouts (v2.0): 4 themes (Dark Blue, Dark Green/terminal, Light/day,
+  High contrast), 4 layouts (Dashboard-first, Wide sidebar, Comfortable, Compact). Theme
+  and layout stored per-user in the DB. Applied via CSS classes on <body> driven by Jinja2.
+  Single base.html template extended by all pages; themes.css holds all variables.
+  (see Feature_ThemesAndLayouts.txt)
+
+- User preferences architecture: Theme + layout columns on users table. Webapp reads
+  at login and stores in session. Appearance popover (top-right or bottom-left of sidebar
+  depending on nav style) allows live switching without full page reload. Preferences
+  persist across sessions via DB.
+  (see Feature_ThemesAndLayouts.txt)
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- Initial code generation context compaction loop: The first code generation attempt
+  was lost to context compaction. User reported the session went in circles. A second
+  attempt produced a consolidated (non-modular) structure that the user selected to
+  replace with the original modular design. Third attempt produced the clean 16-file
+  modular structure that became the project baseline.
+
+- Admin page deployment failure (inline editing approach): Early in the session, the
+  user attempted to edit files by replacing portions inline rather than using the full
+  file content. This broke the admin page. Repaired by SCP of full correct file.
+
+- GPIO button edge detection error: Initial service startup failed with a GPIO-related
+  error on button.py. Root cause: edge detection configuration in the service file.
+  Fixed by adjusting the systemd service unit.
+
+- Multiple context compactions within this sub-session caused loss of previously generated
+  code. The user's "not again, we have already done that, we were going in circles" message
+  documents this clearly. The session eventually stabilized with the modular rebuild.
+
+
+DECISIONS MADE
+--------------
+- Flask + SQLite over InfluxDB + Grafana: permanent architectural decision for all future
+  development. SQLite for time-series metrics with Chart.js for visualization.
+
+- Modular file structure: 16 separate files over a single consolidated module. Allows
+  targeted patching and cleaner service restart logic.
+
+- SSD over SD card for production: SQLite write frequency (logging every ~30s) would
+  wear out SD cards. Pi boots from SD, app runs from USB SSD. User noted desire to migrate
+  eventually; production unit running on SSD from this point forward.
+
+- Static IP: Pi at 192.168.100.10 (wired) and 192.168.110.10 (wireless). Both subnets
+  give dashboard access.
+
+- Role system architecture: Roles define permissions + session timeout. Users inherit from
+  role. This allows a Monitor display role with infinite timeout and read-only access — the
+  user's explicit use case.
+
+- Relay wiring: NC (normally closed) was determined to be the appropriate wiring approach
+  for power-cycle use (modem and router). Active-HIGH relay logic confirmed.
+  [NOTE: Relay logic debugging with active-HIGH/NC wiring occurred later in 1.2 — see
+  Feature_RelayAndControls.txt]
+
+- Theme/layout approach: CSS class on <body> tag, not separate templates. One themes.css.
+  Adding a new theme = adding CSS variables only.
+
+- File uploader and config editor: designed and planned in this sub-session. User requested
+  "intelligent zip-based patch system" for future updates. Implementation deferred to 1.2.
+
+- Context doc: No formal AI context document established yet in this sub-session.
+  That system was created later.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- Relay wiring (NC vs NO, active-HIGH vs active-LOW): partially resolved in this sub-session
+  (NC recommended), fully debugged in sub-session 1.2.
+  [COMPLETED IN LATER SUB-SESSION — see ChatSummary_1.2.txt]
+
+- File uploader and config editor: planned at end of this sub-session.
+  [COMPLETED IN LATER SUB-SESSION — see ChatSummary_1.2.txt]
+
+- No version numbers formally assigned during this sub-session. "v2.0" label is applied
+  retroactively based on the auth transcript (2026-02-28-16-16-17) referencing "v2.0" in
+  context, and the patcher transcript (2026-03-01-00-09-02) referencing that as the starting
+  version. The pre-v2.0 work is unversioned.
+
+- [TRANSCRIPT NOTE] The first transcript (08:58) shows the project was introduced with
+  reference to "a previous AI's recommendations" (InfluxDB + Grafana). The history before
+  that AI interaction is not available in any transcript. The inception of the concept
+  predates these transcripts.
+
+- Multiple context compactions occurred within this sub-session. Some code may have been
+  generated and lost. The 2026-02-28-09:00 and 14:21 transcripts both document recovery
+  from compaction events.
+
+
+BACKLOG CHANGES
+---------------
+Completed this sub-session:
+- Project architecture selected and documented
+- Initial codebase generated (all 16 files)
+- Pi OS setup and network configuration
+- Service deployment (netwatch-monitor, netwatch-web)
+- Authentication system with role-based permissions (v2.0)
+- Themes + layouts + user preferences (v2.0)
+
+Identified and deferred (raised this sub-session, not yet implemented):
+- File upload manager (web-based file replacement)
+- Browser-based config editor
+- Zip-based patch system for updates (user specifically requested this)
+- HTTPS/certificate support (mentioned in passing)
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Feature_Architecture_Decisions.txt — Architecture selection (Flask+SQLite over
+  InfluxDB+Grafana), Pi hardware decisions, network topology, modular file structure.
+- Feature_InitialCodebaseAndDeployment.txt — Initial code generation arc including
+  two rebuild cycles, deployment to Pi, GPIO fix, SCP workflow.
+- Feature_AuthAndRoles.txt — Full authentication system: login, roles, permissions,
+  session timeouts, admin user management.
+- Feature_ThemesAndLayouts.txt — 4 themes × 4 layouts, CSS variable architecture,
+  per-user preferences, appearance popover.
+
+
+NEW GOTCHAS ADDED
+-----------------
+See Gotchas_Append_Session1.txt for entries to merge into Gotchas.txt:
+- CONTEXT COMPACTION LOSES GENERATED CODE — new entry (pre-v2.0)
+- SCP FROM WINDOWS — MUST USE SEPARATE POWERSHELL WINDOW, NOT INSIDE SSH SESSION — new entry
+  (Gotchas.txt has later entries; these are new from this sub-session. Review before merging.)
+
+
+CURRENT STATE
+-------------
+- Pi version at end of sub-session: v2.0 (first formally named version, auth + themes working)
+- Continuing to sub-session 1.2: file uploader, config editor, HTTPS, patcher system,
+  and subsequent feature development.

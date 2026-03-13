@@ -1,0 +1,25 @@
+# Configuration — contains secrets, never commit
+config.py
+config.py.bak
+
+# Database — live data, not source code
+netwatch.db
+netwatch.db.bak
+netwatch.db.pre_restore
+netwatch.db.rollback_safety
+
+# Certificates — private keys must never be committed
+certs/
+
+# Backups and snapshots — generated, not source
+*.bak
+snapshots/
+logs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Context document backups
+NetWatch_AI_Context_*.txt.bak

@@ -1,0 +1,175 @@
+FEATURE: Pi Package Update Scheduling
+======================================
+Type: Feature
+Date: 2026-03-12
+Session: 7
+Versions: v3.3.12
+Outcome: Complete. Pending first scheduled run verification.
+
+
+BACKGROUND
+----------
+NetWatch had no mechanism to keep the Pi's OS packages up to date. Package
+updates were entirely manual (SSH + apt-get). As a live production system,
+the Pi accumulates security and stability updates that should be applied
+regularly without requiring manual intervention.
+
+The feature needed to fit the existing scheduling pattern (backup schedules
+use cron managed via the admin UI) and tie into the alert system so the
+owner could be notified of what changed after each run.
+
+A secondary design question was whether to use the existing account (mboynton)
+or a dedicated service account for the privileged apt operations. Decision:
+keep mboynton for now with a narrow sudoers entry; service account deferred
+to backlog as a full-session infrastructure task.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Heredoc in pkg_update.sh (first draft):
+  The initial script used python3 - << PYEOF to run a Python snippet inline
+  for parsing dry-run output. Caught before shipping. NEVER USE BASH HEREDOCS
+  on the Pi (see Gotchas.txt). Removed.
+
+while-read fed by heredoc on variable (second draft):
+  Replaced the python3 heredoc with a while IFS= read -r line; done <<DRYEOF
+  $DRY_OUT pattern to iterate apt output lines in shell. Still a heredoc.
+  Removed. Final approach: write dry-run output to a temp file and pass the
+  file path to a Python helper script for all parsing.
+
+
+WHAT WORKED
+-----------
+Architecture: shell script (pkg_update.sh) handles process control and
+logging; Python helper (pkg_update_alert.py) handles all apt output parsing
+and alert firing. Shell passes a temp file path to Python rather than piping
+data inline. No heredocs anywhere.
+
+-- pkg_update.sh --
+Location: ~/netwatch/pkg_update.sh
+Flags: --alert (fire completion alert), --quiet (suppress stdout for cron)
+Cron tag: # netwatch-pkg-update
+
+Flow:
+1. Run sudo apt-get update; fail-fast with alert if non-zero exit.
+2. Run sudo apt-get upgrade --dry-run > pkg_update_dry.tmp
+3. Count "Inst " lines. If zero: log "already up to date", optional alert, exit 0.
+4. Run sudo apt-get upgrade -y; fail-fast with alert if non-zero exit.
+5. Call pkg_update_alert.py LOG dry_tmp to print parsed package list to stdout
+   (captured by shell >> to pkg_update.log).
+6. If --alert: call pkg_update_alert.py OK summary dry_tmp to fire alert.
+7. rm temp files, exit 0.
+
+Temp files:
+  pkg_update_dry.tmp  — raw apt dry-run output, removed after use
+  (pkg_update_pkglist.tmp from earlier drafts — removed in final version)
+
+Log file: ~/netwatch/pkg_update.log
+  Append-only. Each run writes a timestamped block: header, apt steps,
+  package list (if any), Done footer. Survives across runs.
+
+-- pkg_update_alert.py --
+Location: ~/netwatch/pkg_update_alert.py
+Invoked directly by pkg_update.sh via python3 path args, never via web.
+
+Modes (sys.argv[1]):
+  LOG  dry_file       — parse and print package list to stdout (for log)
+  OK   summary [dry]  — fire pkg_update alert with summary + package detail
+  FAILED  message     — fire pkg_update alert with failure message
+
+parse_dry_run(dry_file):
+  Reads apt dry-run output. Matches lines starting with "Inst ".
+  Extracts: package name (parts[1]), old version (text inside [...]),
+  new version (first word inside (...)).
+  Returns list of strings: "  name: old -> new" or "  name: (new install) new"
+
+Alert message format (OK with packages):
+  "Pi package update complete -- N package(s) upgraded.
+
+  Packages changed:
+    curl: 7.88.1-10+deb12u5 -> 7.88.1-10+deb12u8
+    libcurl4: 7.88.1-10+deb12u5 -> 7.88.1-10+deb12u8
+    ..."
+
+-- alert_subscribers.py --
+Added to ALERT_TYPES:
+  {"key": "pkg_update", "label": "Pi Package Update", "group": "maintenance",
+   "default_email": False, "default_sms": False, "critical": False}
+"maintenance" is a new third group alongside "network" and "security".
+Default off for both email and SMS — user opts in explicitly.
+
+-- alerts.py --
+Added to SUBJECTS: "pkg_update": "🔧  NetWatch: Pi Package Update Complete"
+Added to COLORS:   "pkg_update": "#1a7f4b"  (green)
+Added to SMS_LABELS: "pkg_update": "PKG UPDATE"
+
+-- alert_settings.html --
+Added to FRIENDLY_LABELS: pkg_update: 'Pi Package Update'
+Delivery history filter and type column now show friendly label.
+
+-- preferences.html --
+buildAlertTypeGrids() updated:
+  groups initialised with maintenance: [] alongside network and security.
+  New sectionHeader() helper function (avoids duplicate inline HTML string).
+  Maintenance section rendered after Security if maintenance group non-empty.
+  Result: My Account → Alerts shows a "Maintenance" section header with
+  "Pi Package Update" checkbox for both email and SMS.
+
+-- webapp.py --
+New route: GET/POST /api/admin/pkg_update_schedule
+  Permission: manage_admin
+  GET: runs crontab -l, parses line tagged # netwatch-pkg-update with regex.
+    Returns: {status, schedule: {enabled, dow, hour, send_alert, last_run}}
+    last_run derived from pkg_update.log mtime if file exists.
+  POST: payload {enabled, dow, hour, send_alert}
+    Reads crontab, removes any existing netwatch-pkg-update line, appends
+    new line if enabled: 0 {hour} * * {dow} /bin/bash {script}{--alert} --quiet {tag}
+    Returns: {status, message}
+
+-- admin.html --
+Daily backup fix: "Enabled" changed from <select> (Yes/No dropdown) to
+  <input type="checkbox" id="sched-db-enabled">. loadSchedule() updated to
+  use .checked instead of .value. saveSchedule('db') updated to use .checked.
+  Consistent with weekly backup pattern.
+
+New "Scheduled Pi Updates" section (below "Scheduled Backups" hr):
+  Card with: Day select, Time select, "Enable weekly Pi package update"
+  checkbox, "Send alert on completion" checkbox, Save button.
+  Status line (●/○) shows day, time, alert state, last run time.
+  loadPkgSchedule() fetches /api/admin/pkg_update_schedule, populates fields.
+  savePkgSchedule() posts payload, refreshes status on success.
+  Both called at page init.
+
+-- Sudoers (manual one-time setup) --
+File: /etc/sudoers.d/netwatch-apt, chmod 440
+Three lines:
+  mboynton ALL=(ALL) NOPASSWD: /usr/bin/apt-get update
+  mboynton ALL=(ALL) NOPASSWD: /usr/bin/apt-get upgrade -y
+  mboynton ALL=(ALL) NOPASSWD: /usr/bin/apt-get upgrade --dry-run
+
+Commands:
+  echo "mboynton ALL=(ALL) NOPASSWD: /usr/bin/apt-get update" | sudo tee /etc/sudoers.d/netwatch-apt
+  echo "mboynton ALL=(ALL) NOPASSWD: /usr/bin/apt-get upgrade -y" | sudo tee -a /etc/sudoers.d/netwatch-apt
+  echo "mboynton ALL=(ALL) NOPASSWD: /usr/bin/apt-get upgrade --dry-run" | sudo tee -a /etc/sudoers.d/netwatch-apt
+  sudo chmod 440 /etc/sudoers.d/netwatch-apt
+
+Cron verification:
+  crontab -l | grep netwatch-pkg-update
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- pkg_update.log has no UI viewer. The alert email covers the normal case.
+  A log viewer (tail in Admin page) is in the backlog.
+
+- Service account (netwatch-svc): privileged operations currently run as
+  mboynton. A dedicated no-login service account with narrower privilege
+  surface is deferred to backlog as a full-session infrastructure task.
+
+- First scheduled run not yet verified at time of session close. User to
+  confirm after run. Quick check: crontab -l | grep netwatch-pkg-update
+  confirms the schedule is registered.
+
+- apt-get upgrade will install kernel updates if available. Kernel updates
+  require a manual reboot to take effect — the script does not reboot
+  automatically. This is intentional.

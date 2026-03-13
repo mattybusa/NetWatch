@@ -1,0 +1,92 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: CHANGELOG SYSTEM
+======================================================
+Name: Per-Package Changelog with Themed HTML Display
+Type: Feature
+Date: 2026-03-06 (v3.2.23–v3.2.24); finalized v3.2.28–v3.2.29
+Sessions: Session 1.3
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+The user wanted a changelog to track what changed in each installed package. The source
+of truth is the manifest.json description field already present in every package. The
+system was designed to generate changelog entries automatically at install time.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Standalone Changelog card (v3.2.24 initial):
+First implementation added a dedicated "Changelog" card on the admin page. User
+rejected this: "I envisioned it being part of the existing package installer, as a
+place to keep track of it, only accessible to the admin." The standalone card was
+removed in v3.2.24b. Changelog moved inside the Package Installer collapsible section.
+
+reportlab PDF generation:
+Initial plan used reportlab to generate styled PDF files. reportlab was not installed
+on the Pi and is not pure Python — adding it would require pip install on the Pi.
+Decision: use styled HTML instead of PDF. HTML can be themed to match the current
+theme and printed ink-efficiently without a PDF step. reportlab removed.
+
+Style preview PDF files generated earlier (v3.2.7 backlog planning session):
+changelog_style_A_dark_minimal.pdf, changelog_style_B_clean_cards.pdf,
+changelog_style_C_combined.pdf — these were style previews only, generated before
+the HTML approach was chosen. Not part of the final implementation.
+
+Version suffix alphabet ordering (3.2.24b):
+The letter-suffix version "3.2.24b" compared as older than "3.2.24" by the packaging
+library. Rule: no letter suffixes in version numbers going forward.
+
+
+WHAT WORKED
+-----------
+CHANGELOG GENERATION AT INSTALL TIME:
+When patcher.py installs a package, it writes a changelog HTML file:
+  ~/netwatch/dev_docs/changelog/changelog_v{version}.html
+Content pulled from manifest.json fields:
+  - version
+  - description (short one-liner)
+  - files changed (list from "files" array)
+  - restart type
+
+HTML TEMPLATE (themed):
+Header: styled with current theme accent color and background. Shows version + date.
+Body: white background (ink-friendly). Lists description, files changed, restart type.
+The accent color is written into the HTML at generation time (reads current theme from
+user preferences for the installing user, or falls back to dark-blue accent).
+Print-safe: header uses theme color, body uses white — stylish on screen, not ink-wasteful
+if actually printed. User confirmed this was the desired behavior.
+
+CHANGELOG VIEWER (admin UI):
+Located inside the Package Installer collapsible section, below the "Open Package
+Installer" button.
+- List of all changelog entries (version + date + description one-liner)
+- Click any entry → opens the full HTML in an inline frame or modal
+- "View All" mode: shows all entries chronologically (newest first)
+- Linked from About page (stub): "View latest release notes" link
+
+ABOUT PAGE LINK (stub added v3.2.24):
+An About page was planned. The changelog link was stubbed in: clicking "About" on the
+admin page links to the most recent changelog entry. Full About page deferred.
+
+RETROACTIVE GENERATION:
+A "Generate All Past Changelogs" button was added to the admin changelog section.
+Iterates the install_log table, generates HTML for all past installs that don't yet
+have a changelog file. For packages installed before the changelog system existed,
+uses the manifest.json description from the install log record.
+
+FILES:
+- patcher.py — changelog HTML generation in apply_package()
+- templates/changelog_template.html — base template for generated entries
+- templates/patch_manager.html — changelog viewer section inside Package Installer
+- webapp.py — /api/changelog/list, /api/changelog/<version> routes
+- ~/netwatch/dev_docs/changelog/ — generated HTML files stored here
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Changelog entries are generated only when patcher.py is running (i.e., web UI
+  install). Packages installed via direct SSH unzip do not generate changelog entries.
+- Theme color is written into HTML at generation time. If the user changes their theme,
+  old changelog entries retain the theme color from when they were generated.
+- Full About page deferred.
+  [Check context doc v3.2.95 for current About page status]

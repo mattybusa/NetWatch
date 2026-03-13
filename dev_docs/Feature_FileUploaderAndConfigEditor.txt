@@ -1,0 +1,289 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: FILE UPLOADER AND CONFIG EDITOR
+======================================================================
+Name: Web-Based File Update Manager and Browser Config Editor
+Type: Feature
+Date: 2026-02-28 (initial build); config editor save fully fixed v3.2.37 (2026-03-06)
+Sessions: Session 1.1/1.2 (initial); Session 1.3 (config editor final fix)
+Final outcome: Complete (config editor save fixed v3.2.37)
+
+
+BACKGROUND
+----------
+User requested a web-based way to update files without SCP/SSH, and a browser-based
+config editor so they could change settings without SSH + nano. Both were planned
+at the end of the themes/auth session and implemented in the next transcript.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+JSON patch format for partial updates:
+The first patcher used JSON patch format (.jsonpatch files) to do targeted line
+replacements. This approach was brittle — text matching with no context awareness.
+When multiple patches touched the same file, references became orphaned. Classic
+example: edit-username-label span was removed in one patch but the JavaScript still
+tried to set its textContent, causing a TypeError. v2.4 dropped JSON patches
+entirely in favor of full-file replace. Never look back.
+
+Config editor save — three sequential root causes (v3.2.8–v3.2.37):
+Each fix unmasked the next. See Bug_ConfigEditorSave.txt for the full arc.
+Summary of failures:
+1. Path resolution: used os.path.expanduser("~/netwatch/config.py") — failed when
+   the web service's working directory was not the user home. Fixed: use
+   os.path.dirname(os.path.abspath(__file__)) to get path relative to configeditor.py.
+2. UTF-8 encoding: open(CONFIG_PATH, "r") and open(CONFIG_PATH, "w") without
+   encoding='utf-8' failed on config files containing non-ASCII characters in comments.
+   Fixed: always open with encoding='utf-8'.
+3. Service restart chaining: configeditor.py called subprocess to restart netwatch-web
+   as part of the save handler — but the restart killed the process that was handling
+   the response, before the file write was confirmed flushed. Fixed: call f.flush()
+   + f.close() before triggering restart, and restructure so restart happens after
+   response is sent.
+
+Pyc cache masking fixes:
+Multiple times during config editor debugging, a fix was applied to configeditor.py
+but the service continued running the old .pyc version from __pycache__. Required:
+  rm ~/netwatch/__pycache__/configeditor*.pyc && sudo systemctl restart netwatch-web
+Without this step, fixes appeared deployed but old behavior persisted. Added to Gotchas.
+
+
+WHAT WORKED
+-----------
+FILE UPDATE MANAGER (updater.py + update_manager.html):
+Smart restart detection based on filename:
+- monitor.py, network.py, relay.py, button.py, database.py, alerts.py, main.py
+  → restart netwatch-monitor
+- webapp.py, auth.py → restart netwatch-web
+- templates/*.html, static/*.css → restart netwatch-web
+- config.py → restart BOTH services
+- Unknown extension → show manual restart buttons
+
+Features:
+- Drag-and-drop or click-to-browse file selection
+- Shows current file on disk (size, last-modified) before upload
+- .bak backup of old file created before overwriting
+- Syntax check on .py files before saving (compile check via py_compile)
+- Upload confirmation UI with filename and size
+
+PACKAGE INSTALLER (patcher.py + patch_manager.html):
+Full-file replace approach (v2.4 onward). manifest.json schema:
+{
+  "version": "2.4",
+  "description": "Short description of changes",
+  "files": [
+    {"action": "replace", "file": "webapp.py"},
+    {"action": "replace", "file": "templates/admin.html"}
+  ],
+  "restart": ["web"]   // or ["monitor"], ["both"]
+}
+
+Patcher resolves file paths: .html → templates/, .css/.js → static/, .py → root.
+Version checking: warns if package version is not sequential with installed version.
+Install history log: each install appended to install_history.db.
+Package History UI: shows last N installs with version, date, description.
+Rollback: pre-install snapshot taken; web UI rollback button; rollback.sh for SSH
+emergency recovery. Added v3.2.2.
+
+CONFIG EDITOR (configeditor.py + config_editor.html):
+Reads config.py, presents as editable form fields with labels and descriptions.
+FIELDS list in configeditor.py defines which keys are shown, their types, and descriptions.
+Boolean fields render as toggles. String fields as text inputs.
+Save: reads current config.py, replaces key=value lines via regex, writes back.
+After save: restarts appropriate service (web, monitor, or both depending on key).
+Config validator integration: keys not yet set to non-placeholder values shown with
+badge in the editor.
+
+FILES:
+- updater.py — File Update Manager logic
+- patcher.py — Package Installer logic, snapshot/rollback
+- configeditor.py — Config Editor logic
+- templates/update_manager.html
+- templates/patch_manager.html
+- templates/config_editor.html
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Config editor boolean toggle double-fire bug found and fixed in v3.2.38-v3.2.41
+  (Session 1.3). ALERTS_ENABLED toggle was firing twice on change event.
+- File Update Manager is for single-file ad-hoc uploads only. Multi-file coordinated
+  changes should always use the Package Installer.
+NETWATCH EXPANDED SUMMARY — FEATURE: FILE UPLOADER AND CONFIG EDITOR
+======================================================================
+Name: Web-Based File Update Manager and Browser Config Editor
+Type: Feature
+Date: 2026-02-28 (initial build); config editor save fully fixed v3.2.37 (2026-03-06)
+Sessions: Session 1.1/1.2 (initial); Session 1.3 (config editor final fix)
+Final outcome: Complete (config editor save fixed v3.2.37)
+
+
+BACKGROUND
+----------
+User requested a web-based way to update files without SCP/SSH, and a browser-based
+config editor so they could change settings without SSH + nano. Both were planned
+at the end of the themes/auth session and implemented in the next transcript.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+JSON patch format for partial updates:
+The first patcher used JSON patch format (.jsonpatch files) to do targeted line
+replacements. This approach was brittle — text matching with no context awareness.
+When multiple patches touched the same file, references became orphaned. Classic
+example: edit-username-label span was removed in one patch but the JavaScript still
+tried to set its textContent, causing a TypeError. v2.4 dropped JSON patches
+entirely in favor of full-file replace. Never look back.
+
+Config editor save — three sequential root causes (v3.2.8–v3.2.37):
+Each fix unmasked the next. See Bug_ConfigEditorSave.txt for the full arc.
+Summary of failures:
+1. Path resolution: used os.path.expanduser("~/netwatch/config.py") — failed when
+   the web service's working directory was not the user home. Fixed: use
+   os.path.dirname(os.path.abspath(__file__)) to get path relative to configeditor.py.
+2. UTF-8 encoding: open(CONFIG_PATH, "r") and open(CONFIG_PATH, "w") without
+   encoding='utf-8' failed on config files containing non-ASCII characters in comments.
+   Fixed: always open with encoding='utf-8'.
+3. Service restart chaining: configeditor.py called subprocess to restart netwatch-web
+   as part of the save handler — but the restart killed the process that was handling
+   the response, before the file write was confirmed flushed. Fixed: call f.flush()
+   + f.close() before triggering restart, and restructure so restart happens after
+   response is sent.
+
+Pyc cache masking fixes:
+Multiple times during config editor debugging, a fix was applied to configeditor.py
+but the service continued running the old .pyc version from __pycache__. Required:
+  rm ~/netwatch/__pycache__/configeditor*.pyc && sudo systemctl restart netwatch-web
+Without this step, fixes appeared deployed but old behavior persisted. Added to Gotchas.
+
+
+WHAT WORKED
+-----------
+FILE UPDATE MANAGER (updater.py + update_manager.html):
+Smart restart detection based on filename:
+- monitor.py, network.py, relay.py, button.py, database.py, alerts.py, main.py
+  → restart netwatch-monitor
+- webapp.py, auth.py → restart netwatch-web
+- templates/*.html, static/*.css → restart netwatch-web
+- config.py → restart BOTH services
+- Unknown extension → show manual restart buttons
+
+Features:
+- Drag-and-drop or click-to-browse file selection
+- Shows current file on disk (size, last-modified) before upload
+- .bak backup of old file created before overwriting
+- Syntax check on .py files before saving (compile check via py_compile)
+- Upload confirmation UI with filename and size
+
+PACKAGE INSTALLER (patcher.py + patch_manager.html):
+Full-file replace approach (v2.4 onward). manifest.json schema:
+{
+  "version": "2.4",
+  "description": "Short description of changes",
+  "files": [
+    {"action": "replace", "file": "webapp.py"},
+    {"action": "replace", "file": "templates/admin.html"}
+  ],
+  "restart": ["web"]   // or ["monitor"], ["both"]
+}
+
+Patcher resolves file paths: .html → templates/, .css/.js → static/, .py → root.
+Version checking: warns if package version is not sequential with installed version.
+Install history log: each install appended to install_history.db.
+Package History UI: shows last N installs with version, date, description.
+Rollback: pre-install snapshot taken; web UI rollback button; rollback.sh for SSH
+emergency recovery. Added v3.2.2.
+
+CONFIG EDITOR (configeditor.py + config_editor.html):
+Reads config.py, presents as editable form fields with labels and descriptions.
+FIELDS list in configeditor.py defines which keys are shown, their types, and descriptions.
+Boolean fields render as toggles. String fields as text inputs.
+Save: reads current config.py, replaces key=value lines via regex, writes back.
+After save: restarts appropriate service (web, monitor, or both depending on key).
+Config validator integration: keys not yet set to non-placeholder values shown with
+badge in the editor.
+
+FILES:
+- updater.py — File Update Manager logic
+- patcher.py — Package Installer logic, snapshot/rollback
+- configeditor.py — Config Editor logic
+- templates/update_manager.html
+- templates/patch_manager.html
+- templates/config_editor.html
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Config editor boolean toggle double-fire bug found and fixed in v3.2.38-v3.2.41
+  (Session 1.3). ALERTS_ENABLED toggle was firing twice on change event.
+- File Update Manager is for single-file ad-hoc uploads only. Multi-file coordinated
+  changes should always use the Package Installer.
+
+
+ADDENDUM — v3.3.9 (2026-03-12)
+-------------------------------
+Config Editor field definitions consolidated into config_schema.py as the single
+source of truth. configeditor.py no longer maintains a hardcoded FIELDS list (see
+line 88 above — that description is superseded). FIELDS is now built dynamically at
+import time from CONFIG_SCHEMA, filtering out entries where ui_hidden=True.
+
+Each entry in config_schema.py now carries all metadata needed by both the validator
+(group, default, required, sensitive) and the Config Editor UI (type, section, min,
+max, ui_hidden). Adding a new config key in config_schema.py is sufficient — it
+appears in the UI automatically with no changes to configeditor.py.
+
+SECRET_KEY is excluded from the UI via ui_hidden=True. SNAPSHOT_RETENTION, previously
+missing from the UI due to the dual-list design, now appears correctly in the
+Data Retention section.
+
+OPEN: Config editor visual indicator for newly added keys that already have valid
+defaults (e.g. SNAPSHOT_RETENTION shows no NEEDS SETUP badge after first install).
+Tracked as a separate backlog item.
+
+
+UPDATED: 2026-03-13 | Session 9 | v3.3.24
+------------------------------------------
+Resolved: "Config editor visual indicator for newly added keys that already have valid
+defaults" — the open item noted above is now complete.
+
+WHAT WORKED (v3.3.24):
+
+Problem: When config_validator.py auto-adds a new key with a valid default (e.g.
+SNAPSHOT_RETENTION = 10), no NEEDS SETUP badge appeared in the Config Editor because
+the value is not in UNCONFIGURED_VALUES. The user had no visual cue to review it.
+
+Solution: Two-path detection in get_unconfigured_keys() in config_validator.py:
+
+  Case 1 (unchanged behavior): value is in UNCONFIGURED_VALUES. A required=True key
+  with a placeholder like "your_email@gmail.com" fires this path. Added guard: empty
+  string ("") only triggers for required=True keys — optional keys (LAN_INTERFACE,
+  WIFI_GATEWAY, WIFI_INTERFACE) may legitimately be blank and must not be flagged.
+
+  Case 2 (new): key has an undismissed config_notification row in the DB. When
+  validate() runs on startup and auto-adds a missing key, it calls _record_notification()
+  which writes a row to config_notifications. get_unconfigured_keys() now queries this
+  table and includes any key with dismissed=0 in the returned set, regardless of its
+  current value.
+
+Dismissal: api_config_save() in webapp.py now calls
+config_validator.dismiss_notification_by_key(key) for each key in the save payload.
+Badge clears the next time Config Editor loads after a save.
+
+New function added to config_validator.py:
+  dismiss_notification_by_key(key): sets dismissed=1 for all pending notifications
+  for a given key. Called by api_config_save() after a successful save.
+
+WHAT WAS TRIED AND FAILED (v3.3.24 arc):
+
+First attempt built the wrong fix. Claude misread the backlog item as "optional keys
+should not show NEEDS SETUP when blank" and implemented logic to suppress the badge for
+required=False keys with empty values. This was the opposite of the actual goal. User
+corrected: the problem was that NEWLY AUTO-ADDED keys with VALID defaults showed NO
+badge at all. Fix was rebuilt from scratch.
+
+Second attempt had the right direction but a regression: Case 1 still flagged blank
+optional keys (WIFI_INTERFACE = "") because "" is in UNCONFIGURED_VALUES. Fix: guard
+clause in Case 1 only — skip empty-string match when required=False. Case 2 is
+unrestricted (new keys should always badge regardless of required status).
+
+Test packages v3.3.25 (add two dummy keys) and v3.3.26 (remove them) were built and
+used to verify badge behavior end-to-end. User confirmed both badges appeared correctly
+and cleared on save. User then rolled back to v3.3.24 rather than installing v3.3.26.
+Orphan test key lines may remain in config.py on the Pi — harmless, validator ignores
+unknown keys.

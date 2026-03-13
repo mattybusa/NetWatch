@@ -1,0 +1,174 @@
+NETWATCH CHAT SUMMARY
+=====================
+Session: 8
+Date: 2026-03-13
+Pi version at start: v3.3.12
+Pi version at end: v3.3.21
+Transcripts:
+  2026-03-13-00-54-55-netwatch-theme-import-export.txt
+  2026-03-13-00-59-03-netwatch-theme-import-export.txt
+  2026-03-13-02-30-54-netwatch-theme-system-v3318.txt
+  2026-03-13-02-48-57-netwatch-theme-css-fix.txt
+  2026-03-13-02-49-57-netwatch-theme-css-fix-v3319-v3321.txt
+  2026-03-13-02-49-58-netwatch-theme-css-fix-v3319-v3321.txt
+  2026-03-13-02-52-20-netwatch-session8-closeout-v3321.txt
+
+SCOPE NOTE
+----------
+Large session spanning multiple transcript windows. Covers the entire custom theme
+system from concept through confirmed working delivery: 9 packages (v3.3.13-v3.3.21),
+multiple failed approaches documented, one expanded summary updated.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+v3.3.13 - Rename "Theme" to "Color Scheme" throughout UI
+- User-facing labels in preferences.html, admin.html, navbar appearance popover
+- No DB schema changes; storage key stays "custom_color_scheme" (internal only)
+- System theme class names unchanged (theme-dark-blue etc.)
+
+v3.3.14 - Theme storage + CSS injection infrastructure
+(see Feature_ThemesAndLayouts.txt for full detail)
+- theme_manager.py: new module. Handles .nwtheme file I/O, validation, CSS generation.
+  REQUIRED_COLOR_KEYS (25 CSS variables), REQUIRED_LAYOUT_KEYS (3 variables).
+  save_theme(), load_theme(), list_themes(), delete_theme(), generate_css().
+- database.py: set_user_pref(user_id, key, None) now deletes the row (None = clear pref)
+- webapp.py: theme context processor injects custom_theme_css into every template render;
+  routes /api/themes/import (POST), /api/themes/export/<name> (GET),
+  /api/themes/list (GET), /api/themes/delete/<name> (POST),
+  /api/themes/toggle/<name> (POST).
+- templates/base.html: custom-theme-css style block in <head> after themes.css
+
+v3.3.15 - CSS flash fix + appearance UI
+- CSS injection architecture: system theme class stays on body always; custom variables
+  override via inline <style> block placed after themes.css. No class switching = no flash.
+- Appearance popover updated: custom color scheme and layout sections added
+
+v3.3.16 - Theme Manager admin section
+- admin.html: new "Color Schemes" section under Admin tab
+- Lists all custom themes (enabled/disabled), import button, export/delete/toggle per theme
+- Admin-only: import, export, delete, enable/disable
+- All users: select from enabled custom themes in appearance popover and preferences page
+
+v3.3.17 - Fix theme import field name mismatch
+- Import form was sending field name "file" but route expected "theme_file"
+- Root cause: copy-paste from a different upload form. One-line fix in admin.html.
+- Confirmed working: import succeeds, theme appears in list
+
+v3.3.18 - Fix JS duplicate declaration + popover + enable/disable
+(see Feature_ThemesAndLayouts.txt for full detail)
+- Root cause: duplicate `const APPEAR_KEY` in preferences.html causing SyntaxError
+  that killed all JS on the preferences page
+- Fixed: removed duplicate declaration; kept single definition at top of scripts block
+- Popover custom theme sections: added color scheme + layout selectors to appearance popover
+- Enable/disable: toggle route + UI working; disabled themes hidden from user selectors
+- Confirmed: theme list visible, toggle works
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+
+v3.3.19 arc — Jinja block nesting (self-introduced regression carried from v3.3.18):
+During v3.3.18 preferences.html work, {% block scripts %} was inadvertently opened INSIDE
+{% block content %}. In base.html these are separate sequential blocks. Jinja2 renders
+the scripts content TWICE — once inline within content, and again at base.html's {% block
+scripts %} location. Produced ~2023-line rendered HTML with duplicate APPEAR_KEY, causing
+SyntaxError killing all JS. Fixed in v3.3.19 by separating blocks correctly.
+
+v3.3.20 arc — CSS :root selector attempt:
+Changed generate_css() to use :root selector. FAILED. CSS custom properties resolve by
+DOM inheritance (nearest ancestor wins), not just specificity. body.theme-* sets variables
+on body; body is closer to all elements than :root. Source order does not matter here —
+body always wins over :root for CSS variable inheritance.
+
+v3.3.19 — Fix: Jinja block nesting
+- Closed {% block content %} before opening {% block scripts %} in preferences.html
+- Removed extra {% endblock %} at end of file
+- One APPEAR_KEY declaration in rendered output. JS restored. Confirmed working.
+
+v3.3.20 — Fix attempt: :root selector (SUPERSEDED)
+- generate_css() changed to use :root { ... }
+- FAILED: CSS variable inheritance goes to nearest DOM ancestor (body, not :root)
+- This package was accidentally uploaded to Pi via Deployed Files drag-and-drop
+  (updater.py treats zip as raw file, copied it to ~/netwatch/). User deleted manually.
+
+v3.3.21 — Fix: body[class] selector
+- generate_css() changed to use body[class] { ... }
+- body[class] has equal specificity to body.theme-* (element + attribute = element + class)
+- Our <style> block is after themes.css in <head>, so we win on source order at tie
+- body[class] always matches because body always has theme + layout classes present
+- CONFIRMED WORKING: Neon Dystopia custom theme applied correctly across pages
+
+
+DECISIONS MADE
+--------------
+- .nwtheme format: JSON with "color_scheme" and "layout" top-level keys
+- CSS injection uses body[class] selector; system theme class stays on body always
+- Disabled themes stored as .disabled sidecar files alongside .nwtheme files
+- set_user_pref(id, key, None) deletes the row (None = "use system default")
+- Admin-only operations: import, export, delete, enable/disable
+- All users: select from enabled custom themes in popover and preferences page
+- Theme storage path: ~/netwatch/themes/
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Feature_ThemesAndLayouts.txt (UPDATED) — full detail on theme system architecture,
+  all failed approaches, final working implementation, file-by-file changes
+
+
+NEW GOTCHAS ADDED
+-----------------
+(Appended directly to Gotchas.txt — this is a dev session)
+
+1. JINJA2 NESTED BLOCKS CAUSE DOUBLE RENDERING (2026-03-13 | v3.3.19)
+   {% block scripts %} nested inside {% block content %} causes double rendering
+   if base.html defines them as separate sequential blocks. Produces duplicate JS
+   declarations and silent SyntaxError killing all JS on the page.
+
+2. CSS CUSTOM PROPERTIES: body BEATS :root FOR INHERITANCE (2026-03-13 | v3.3.19-v3.3.21)
+   CSS variables resolve by DOM inheritance (nearest ancestor). body.theme-* wins over
+   :root. To override: use body[class] placed after themes.css in <head>.
+
+3. UPDATER.PY DRAG-AND-DROP TREATS ZIP AS A RAW FILE (2026-03-13 | v3.3.20)
+   Uploading a .zip via Deployed Files copies it as-is to ~/netwatch/ — does NOT extract.
+   Package Installer (patcher.py) is the correct path for zips.
+
+4. DON'T CHASE CACHE — IT'S ALWAYS THE CODE (2026-03-13 | v3.3.21)
+   In NetWatch's history, unexpected post-restart behavior has ALWAYS been a code issue,
+   not browser or gunicorn cache. Check rendered HTML source first.
+
+
+CURRENT STATE
+-------------
+- Pi at v3.3.21
+- Custom theme system fully operational:
+  - Import confirmed (v3.3.17)
+  - Enable/disable confirmed (v3.3.18)
+  - Preferences page JS confirmed (v3.3.19)
+  - CSS injection applying correctly confirmed (v3.3.21)
+  - Neon Dystopia confirmed working across pages
+- "Theme import/export" backlog item: COMPLETE
+- Next task: open for discussion. Top candidates:
+  1. Verify popover custom theme selection works end-to-end (not explicitly tested)
+  2. Config editor: visual indicator for newly added keys with valid defaults
+  3. System log viewer: read-only tail of pkg_update.log in Admin page
+  4. Host monitoring
+
+
+OPEN QUESTIONS / UNVERIFIED ITEMS
+----------------------------------
+- [UNVERIFIED] Popover custom theme sections: selection works (UI built, not explicitly
+  tested end-to-end this session — verify at start of next session)
+- [UNVERIFIED] Theme applies correctly on all pages beyond preferences (Neon Dystopia
+  tested; full cross-page verification not done)
+- Weekly Pi update cron: configured (v3.3.12), not yet run. Verify after first fire.
+- Web service silent-exit after delayed restart: unconfirmed potential bug
+- DB-driven registry backlog item: origin unclear, transcript research was started
+  but not completed
+- Transcript upload via Dev Documents: not yet built
+- AI_Session_Process.txt v1.2: "GETTING SUMMARY FILES ONTO THE PI" section still
+  references Gotchas_Append_SessionN.txt — stale, should be updated to reflect
+  direct-append workflow. (SummaryInstructions.txt checklist at line 952 correctly
+  distinguishes dev vs summarization sessions.)
