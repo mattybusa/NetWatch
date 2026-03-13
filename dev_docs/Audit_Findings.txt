@@ -1,0 +1,457 @@
+NETWATCH PRE-MBASE AUDIT FINDINGS
+===================================
+Date: 2026-03-13 | Pi version: v3.3.29 | Session: 11
+Status: DRAFT — in discussion. Update findings as decisions are made.
+
+This document is the output of the pre-mBase audit session. It evaluates each
+NetWatch subsystem against Networked_App_Standards_Summary.txt and answers the
+mBase extraction questions from Audit_PreMBase.txt.
+
+Design standard reference: Networked_App_Standards_Summary.txt
+Audit agenda: Audit_PreMBase.txt
+mBase forward plan: mBase_Plan.txt
+
+Overall assessment: NetWatch is in good shape. The codebase is cleaner than it
+has any right to be for something built iteratively across 10 sessions. The main
+mBase work is the Blueprint refactor and module system design — the underlying
+subsystems are solid.
+
+Deliberate deviations from standards are noted throughout. These are cases where
+the standard doesn't apply to a self-hosted Pi deployment and the deviation is
+the correct choice, not a failure.
+
+
+================================================================================
+SUBSYSTEM 1 & 2: AUTHENTICATION, SESSION MANAGEMENT, USER & ROLE MANAGEMENT
+================================================================================
+Files: auth.py, webapp.py (auth routes)
+Status: REVIEWED
+
+FINDING 1.1 — Deliberate deviation: hand-rolled auth
+Standard says use an IdP (Auth0, Keycloak). Keycloak alone requires ~512MB RAM;
+the Pi 3B+ has 1GB total. No external dependencies by design. Rolling our own
+is the only practical option here.
+Decision: ACCEPTED DEVIATION. Document in mBase as a known departure from
+the standard with the reasoning.
+
+FINDING 1.2 — bcrypt with default rounds (12)
+gensalt() called with no rounds parameter — defaults to 12. Current best
+practice. No action needed.
+Decision: OK AS-IS
+
+FINDING 1.3 — SESSION_COOKIE_SECURE not set
+HttpOnly=True and SameSite=Lax are set. SESSION_COOKIE_SECURE is missing.
+Since gunicorn serves HTTPS directly, this flag should be True — without it
+the browser won't enforce HTTPS-only cookie transmission. Low risk on a LAN
+but should be fixed before mBase inherits it.
+Decision: PENDING DISCUSSION
+Fix: One line in webapp.py — app.config["SESSION_COOKIE_SECURE"] = True
+
+FINDING 1.4 — Session storage: signed cookie, not server-side store
+Flask sessions store data in a signed cookie, not a session ID pointing to a
+server-side store. Means sessions cannot be force-invalidated without rotating
+SECRET_KEY. For a single-Pi single-user system this is acceptable. For mBase
+with multiple users, admin-forced logout becomes impossible without this.
+Decision: PENDING DISCUSSION
+Options: (a) keep as-is for mBase v1, (b) SQLite-backed session store
+
+FINDING 1.5 — Role system: generic and well-structured
+Four boolean permissions + session timeout per role. is_system flag protects
+built-in roles. Reassignment dialog on role deletion. Clean and extensible.
+Decision: EXTRACT TO MBASE AS-IS
+
+FINDING 1.6 — Password reset design: correct
+Dual-hash design (temp token in reset_token_hash, never touches password_hash).
+15-minute expiry. Battle-tested through multiple sessions.
+Decision: EXTRACT TO MBASE AS-IS
+
+FINDING 1.7 — Schema migrations: ALTER TABLE try/except, not versioned
+Column additions done via ALTER TABLE in a try/except loop — idempotent, works
+reliably. No migration version tracking table. For a single-instance deployment
+this is fine. For mBase managing multiple installs over time, a migration version
+table would be cleaner.
+Decision: PENDING DISCUSSION
+
+FINDING 1.8 — get_current_user() consistency
+Always returns a dict, never None, guest context for unauthenticated users.
+Consistent across the codebase. No action needed.
+Decision: OK AS-IS
+
+
+================================================================================
+SUBSYSTEM 3: DATABASE LAYER
+================================================================================
+Files: database.py
+Status: REVIEWED
+
+FINDING 3.1 — init_db() is idempotent
+CREATE TABLE IF NOT EXISTS throughout. Safe to call on every startup.
+Decision: OK AS-IS
+
+FINDING 3.2 — Separate c.execute() calls confirmed
+Multi-statement crash (v3.2.50f) was fixed and the pattern is clean. Each
+table gets its own call.
+Decision: OK AS-IS
+
+FINDING 3.3 — No migration versioning
+Same pattern as auth.py (ALTER TABLE try/except). See Finding 1.7.
+Decision: PENDING DISCUSSION (same decision as 1.7)
+
+FINDING 3.4 — Table separation: generic vs NetWatch-specific
+Tables in database.py are all NetWatch-specific monitoring data:
+  network_health, reset_events, speedtest_results, alerts
+These stay in NetWatch. Generic tables live in other files:
+  users, roles (auth.py) -- go to mBase
+  user_prefs (database.py) -- should move to mBase (see Finding 3.5)
+  security_events (security_log.py) -- goes to mBase
+Decision: NetWatch monitoring tables STAY IN NETWATCH
+
+FINDING 3.5 — user_prefs table mixed in with NetWatch monitoring tables
+user_prefs is defined in database.py alongside network_health, reset_events etc.
+It is a generic per-user key-value preference store with no NetWatch-specific
+logic. For mBase it belongs in auth.py or a dedicated prefs module, not in
+the application-layer database file.
+Decision: PENDING DISCUSSION
+Fix: Move user_prefs table definition and access functions out of database.py
+     into auth.py or a new base_database.py during mBase extraction.
+
+FINDING 3.6 — Connection handling: correct for gunicorn multi-worker
+Each function opens and closes its own connection. No shared connections across
+processes. Correct for SQLite under gunicorn.
+Decision: OK AS-IS
+
+
+================================================================================
+SUBSYSTEM 4: CONFIGURATION SYSTEM
+================================================================================
+Files: config_schema.py, configeditor.py, config.py
+Status: REVIEWED
+
+FINDING 4.1 — Single source of truth confirmed (v3.3.9)
+configeditor.py builds FIELDS dynamically from config_schema.py. No dual-list
+maintenance problem.
+Decision: OK AS-IS
+
+FINDING 4.2 — Config keys: clear generic vs NetWatch-specific separation
+Generic keys (go to mBase):
+  SITE_NAME, SECRET_KEY, PORT, ALERTS_ENABLED, GMAIL_USER, GMAIL_APP_PASSWORD,
+  ALERT_TO, LOCKOUT_* settings, SNAPSHOT_RETENTION, backup/retention settings
+NetWatch-specific keys (stay in NetWatch):
+  Everything in the network, relay, timing, speedtest groups
+Decision: CLEAN SEPARATION — extract generic keys to mBase schema
+
+FINDING 4.3 — Config system is generic and fully reusable
+The schema-driven UI, validation, export/import, and NEEDS SETUP badge logic
+all operate against whatever schema is defined. A new mBase project defines its
+own schema entries and the whole system works.
+Decision: EXTRACT TO MBASE AS-IS (with NetWatch-specific keys removed)
+
+FINDING 4.4 — Deliberate deviation: config.py file vs environment variables
+Standard says env vars + secrets manager. For a Pi deployment with no git and
+no cloud, config.py is pragmatic. The export/import encryption (AES-GCM 256-bit,
+browser-side) compensates for the secrets concern.
+Decision: ACCEPTED DEVIATION. Document in mBase.
+
+
+================================================================================
+SUBSYSTEM 5: PACKAGE INSTALLER / PATCHER
+================================================================================
+Files: patcher.py, updater.py
+Status: REVIEWED
+
+FINDING 5.1 — Temp file backlog fix already done
+_syntax_check() now uses tempfile.NamedTemporaryFile with delete=False, writes,
+compiles, then os.unlink() in both success and failure paths. The /tmp/__pycache__
+accumulation problem is resolved. This was fixed in v3.3.26-3.3.29.
+Decision: COMPLETE — remove from backlog
+
+FINDING 5.2 — Patcher is generic as-is
+Manifest format, version checking, snapshot/rollback, service restart logic —
+none of it is NetWatch-specific. SERVICE_MAP in updater.py references
+NetWatch-specific files but that map is the right abstraction; mBase would have
+its own map. All paths derived from __file__, no hardcoded locations.
+Decision: EXTRACT TO MBASE — SERVICE_MAP becomes project-specific config
+
+
+================================================================================
+SUBSYSTEM 6: BACKUP & RESTORE
+================================================================================
+Files: backup.sh, backup_db.sh, restore.sh, rollback.sh
+Status: NOT FULLY READ THIS SESSION
+
+FINDING 6.1 — Known good from session history
+rollback.sh rewritten in pure ASCII with no heredocs (v3.3.4). DB restore
+confirmed working (Session 9). config.py excluded from snapshots. Service
+account paths correct post-v3.3.25.
+Decision: LIGHT READ RECOMMENDED before extraction to confirm no hardcoded
+          paths remain. Flag for next code session.
+
+
+================================================================================
+SUBSYSTEM 7: SECURITY & LOGGING
+================================================================================
+Files: security_log.py, webapp.py (security routes)
+Status: REVIEWED (function signatures and patterns)
+
+FINDING 7.1 — Logging format: plain text, not structured JSON
+All modules use logging.getLogger("netwatch.modulename") — consistent naming.
+Format is plain text: log.info(f"Security: [{event_type}] user={username}...")
+Standard calls for structured JSON with correlation IDs. For a single-Pi home
+deployment this is acceptable. For mBase targeting wider distribution, structured
+logging is the right foundation.
+Decision: PENDING DISCUSSION
+Options: (a) keep plain text for mBase v1, (b) structured JSON from the start
+
+FINDING 7.2 — No correlation/request IDs
+Each request is independent with no trace ID. Related to Finding 7.1.
+Decision: PENDING DISCUSSION (same decision as 7.1)
+
+FINDING 7.3 — Security event coverage appears comprehensive
+LOGIN_FAIL, LOGIN_OK, LOGIN_DISABLED, ACCOUNT_LOCKED, ACCOUNT_DISABLED all
+logged with IP address. Config change logging needs verification.
+Decision: VERIFY config change events are logged before extraction
+
+FINDING 7.4 — Log retention policy
+prune(days=90) function exists. Whether it runs on a schedule needs verification.
+Decision: VERIFY prune is called on a schedule
+
+
+================================================================================
+SUBSYSTEM 8: SSL/TLS & CERTIFICATE MANAGEMENT
+================================================================================
+Files: gunicorn.conf.py, certmanager.py, generate_certs.sh
+Status: PARTIALLY REVIEWED
+
+FINDING 8.1 — Deliberate deviation: self-signed CA vs Let's Encrypt
+Let's Encrypt requires an internet-accessible domain. Not applicable to a
+LAN-only Pi deployment. Self-signed CA with browser certificate installation
+is the correct approach here.
+Decision: ACCEPTED DEVIATION. Document in mBase.
+
+FINDING 8.2 — TLS cipher suites not explicitly configured
+gunicorn.conf.py uses Python ssl module defaults. Should verify TLS 1.2+
+is enforced and weak ciphers are excluded. Low priority for LAN deployment.
+Decision: VERIFY TLS version range. Low priority.
+
+FINDING 8.3 — SESSION_COOKIE_SECURE (see Finding 1.3)
+Connected issue. HTTPS is confirmed active. Setting this flag is safe and correct.
+Decision: PENDING (same as Finding 1.3)
+
+
+================================================================================
+SUBSYSTEM 9: ALERT & NOTIFICATION SYSTEM
+================================================================================
+Files: alerts.py, alert_subscribers.py
+Status: NOT FULLY READ THIS SESSION — based on session history and context doc
+
+FINDING 9.1 — Alert system is generic
+ALERT_TYPES is the single source of truth. Delivery history tracked. Per-subscriber
+per-type granularity. Email via Gmail SMTP, SMS via carrier gateways. No network
+monitoring logic in the alert infrastructure itself.
+Decision: EXTRACT TO MBASE as optional module
+
+FINDING 9.2 — Alert type separation
+NetWatch-specific types (network_down, wan_down, etc.) stay in NetWatch.
+Delivery infrastructure (email, SMS, delivery history, subscriber management)
+goes to mBase. The group structure (maintenance/network/security) stays; the
+type names become project-defined.
+Decision: PENDING DISCUSSION — how to handle type registration in module system
+
+
+================================================================================
+SUBSYSTEM 10: PACKAGE UPDATE SCHEDULING
+================================================================================
+Files: pkg_update.sh, pkg_update_alert.py, webapp.py (scheduling routes)
+Status: Based on session history
+
+FINDING 10.1 — Too Pi/OS-specific for mBase core
+apt-get scheduling is Raspberry Pi OS infrastructure, not generic app framework.
+The cron management pattern (webapp route reads/writes crontab) could be
+abstracted into a generic scheduler interface in mBase, but the apt-get content
+stays out.
+Decision: STAYS IN NETWATCH as Pi-specific optional module
+          mBase gets a generic scheduler abstraction (cron interface without content)
+
+
+================================================================================
+SUBSYSTEM 11: WEB FRAMEWORK & GUNICORN
+================================================================================
+Files: webapp.py, wsgi.py, gunicorn.conf.py
+Status: REVIEWED (structure and patterns)
+
+FINDING 11.1 — API routes not versioned
+All routes are /api/... with no /v1/ prefix. Standard calls for versioning from
+day one. For a single-installation Pi this hasn't mattered. For mBase, this is
+the right time to add it — cheap to do before other projects inherit the pattern.
+Decision: PENDING DISCUSSION
+Recommendation: Add /v1/ prefix in mBase from the start. Don't retrofit NetWatch.
+
+FINDING 11.2 — No Flask Blueprints
+webapp.py is a single ~2800-line file with all routes. No Blueprint organization.
+For the module system, Blueprints are required — each module registers its own
+Blueprint. The current structure works but won't scale to modules.
+Decision: BLUEPRINT REFACTOR is part of the mBase module system work. Required,
+          not optional. This is the most significant structural change in mBase.
+
+FINDING 11.3 — Error responses: raw str(e) returned to client
+~23 locations return jsonify({"status": "error", "message": str(e)}). Exception
+messages can leak implementation details. For LAN-only internal use, low risk.
+For mBase with wider distribution, should wrap exceptions before returning.
+Decision: PENDING DISCUSSION
+Recommendation: Standard error format for mBase. Don't change NetWatch.
+
+FINDING 11.4 — No /health or /ready endpoints
+Standard lists these as required. /api/session/ping exists for session keep-alive
+but is not a health check. /health (liveness) and /ready (readiness) endpoints
+are easy wins for mBase.
+Decision: ADD TO MBASE base framework. Easy win.
+
+FINDING 11.5 — gunicorn configuration: correct for Pi
+2 sync workers, preload_app=True, SSL via cert/key. Correct for the hardware
+and deployment model.
+Decision: EXTRACT TO MBASE AS-IS (worker count may need tuning per project)
+
+
+================================================================================
+SUBSYSTEM 12: FRONTEND ARCHITECTURE
+================================================================================
+Files: templates/, static/themes.css
+Status: REVIEWED (structure and patterns)
+
+FINDING 12.1 — Theme system: clean and reusable
+CSS custom properties, body[class] selector override, .nwtheme files. Generic,
+well-documented, no NetWatch-specific assumptions.
+Decision: EXTRACT TO MBASE AS-IS
+
+FINDING 12.2 — Deliberate deviation: hand-rolled CSS vs Tailwind + shadcn/ui
+Standard recommends Tailwind CSS + shadcn/ui. NetWatch uses a hand-rolled CSS
+variable system. A full CSS migration is a significant undertaking. The current
+system works well and the theme system is a genuine strength.
+Decision: PENDING DISCUSSION
+Options: (a) keep hand-rolled CSS in NetWatch + mBase v1, evaluate Tailwind
+         for mBase v2 or new projects; (b) migrate to Tailwind as part of mBase
+
+FINDING 12.3 — JavaScript: template-scattered, no bundler
+Each page has inline <script> blocks. No bundler, no JS modules. Works for
+current scale. For the module system, modules need to contribute JS without
+editing base templates — this requires a JS loading architecture change.
+Decision: PENDING DISCUSSION — connected to Blueprint/module system design
+
+FINDING 12.4 — Bootstrap Icons CDN: only external dependency
+Single CDN call for icons. Clean. No Bootstrap CSS, no jQuery.
+Decision: OK AS-IS. Consider vendoring for offline deployments in mBase.
+
+
+================================================================================
+CROSS-CUTTING CONCERNS
+================================================================================
+
+FINDING CC.1 — Hardcoded paths: none found
+All paths use __file__-relative construction post-v3.3.25. Clean.
+Decision: OK AS-IS
+
+FINDING CC.2 — Error handling: inconsistent across codebase
+Some places return str(e) to client, some return generic messages, two places
+return raw HTTP 500 strings. See Finding 11.3.
+Decision: STANDARDIZE IN MBASE. Don't retrofit NetWatch.
+
+FINDING CC.3 — Logger naming: consistent
+All modules use logging.getLogger("netwatch.modulename"). Good pattern.
+Decision: CARRY FORWARD TO MBASE. Use "mbase.modulename" prefix.
+
+FINDING CC.4 — Inline documentation: good
+Column-level comments on CREATE TABLE, docstrings on functions, section headers
+in long files. A future Claude instance can navigate this codebase.
+Decision: MAINTAIN STANDARD. Carry forward to mBase.
+
+FINDING CC.5 — Input validation: manual .strip() and int() casting
+No schema validation library (Pydantic etc.). Standard recommends Pydantic.
+For the current scope this is adequate. For mBase with a public-facing API,
+Pydantic at route boundaries would be cleaner.
+Decision: PENDING DISCUSSION
+
+
+================================================================================
+MBASE EXTRACTION ANSWERS
+================================================================================
+
+1. GENERIC AS-IS — copy directly to mBase:
+   - auth.py (add SESSION_COOKIE_SECURE fix first)
+   - config_schema.py + configeditor.py (remove NetWatch-specific keys)
+   - security_log.py
+   - patcher.py + updater.py (SERVICE_MAP becomes project-specific)
+   - theme_manager.py
+   - certmanager.py (verify before extraction — not fully read this session)
+   - wsgi.py, gunicorn.conf.py
+   - Base templates and static/themes.css
+
+2. NEED CLEANUP BEFORE EXTRACTION:
+   - webapp.py — Blueprint refactor, /v1/ API versioning, error standardization,
+     generic routes separated from NetWatch-specific routes
+   - database.py — user_prefs moves to mBase; NetWatch monitoring tables stay
+   - Logging — plain text -> structured JSON (if decided; not a blocker)
+
+3. STAYS IN NETWATCH:
+   - main.py, monitor.py, network.py, relay.py, button.py
+   - database.py monitoring tables and all monitoring queries
+   - pkg_update.sh, pkg_update_alert.py
+   - NetWatch config keys (network, relay, timing, speedtest groups)
+   - Dashboard charts and index.html monitoring UI
+   - NetWatch-specific alert types
+
+4. MINIMUM VIABLE MBASE:
+   auth + RBAC, config system, patcher/updater, backup/rollback,
+   security logging, SSL/TLS, service account setup,
+   base web framework (Flask + gunicorn + base templates + theme system)
+
+5. RECOMMENDED MBASE (most projects need):
+   Add to minimum: alert/notification system, user management UI,
+   first-run wizard, dev docs system, health/ready endpoints,
+   generic scheduler interface (cron abstraction without content)
+
+6. EXTRACTION ORDER:
+   Follows mBase_Plan.txt Phase 1-6 order. That order is correct.
+   Phase 1 (database/auth/config/security) is the right starting point.
+   Blueprint refactor happens in Phase 2 alongside web framework extraction.
+
+7. MBASE LOCATION:
+   Separate directory on same Pi (/home/mboynton/mbase/) for now.
+   Separate repo when a second project is ready to consume it.
+   Don't add infrastructure overhead before there's a second consumer.
+
+
+================================================================================
+FINDINGS REQUIRING DECISIONS (SUMMARY)
+================================================================================
+
+These findings are marked PENDING DISCUSSION above. Decisions needed before
+extraction planning can be finalized.
+
+PRIORITY: SHOULD FIX BEFORE MBASE EXTRACTION
+  1.3 / 8.3  SESSION_COOKIE_SECURE = True (one line, one package)
+  5.1        Patcher temp file fix — ALREADY DONE, remove from backlog
+  3.5        user_prefs relocation (happens during Blueprint refactor)
+
+PRIORITY: MBASE DESIGN DECISIONS (DISCUSS BEFORE BUILDING)
+  1.4        Session storage: signed cookie vs SQLite-backed store
+  1.7 / 3.3  Migration versioning: ALTER TABLE vs migration table
+  7.1 / 7.2  Logging format: plain text vs structured JSON
+  11.1       API versioning: /v1/ prefix in mBase from day one
+  11.2       Blueprint refactor: required for module system (not optional)
+  11.3       Error response standardization: standard format for mBase
+  12.2       CSS direction: keep hand-rolled vs move to Tailwind
+  12.3       JS architecture: how modules contribute JS
+  9.2        Alert type registration in module system
+  CC.5       Input validation: manual vs Pydantic
+
+ACCEPTED DEVIATIONS (NO ACTION NEEDED — DOCUMENT IN MBASE)
+  1.1        Hand-rolled auth (IdP not practical for Pi RAM constraints)
+  4.4        config.py file vs environment variables
+  8.1        Self-signed CA vs Let's Encrypt (no public domain)
+  12.2       Hand-rolled CSS (if decision is to keep it)
+
+VERIFY BEFORE EXTRACTION (LIGHT READS)
+  6.1        Backup shell scripts: confirm no hardcoded paths post-v3.3.25
+  7.3        Config change events: confirm they are logged in security_log
+  7.4        Log pruning: confirm prune() is called on a schedule
+  8.2        TLS version: confirm TLS 1.2+ enforced

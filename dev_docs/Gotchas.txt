@@ -362,3 +362,73 @@ Wrong structure (causes hang on "validating"):
 The _find_in_zip function matches by basename, so the patcher CAN find files
 at the wrong level -- but an earlier validation step rejects the package before
 _find_in_zip is ever reached. Always match zip structure to target path structure.
+
+================================================================================
+SESSION 11 — 2026-03-13
+================================================================================
+
+GIT ON A SERVICE-ACCOUNT-OWNED DIRECTORY
+-----------------------------------------
+~/netwatch is owned by netwatch-svc:netwatch-svc with permissions drwxr-x---.
+Running git init as mboynton fails with "Permission denied" even after adding
+mboynton to the netwatch-svc group, because the directory itself lacks group
+write permission.
+
+Fix requires two steps:
+1. sudo usermod -a -G netwatch-svc mboynton (then log out and back in)
+2. sudo chmod g+w ~/netwatch
+
+Also required:
+  git config --global --add safe.directory /home/mboynton/netwatch
+  (git refuses to operate on directories owned by a different user without this)
+
+GIT FIRST PUSH WITH INITIALIZED REMOTE
+----------------------------------------
+When you create a repo on Gitea with "Initialize repository" checked (adds
+README and LICENSE), and then try to push a local repo for the first time,
+git rejects the push because the remote has commits the local doesn't have.
+
+Fix:
+  git config --global pull.rebase false
+  git pull origin main --allow-unrelated-histories
+  (resolve any conflicts, commit the merge)
+  git push -u origin main
+
+GITEA INITIAL SETUP WIZARD REWRITES app.ini
+---------------------------------------------
+The Gitea setup wizard rewrites app.ini without section headers, breaking
+the config. After running the wizard:
+1. Verify /etc/gitea/app.ini still has [server], [database], etc. headers
+2. If headers are missing, rewrite the file manually with correct structure
+3. Set INSTALL_LOCK = true in [security] to prevent wizard from reappearing
+4. Permissions must be temporarily relaxed for the wizard to write the file:
+   sudo chmod 777 /etc/gitea && sudo chmod 666 /etc/gitea/app.ini
+   Lock back down after install: sudo chmod 750 /etc/gitea && sudo chmod 640 /etc/gitea/app.ini
+
+NETPLAN CONNECTION NAME ON RASPBERRY PI OS LITE 64-BIT
+--------------------------------------------------------
+Newer Raspberry Pi OS Lite 64-bit uses NetworkManager with netplan, not dhcpcd.
+dhcpcd.service does not exist. nmcli is the correct tool.
+Connection name is NOT "Wired connection 1" -- check with: sudo nmcli con show
+Actual name on a fresh Pi is typically "netplan-eth0".
+Static IP command:
+  sudo nmcli con mod "netplan-eth0" ipv4.addresses X.X.X.X/24 \
+    ipv4.gateway X.X.X.X ipv4.dns 8.8.8.8 ipv4.method manual
+  sudo nmcli con up "netplan-eth0"
+
+GITEA BUILT-IN SSH VS SYSTEM SSH PORT CONFLICT
+------------------------------------------------
+Gitea's built-in SSH server and the system SSH daemon both want port 22.
+Setting SSH_PORT = 2222 in app.ini does not automatically make Gitea's
+built-in SSH server bind to 2222 -- it may simply not start.
+Workaround: use HTTPS with stored credentials (git credential.helper store).
+This is fully functional and passwordless after first push.
+Gitea SSH passthrough (using system SSH to route git connections to Gitea)
+is an alternative but requires additional configuration.
+
+OPENSSL SERIAL FILE PERMISSIONS
+---------------------------------
+When signing a certificate with openssl x509, if the CA serial file (.srl)
+is not writable by the current user, the signing produces a 0-byte output
+file with no clear error message -- just a permissions warning in stderr.
+Fix: sudo chmod 664 ~/netwatch/certs/ca/netwatch-ca.srl before signing.

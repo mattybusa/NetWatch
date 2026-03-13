@@ -23,18 +23,15 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.3.29
+- **Pi version:** v3.3.26
 - **Pi path:** `/home/mboynton/netwatch/`
-- **Canonical matches Pi at v3.3.29**
-- **Git:** Initialized in ~/netwatch/, remote origin at https://gitea-pi.home:3000/mboynton/netwatch.git
-- **Gitea Pi:** 192.168.100.230 | https://gitea-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos
+- **Canonical matches Pi at v3.3.26**
 
 ---
 
 ## Hardware & Network
 
 - **Hardware:** Raspberry Pi 3B+ (1GB RAM), two single relay boards, 5V/3A PSU, momentary pushbutton, USB-SATA adapter (SSD ordered, still on SD card)
-- **Gitea Pi:** Raspberry Pi 3B+, Samsung 860 EVO 500GB SSD at /mnt/gitea-data, static IP 192.168.100.230, hostname gitea-pi
 - **GPIO:** GPIO 17 → Relay 1 (Modem), GPIO 27 → Relay 2 (Router), GPIO 22 → Pushbutton
 - **Physical:** Modem → Router → AP (AP powered via PoE from router)
 - **Pi eth0:** `192.168.100.10` / gateway `192.168.100.254` (wired, .100 automation subnet)
@@ -551,12 +548,9 @@ Never include in a package zip:
 
 ---
 
-## Planning Documents (Sessions 10-11)
+## Planning Documents (Session 10)
 - **Audit_PreMBase.txt** — structured audit checklist for pre-mBase session;
   evaluates each subsystem for generic reusability. Read before audit session.
-- **Audit_Findings.txt** — output of Session 11 pre-mBase audit. Full findings
-  with decisions, accepted deviations, and pending discussion items. Read before
-  any mBase extraction work begins.
 - **mBase_Plan.txt** — forward plan for mBase framework extraction; proposed
   structure, extraction order, open questions, module system design, and
   integration standards (OpenTelemetry, ONVIF, Matter, webhooks, gRPC, SNMP).
@@ -569,17 +563,6 @@ Never include in a package zip:
   **Use this document as the design standard during all mBase and audit work.**
   When making any architectural decision, check here first. The goal is for
   mBase and all projects built on it to conform to these standards.
-
-## Git/Gitea Infrastructure (Session 11)
-- **Git initialized** in ~/netwatch/ on NetWatch Pi
-- **Remote:** https://gitea-pi.home:3000/mboynton/netwatch.git
-- **Push:** cd ~/netwatch && git add . && git commit -m "msg" && git push
-- **Credentials:** stored via credential.helper store (passwordless)
-- **Gitea Pi:** 192.168.100.230, https://gitea-pi.home:3000
-- **Repos:** mboynton/netwatch, mboynton/mbase (both private, MIT)
-- **Hosts file:** 192.168.100.230 gitea-pi.home in /etc/hosts on NetWatch Pi
-- **CA trust:** netwatch-ca.crt installed system-wide on NetWatch Pi
-- **Next feature:** git webhook auto-deployment (see CurrentTask.txt)
 
 ## Backlog (as of v3.3.26, updated Session 10)
 
@@ -612,8 +595,12 @@ Never include in a package zip:
 
 **Infrastructure**
 - SSD migration (hardware ordered)
-- ✅ Fix patcher.py temp file handling -- CONFIRMED DONE (verified Session 11; tempfile.NamedTemporaryFile with cleanup in finally block)
-- ✅ Dedicated service account (netwatch-svc): services now run as
+- Fix patcher.py temp file handling: syntax check writes .pyc files to
+  /tmp/__pycache__/ and never cleans up. After netwatch-svc transition,
+  wrong permissions caused misleading "syntax error" on install. Fix:
+  use tempfile.mkstemp(), clean up in finally block, improve error message.
+
+- [DONE v3.3.25] Dedicated service account (netwatch-svc): services now run as
   a no-login system account (--no-create-home, home=/nonexistent). netwatch-svc
   owns ~/netwatch/ files via chown; mboynton retains group access. Narrow sudoers:
   systemctl + apt only. main.py and theme_manager.py updated to use

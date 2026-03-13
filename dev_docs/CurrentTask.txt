@@ -1,29 +1,76 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-13 | Session 10 complete | v3.3.27
+Updated: 2026-03-13 | Session 11 complete | v3.3.29
 
-STATUS: Session 10 complete. Planning artifacts produced. Next: audit session.
+STATUS: Session 11 complete. Pre-mBase audit done. Gitea infrastructure live.
+Next: Build git webhook auto-deployment feature in NetWatch.
 
-LAST COMPLETED (Session 10)
+LAST COMPLETED (Session 11)
 ----------------------------
-- Backlog correction: DB-driven registry marked complete.
-- Backlog correction: Transcript upload via Dev Docs marked complete.
-- v3.3.25 -- Dedicated service account (netwatch-svc).
-- v3.3.26 -- Session 10 documentation + planning artifacts.
-- v3.3.27 -- mBase plan updated with full module system and integration standards.
-             Audit checklist updated. Gotchas updated (zip structure lesson).
+- Pre-mBase audit completed. Output: dev_docs/Audit_Findings.txt
+- Gitea Pi set up from scratch (Pi 3B+, Samsung 860 EVO 500GB SSD)
+  Static IP: 192.168.100.230 | URL: https://gitea-pi.home:3000
+- NetWatch codebase pushed to Gitea (132 files, initial commit v3.3.29)
+- mbase repo created in Gitea (empty, ready for extraction work)
+- Development workflow designed: full automated pipeline planned
+- CONFIRMED: patcher.py temp file backlog item already fixed (v3.3.26-3.3.29)
+- CONFIRMED: NetWatch CA key has no passphrase, certs valid until 2036
+- CONFIRMED: theme_manager.py PermissionError bug is fixed
 
-NEXT SESSION: PRE-MBASE AUDIT
-------------------------------
-Read Audit_PreMBase.txt before starting. That document is the agenda.
-The audit session reads code and evaluates each subsystem. No code is written.
-Output: a decision document identifying what is generic, what needs cleanup,
-and what stays in NetWatch. That feeds the mBase extraction plan in mBase_Plan.txt.
+NEXT SESSION: GIT WEBHOOK AUTO-DEPLOYMENT
+------------------------------------------
+Build git-push-triggered auto-deployment for NetWatch.
+This replaces manual Package Installer uploads with an automated pipeline.
+Package Installer remains as manual fallback.
 
-After the audit, the next major work is mBase extraction.
+Design-first required (per AI_Session_Process.txt v1.4). Before writing code,
+produce a design brief covering:
+- Webhook receiver endpoint (/api/webhook/gitea)
+- Gitea HMAC-SHA256 signature verification
+- git pull integration
+- How existing patcher logic integrates (syntax check, snapshot, restart)
+- Alert on success/failure
+- Rollback on failed deployment
 
-DESIGN-FIRST NORM (NEW AS OF SESSION 10)
------------------------------------------
+Build order (suggested):
+1. Webhook receiver + signature verification (safe, no deployment yet)
+2. git pull on verified webhook
+3. Patcher integration (syntax check + snapshot + apply)
+4. Service restart
+5. Alert notification
+6. Test end-to-end: push to Gitea -> NetWatch auto-deploys
+
+Once working in NetWatch, this becomes a mBase core feature.
+
+ALSO NEXT SESSION (lower priority):
+- SESSION_COOKIE_SECURE = True fix (one line, one package -- easy win)
+- Review Audit_Findings.txt PENDING DISCUSSION items with Matt
+- mBase extraction planning once audit decisions are finalized
+
+GITEA INFRASTRUCTURE (reference)
+----------------------------------
+Gitea Pi: 192.168.100.230 | https://gitea-pi.home:3000
+Repos: mboynton/netwatch, mboynton/mbase (both private, MIT license)
+Remote on NetWatch Pi: https://gitea-pi.home:3000/mboynton/netwatch.git
+Push command: cd ~/netwatch && git add . && git commit -m "message" && git push
+Credentials: stored via git credential.helper store (passwordless)
+NetWatch Pi hosts file: 192.168.100.230 gitea-pi.home
+NetWatch Pi CA trust: netwatch-ca.crt installed system-wide
+
+GITEA SSH NOTE
+--------------
+Built-in SSH server on port 2222 not successfully started. Deferred.
+HTTPS with stored credentials is fully functional -- no action needed.
+Investigate SSH in a future session if desired.
+
+WIREGUARD VPN
+-------------
+Planned for remote development access (travelling use case).
+Deferred until after webhook feature is built.
+Run on router if supported, else on a dedicated Pi.
+
+DESIGN-FIRST NORM (v1.4)
+--------------------------
 Before writing any code for a new feature, Claude must produce a design brief:
 - The meaningful approaches (2-4 options)
 - What each costs and buys in plain language
@@ -31,37 +78,22 @@ Before writing any code for a new feature, Claude must produce a design brief:
 Wait for explicit user approval before writing code.
 See AI_Session_Process.txt v1.4 for full details.
 
-KNOWN BUG: theme_manager.py PERMISSION ERROR
----------------------------------------------
-theme_manager.py is calling os.makedirs() on a path that resolves to /nonexistent
-(the service account home directory). This causes a PermissionError on every admin
-page load and means themes are broken. The expanduser() fix applied to main.py and
-theme_manager.py in v3.3.25 did not fully resolve this -- theme_manager.py still
-has at least one path that resolves incorrectly under the netwatch-svc account.
-
-Symptom: ERROR in app on /api/themes -- PermissionError: /nonexistent
-Impact: Themes fail to load. Non-critical but visible error on every admin load.
-Fix: Audit theme_manager.py for any remaining expanduser() or hardcoded home
-     directory references. Replace with os.path.dirname(os.path.abspath(__file__))
-     pattern. Address in audit session or as first code task after audit.
-
-PATCHER BACKLOG ITEM
----------------------
-Fix patcher.py temp file handling: syntax check writes .pyc files to
-/tmp/__pycache__/ and never cleans up. Wrong permissions cause misleading
-"syntax error" on install. Fix: use tempfile.mkstemp(), clean up in finally
-block, improve error message. Do this during audit session or as first code
-task after audit.
+RESOLVED THIS SESSION
+----------------------
+- theme_manager.py PermissionError -- CONFIRMED FIXED. Remove from tracking.
+- Patcher temp file handling -- CONFIRMED ALREADY DONE. Remove from backlog.
 
 PENDING VERIFICATION
 --------------------
-- Weekly Pi update cron (v3.3.12): not yet run. Verify after first fire.
-  NOTE: crontab entries migrated from mboynton to netwatch-svc in Session 10.
-  Verify migrated entries are correct when it fires.
+- Weekly Pi update cron (v3.3.12): not yet confirmed fired in the wild.
+  Verify: crontab -l | grep netwatch-pkg-update (run as netwatch-svc)
+- Web service silent-exit after delayed restart: unconfirmed potential bug.
 
 OPEN ITEMS
 ----------
-- /tmp/__pycache__/ will accumulate .pyc files again after next package install.
-  Workaround: sudo chmod 777 /tmp/__pycache__ if install fails with "syntax error".
-- Orphan test keys (TEST_KEY_WITH_DEFAULT, TEST_KEY_UNCONFIGURED) may remain in
-  config.py. Harmless -- validator ignores unknown keys.
+- Orphan test keys (TEST_KEY_WITH_DEFAULT, TEST_KEY_UNCONFIGURED) may remain
+  in config.py. Harmless -- validator ignores unknown keys.
+- System log viewer for pkg_update.log in Admin UI (backlog)
+- Host monitoring (longer-term, first mBase module candidate)
+- SSD migration on NetWatch Pi (Samsung 860 EVO available)
+- mBase audit decisions: see Audit_Findings.txt PENDING DISCUSSION section

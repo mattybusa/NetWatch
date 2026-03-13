@@ -1,0 +1,170 @@
+CHAT SUMMARY — SESSION 11
+==========================
+Date: 2026-03-13
+Pi version at start: v3.3.29
+Pi version at end: v3.3.29 (no code changes this session)
+Focus: Pre-mBase audit, Git/Gitea infrastructure setup, development workflow design
+
+NO CODE PACKAGES WERE INSTALLED THIS SESSION.
+All work was audit, planning, and infrastructure.
+
+================================================================================
+PART 1: PRE-MBASE AUDIT
+================================================================================
+
+Full audit of all 13 NetWatch subsystems completed against
+Networked_App_Standards_Summary.txt. Output saved as:
+  dev_docs/Audit_Findings.txt
+
+Key findings summary:
+- NetWatch is in good shape overall. Clean patterns, well-documented.
+- SESSION_COOKIE_SECURE missing (one-line fix before mBase extraction)
+- Patcher temp file backlog item confirmed ALREADY FIXED in v3.3.26-3.3.29
+- user_prefs table should move to mBase during Blueprint refactor
+- API routes not versioned (/v1/ prefix) — add in mBase from day one
+- No Flask Blueprints — required for module system, part of mBase work
+- Logging is plain text not structured JSON — acceptable deviation for now
+- Several accepted deviations documented (hand-rolled auth, self-signed CA,
+  config.py vs env vars, hand-rolled CSS)
+- mBase extraction order confirmed: follows mBase_Plan.txt Phase 1-6
+
+See Audit_Findings.txt for full findings with decisions and status.
+
+================================================================================
+PART 2: GIT/GITEA INFRASTRUCTURE
+================================================================================
+
+DECISION: Use Gitea (self-hosted git server) on a dedicated Pi 3B+.
+DECISION: Keep code private for now, flip to public when ready to share.
+DECISION: MIT license as placeholder; evaluate GPL when going public.
+DECISION: One LAN Root CA signs certs for all Pi services (already in place).
+
+GITEA PI SETUP — COMPLETED:
+Hardware: Pi 3B+, 32GB SD card, Samsung 860 EVO 500GB SSD
+OS: Raspberry Pi OS Lite 64-bit
+Hostname: gitea-pi
+Static IP: 192.168.100.230
+Username: mboynton (same as NetWatch Pi for consistency)
+SSD: Formatted ext4, mounted at /mnt/gitea-data, auto-mounts via fstab
+  UUID: 89e538f9-c72a-4b9f-a55a-b830c1ada9bd
+  fstab entry: UUID=... /mnt/gitea-data ext4 defaults,noatime 0 2
+WiFi: Disabled (wired-only server)
+
+GITEA INSTALLATION:
+Version: 1.25.5 (linux-arm-6 binary)
+Binary: /usr/local/bin/gitea
+Service account: gitea (system user, home /home/gitea)
+Data directory: /mnt/gitea-data/ (repositories, data, log, custom)
+Config: /etc/gitea/app.ini (root:gitea, 640)
+Certs: /etc/gitea/certs/ (gitea.crt, gitea.key)
+Service: gitea.service (systemd, enabled, starts on boot)
+Protocol: HTTPS on port 3000
+URL: https://gitea-pi.home:3000
+
+CERTIFICATE:
+Signed by existing NetWatch LAN CA (netwatch-ca.crt on NetWatch Pi)
+Subject: C=US, ST=Home, L=HomeNetwork, O=Gitea, CN=gitea-pi.home
+SAN: DNS:gitea-pi.home, DNS:gitea-pi, IP:192.168.100.230
+Valid: 2026-03-13 to 2036-03-10 (10 years)
+Browser already trusts it via existing CA install — no new browser config needed.
+
+NETWATCH CA STATUS (verified):
+ca/ folder confirmed on NetWatch Pi at ~/netwatch/certs/ca/
+Files: netwatch-ca.crt, netwatch-ca.key, netwatch-ca.srl
+CA key has no passphrase — ready to sign future certificates.
+NetWatch cert valid until 2036. No action needed on NetWatch certs.
+
+WINDOWS HOSTS FILE:
+192.168.100.230 gitea-pi.home (added manually)
+
+NETWATCH PI HOSTS FILE:
+192.168.100.230 gitea-pi.home (added via /etc/hosts)
+
+NETWATCH PI CA TRUST:
+netwatch-ca.crt installed to /usr/local/share/ca-certificates/
+sudo update-ca-certificates run — 1 added.
+
+GITEA REPOSITORIES CREATED:
+- mboynton/netwatch (private, MIT license, initialized)
+- mboynton/mbase (private, MIT license, initialized)
+
+NETWATCH CODEBASE IN GIT:
+git initialized in ~/netwatch/
+.gitignore created — excludes: config.py, *.bak, netwatch.db*, certs/,
+  snapshots/, logs/, __pycache__/, *.pyc, NetWatch_AI_Context_*.txt.bak
+Initial commit: "v3.3.29: Initial commit — full NetWatch codebase"
+132 files, 40,875 insertions
+Pushed to https://gitea-pi.home:3000/mboynton/netwatch.git
+Credentials stored via git credential.helper store
+
+mboynton group membership: added to netwatch-svc group for write access
+~/netwatch: chmod g+w applied
+git safe.directory: /home/mboynton/netwatch added to global config
+git defaultBranch: main set globally
+git pull.rebase: false set globally
+
+NOTE: Gitea built-in SSH server on port 2222 not successfully started.
+Using HTTPS with stored credentials instead. Passwordless push confirmed working.
+SSH debugging deferred — HTTPS workflow is fully functional.
+
+================================================================================
+PART 3: DEVELOPMENT WORKFLOW DESIGN
+================================================================================
+
+FULL AUTOMATED PIPELINE DESIGNED (not yet built):
+
+Session start:
+  - Claude fetches context doc and session docs from Gitea URL directly
+  - No manual copy-paste needed
+
+During session:
+  - Claude pushes changes directly to Gitea via Claude in Chrome
+
+Session close:
+  - Claude commits and pushes all docs + code to Gitea
+  - Gitea webhook fires to NetWatch
+  - NetWatch pulls from Gitea, runs patcher logic, restarts services
+  - Zero manual steps
+
+NEXT FEATURE DECIDED: Git webhook auto-deployment for NetWatch
+Build in NetWatch first (battle-test on known system), then extract to mBase.
+
+Components to build:
+1. Webhook receiver endpoint in webapp.py (/api/webhook/gitea)
+2. Gitea signature verification (HMAC-SHA256 secret)
+3. git pull triggered by webhook
+4. Existing patcher logic runs automatically (syntax check, snapshot, apply, restart)
+5. Alert on success or failure
+
+This makes the Package Installer the manual fallback; git push becomes
+the primary deployment method. Safe because patcher logic is preserved.
+
+REMOTE ACCESS PLAN:
+WireGuard VPN for remote development (travelling use case).
+Run on router if supported, or on a Pi if not.
+Deferred until after webhook feature is built.
+
+================================================================================
+OPEN ITEMS CARRIED FORWARD
+================================================================================
+- Gitea SSH server on port 2222 not working — deferred, HTTPS sufficient for now
+- WireGuard VPN setup — deferred
+- mBase audit decisions: pending discussions on session storage, migration
+  versioning, logging format, API versioning, Blueprint refactor, error
+  standardization, CSS direction, JS architecture, alert type registration,
+  input validation (see Audit_Findings.txt PENDING DISCUSSION items)
+- SESSION_COOKIE_SECURE fix (one line, first code package next session)
+- Weekly Pi update cron: not yet confirmed fired in the wild
+- Web service silent-exit after delayed restart: unconfirmed potential bug
+
+================================================================================
+PROCESS NOTE
+================================================================================
+Closeout going forward:
+1. Any code packages installed via Package Installer as before
+2. On NetWatch Pi: git add . && git commit -m "Session N closeout" && git push
+3. Gitea becomes source of truth — no more manual folder management on Windows
+
+Future session start (once webhook pipeline is built):
+  Claude fetches context doc from Gitea URL directly.
+  No copy-paste marathon at session start.
