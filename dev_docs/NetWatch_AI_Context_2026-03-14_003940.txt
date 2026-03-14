@@ -84,10 +84,9 @@ def my_view():
 site_name = getattr(config, "SITE_NAME", "NetWatch") or "NetWatch"
 check_interval = getattr(config, "CHECK_INTERVAL", 30)
 
-# Theme — always read from the Flask sesion object (already imported above)
-# NOTE: "sesion" is intentionally misspelled throughout this block to avoid triggering
-# a JS session-header filter when this file is fetched over HTTP. Do not correct it.
-theme = sesion.get("theme", "dark-blue")  # sesion imported via: from flask import sesion
+# Theme — always from session
+from flask import session
+theme = session.get("theme", "dark-blue")
 ```
 
 ### Valid themes
