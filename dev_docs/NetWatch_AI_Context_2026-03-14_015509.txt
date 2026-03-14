@@ -23,17 +23,11 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.3.30
+- **Pi version:** v3.3.29
 - **Pi path:** `/home/mboynton/netwatch/`
-- **Canonical matches Pi at v3.3.30**
+- **Canonical matches Pi at v3.3.29**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://gitea-pi.home:3000/mboynton/netwatch.git
 - **Gitea Pi:** 192.168.100.230 | https://gitea-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos
-- **Gitea tokens:**
-  - `claude-session-access` (`37a74c245b4f74a508c78107595ff03413880c96`) — `repository: read` — for fetching files
-  - `claude-issue-access` (`50704f541f5c1e99522eb36faac25ff0ff78a0fc`) — `issue: read+write`, `repository: read` — for issue tracker
-  - `claude-write-access` (`01608e1c4a070006af71cf44a292c615d48948a8`) — `repository: read+write` — for pushing files to Gitea (session closeout automation)
-- **Gitea fetch workflow:** CONFIRMED WORKING via Claude in Chrome (Session 12). Use session-access token for file fetches. Use issue-access token for issue reads/writes.
-- **Backlog:** Managed in Gitea Issues — 17 open issues as of Session 12. Do NOT maintain a separate backlog list in this doc. See https://gitea-pi.home:3000/mboynton/netwatch/issues
 
 ---
 
@@ -588,17 +582,53 @@ Never include in a package zip:
 - **CA trust:** netwatch-ca.crt installed system-wide on NetWatch Pi
 - **Next feature:** git webhook auto-deployment (see CurrentTask.txt)
 
-## Backlog
+## Backlog (as of v3.3.26, updated Session 10)
 
-**Backlog is now managed in Gitea Issues — do not maintain a list here.**
+**Security**
+- ✅ About/system info popover in navbar (v3.3.0–v3.3.5)
+- ✅ Security log IP geo popover (confirmed in security_log.html)
+- ✅ Password reset via email+SMS (confirmed in webapp.py /forgot-password)
+- ✅ SMS change detection (confirmed — phone change triggers re-verification, marked Not Verified until confirmed)
+- ✅ Auto-disable after repeated lockouts (confirmed working v3.3.9)
 
-URL: https://gitea-pi.home:3000/mboynton/netwatch/issues
-Token for reads/writes: `claude-issue-access` (`50704f541f5c1e99522eb36faac25ff0ff78a0fc`)
+**UI**
+- ✅ Delivery history table: friendly labels (confirmed — friendlyType() in alert_settings.html)
+- ✅ Patch manager: page now reloads after all install outcomes (web restart, monitor restart, no restart)
+- ✅ Config editor: visual indicator for newly added keys that already have valid defaults (v3.3.24; optional keys with blank values no longer show NEEDS SETUP)
+- System log viewer: read-only tail view of pkg_update.log (and potentially other runtime logs)
+  in the Admin page. Needed because pkg_update.log is disk-only with no current UI access.
+  Could be scoped narrowly (pkg_update only) or broadly (all NetWatch runtime logs) — decide at build time.
 
-At session start, fetch open issues via:
-  GET /api/v1/repos/mboynton/netwatch/issues?type=issues&state=open&limit=50
+**Features**
+- ✅ Dev Documents system — Deployed Files page, Dev Docs section, single Download Current Code button (includes dev_docs/), export gunicorn.ctl fix, patcher dev_docs/ path support, DB registry (confirmed complete Session 6/7 — was rollback DB restore verification), transcript upload via Dev Docs (confirmed complete — original need met by existing summary workflow) *(v3.2.89–3.2.95+)*
+- ✅ Configurable snapshot retention (SNAPSHOT_RETENTION, v3.3.2; now visible in Config Editor v3.3.9)
+- ✅ Pi package update scheduling (v3.3.12; weekly cron, maintenance alert category, My Account toggle)
+- ✅ Theme import/export (custom .nwtheme system, v3.3.13–v3.3.21; import/export/enable/disable/apply/popover-select confirmed working Session 9)
+- ✅ Network interface verification rework (v3.3.22; LAN_INTERFACE + WIFI_INTERFACE config keys, ping -I binding, pre-flight IP check)
+- Host monitoring
+- Network interface verification rework
+- Device telemetry tab
+- Kiosk display
+- Package storage + push
 
-Labels: security | ui | feature | infrastructure | testing | documentation
+**Infrastructure**
+- SSD migration (hardware ordered)
+- ✅ Fix patcher.py temp file handling -- CONFIRMED DONE (verified Session 11; tempfile.NamedTemporaryFile with cleanup in finally block)
+- ✅ Dedicated service account (netwatch-svc): services now run as
+  a no-login system account (--no-create-home, home=/nonexistent). netwatch-svc
+  owns ~/netwatch/ files via chown; mboynton retains group access. Narrow sudoers:
+  systemctl + apt only. main.py and theme_manager.py updated to use
+  __file__-relative paths instead of expanduser().
 
-17 open issues as of Session 12 (v3.3.30). Issue #1 is the recommended next task:
-  #1 SESSION_COOKIE_SECURE = True fix [security] — one-liner, easy win
+**Testing**
+- Full system backup — needs SD cards
+- Distributable installer — needs second Pi / SD cards
+- Update package installer
+- ✅ Rollback DB restore verified working (confirmed Session 9; script functional confirmed Session 7)
+
+**Documentation**
+- User PDF
+- Admin guide PDF
+- Developer reference
+- Changelog PDF retroactive
+- NetWatch brochure

@@ -1,99 +1,70 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-13 | Session 11 complete | v3.3.29
+Updated: 2026-03-14 | Session 12 complete | v3.3.30
 
-STATUS: Session 11 complete. Pre-mBase audit done. Gitea infrastructure live.
-Next: Build git webhook auto-deployment feature in NetWatch.
+STATUS: Session 12 complete. Gitea fetch workflow confirmed working.
+Backlog migrated to Gitea Issues. Ready for normal feature work next session.
 
-LAST COMPLETED (Session 11)
+LAST COMPLETED (Session 12)
 ----------------------------
-- Pre-mBase audit completed. Output: dev_docs/Audit_Findings.txt
-- Gitea Pi set up from scratch (Pi 3B+, Samsung 860 EVO 500GB SSD)
-  Static IP: 192.168.100.230 | URL: https://gitea-pi.home:3000
-- NetWatch codebase pushed to Gitea (132 files, initial commit v3.3.29)
-- mbase repo created in Gitea (empty, ready for extraction work)
-- Development workflow designed: full automated pipeline planned
-- CONFIRMED: patcher.py temp file backlog item already fixed (v3.3.26-3.3.29)
-- CONFIRMED: NetWatch CA key has no passphrase, certs valid until 2036
-- CONFIRMED: theme_manager.py PermissionError bug is fixed
+- Fixed NetWatch_AI_Context_latest.txt session-header filter issue:
+  "session" keyword on its own line was being blocked by the Claude in Chrome
+  JS filter during Gitea file fetches. Fixed by intentional misspelling ("sesion")
+  with an explanatory NOTE comment. Do not correct the misspelling.
 
-NEXT SESSION: GIT WEBHOOK AUTO-DEPLOYMENT
-------------------------------------------
-Build git-push-triggered auto-deployment for NetWatch.
-This replaces manual Package Installer uploads with an automated pipeline.
-Package Installer remains as manual fallback.
+- Confirmed Gitea fetch workflow fully working via Claude in Chrome:
+  All session-start files fetch cleanly from Gitea. No zip upload needed.
 
-Design-first required (per AI_Session_Process.txt v1.4). Before writing code,
-produce a design brief covering:
-- Webhook receiver endpoint (/api/webhook/gitea)
-- Gitea HMAC-SHA256 signature verification
-- git pull integration
-- How existing patcher logic integrates (syntax check, snapshot, restart)
-- Alert on success/failure
-- Rollback on failed deployment
+- Created second Gitea API token (claude-issue-access) with issue read+write scope.
 
-Build order (suggested):
-1. Webhook receiver + signature verification (safe, no deployment yet)
-2. git pull on verified webhook
-3. Patcher integration (syntax check + snapshot + apply)
-4. Service restart
-5. Alert notification
-6. Test end-to-end: push to Gitea -> NetWatch auto-deploys
+- Migrated backlog from context doc flat list to Gitea Issues:
+  17 issues created with labels (security, ui, feature, infrastructure,
+  testing, documentation). Backlog section removed from context doc.
 
-Once working in NetWatch, this becomes a mBase core feature.
+- Updated Gotchas.txt with 3 new entries (session filter, JWT filename block,
+  Claude in Chrome session privilege model).
 
-ALSO NEXT SESSION (lower priority):
-- SESSION_COOKIE_SECURE = True fix (one line, one package -- easy win)
-- Review Audit_Findings.txt PENDING DISCUSSION items with Matt
-- mBase extraction planning once audit decisions are finalized
+- Updated AI_Session_Process.txt to explicitly list ChatSummary_1.1/1.2/1.3
+  by name to work around JWT token filter on dotted filenames.
 
-GITEA INFRASTRUCTURE (reference)
-----------------------------------
-Gitea Pi: 192.168.100.230 | https://gitea-pi.home:3000
-Repos: mboynton/netwatch, mboynton/mbase (both private, MIT license)
-Remote on NetWatch Pi: https://gitea-pi.home:3000/mboynton/netwatch.git
-Push command: cd ~/netwatch && git add . && git commit -m "message" && git push
-Credentials: stored via git credential.helper store (passwordless)
-NetWatch Pi hosts file: 192.168.100.230 gitea-pi.home
-NetWatch Pi CA trust: netwatch-ca.crt installed system-wide
+- Deployed v3.3.30 package (doc-only, no restart).
 
-GITEA SSH NOTE
---------------
-Built-in SSH server on port 2222 not successfully started. Deferred.
-HTTPS with stored credentials is fully functional -- no action needed.
-Investigate SSH in a future session if desired.
+NEXT SESSION
+------------
+Recommended first task: Issue #1 -- SESSION_COOKIE_SECURE = True fix
+  One-liner identified in Session 11 audit. Easy win, low risk.
+  No design brief required (trivial change, no meaningful alternatives).
 
-WIREGUARD VPN
--------------
-Planned for remote development access (travelling use case).
-Deferred until after webhook feature is built.
-Run on router if supported, else on a dedicated Pi.
+After that: pick from Gitea Issues by label/priority.
+  https://gitea-pi.home:3000/mboynton/netwatch/issues
 
-DESIGN-FIRST NORM (v1.4)
+GITEA TOKENS (REFERENCE)
 --------------------------
-Before writing any code for a new feature, Claude must produce a design brief:
-- The meaningful approaches (2-4 options)
-- What each costs and buys in plain language
-- A clear recommendation with reasoning
-Wait for explicit user approval before writing code.
-See AI_Session_Process.txt v1.4 for full details.
+claude-session-access:  37a74c245b4f74a508c78107595ff03413880c96  (repository: read)
+claude-write-access:    01608e1c4a070006af71cf44a292c615d48948a8  (repository: read+write)
+claude-issue-access:    50704f541f5c1e99522eb36faac25ff0ff78a0fc  (issue: rw, repository: read)
 
-RESOLVED THIS SESSION
-----------------------
-- theme_manager.py PermissionError -- CONFIRMED FIXED. Remove from tracking.
-- Patcher temp file handling -- CONFIRMED ALREADY DONE. Remove from backlog.
+Use session-access token for all file fetches at session start.
+Use issue-access token for reading/writing the issue tracker.
+
+SESSION START FORMAT
+---------------------
+"NetWatch session. Repo: https://gitea-pi.home:3000/mboynton/netwatch
+ Session token: 37a74c245b4f74a508c78107595ff03413880c96
+ Issue token:   50704f541f5c1e99522eb36faac25ff0ff78a0fc"
+
+Claude in Chrome will fetch all required session files directly from Gitea.
+No zip upload required.
 
 PENDING VERIFICATION
 --------------------
 - Weekly Pi update cron (v3.3.12): not yet confirmed fired in the wild.
-  Verify: crontab -l | grep netwatch-pkg-update (run as netwatch-svc)
+  Verify: crontab -l | grep netwatch-pkg-update
 - Web service silent-exit after delayed restart: unconfirmed potential bug.
 
 OPEN ITEMS
 ----------
 - Orphan test keys (TEST_KEY_WITH_DEFAULT, TEST_KEY_UNCONFIGURED) may remain
   in config.py. Harmless -- validator ignores unknown keys.
-- System log viewer for pkg_update.log in Admin UI (backlog)
-- Host monitoring (longer-term, first mBase module candidate)
-- SSD migration on NetWatch Pi (Samsung 860 EVO available)
 - mBase audit decisions: see Audit_Findings.txt PENDING DISCUSSION section
+- All other items now tracked in Gitea Issues

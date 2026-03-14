@@ -68,6 +68,13 @@ Fetch each of these from Gitea using the raw URL format above. Read completely.
 
 3. ChatSummary_1.txt through ChatSummary_N.txt (all base summaries, in order)
    Historical context. Read all of them. Note the progression.
+   IMPORTANT: Always fetch these three files by explicit URL — they are NOT reliably
+   returned by the Gitea API directory listing because their dotted filenames
+   (1.1, 1.2, 1.3) are blocked by a JWT token filter in the browser extension:
+     ChatSummary_1.1.txt
+     ChatSummary_1.2.txt
+     ChatSummary_1.3.txt
+   Then fetch ChatSummary_2.txt through ChatSummary_N.txt in order.
 
 4. CurrentTask.txt
    What was being worked on when the last session ended. This is where to start.
