@@ -23,3 +23,12 @@ __pycache__/
 
 # Context document backups
 NetWatch_AI_Context_*.txt.bak
+
+# GPG keyring — user-specific, contains keys, never commit
+.gnupg/
+
+# Runtime logs — generated, not source
+pkg_update.log
+
+# Gitea socket (gunicorn)
+gunicorn.ctl
