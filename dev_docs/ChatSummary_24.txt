@@ -1,0 +1,126 @@
+NETWATCH CHAT SUMMARY — SESSION 24
+====================================
+Date: 2026-03-20
+Starting version: v3.3.61 (zip label and context doc matched)
+Ending version: v3.3.69
+Summary: Dashboard system health card, uptime card overflow fix, dashboard bottom row
+  layout (required multiple iterations), range button overflow fix, row height
+  reduction, and changelog custom theme inheritance fix.
+
+SCOPE NOTE: One planned feature (system health card) plus several discovered UI issues
+  fixed along the way. Seven packages shipped due to layout iteration arc.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+v3.3.63 — System health card + uptime overflow fix
+  New /api/system_health route (guest_allowed) backed by database.get_system_health_stats().
+  Returns: age_seconds (time since last network_health record), expected_interval
+  (config.CHECK_INTERVAL), overdue flag (age > 2.5× interval), disk_free_gb,
+  disk_free_pct. New card added to dashboard as a bottom row with three columns:
+  Monitor (● OK / ● OVERDUE dot), Last Check (age formatted as Xs/Xm/Xh ago + interval
+  sublabel), Disk Free (GB + % free, colors at <20% warn, <10% error).
+  Also fixed uptime card column overflow: col-3 → col-6 col-sm-3 so four uptime stats
+  wrap to 2×2 grid at narrow widths instead of squeezing together.
+  New CSS classes in themes.css: .sh-dot, .sh-dot-ok, .sh-dot-warn, .sh-dot-error,
+  .sh-dot-muted.
+  updateSystemHealthCard() JS function added, wired into refresh() loop.
+
+v3.3.64–v3.3.66 — Bottom row layout iteration arc
+  Goal: Last Reset Event, Auto Resets, and System Health all on one row.
+  v3.3.64: Bootstrap col-md-5/3/4 — Last Reset took full row, others dropped.
+  v3.3.65: Tried col-sm-5/3/4 — all three stacked individually (wrong direction).
+  v3.3.66: Abandoned Bootstrap grid entirely. Replaced with plain flexbox:
+    display:flex; flex-wrap:wrap; gap:var(--gap,1rem)
+    flex:5 / flex:3 / flex:4 with min-width on each card.
+  This reliably keeps the three cards side by side at normal widths and wraps
+  individually when genuinely too narrow. Bootstrap's col-* was unreliable here —
+  do not revert to it for this row.
+
+v3.3.67 — Spacing and button overflow fixes
+  Added margin-top:var(--gap) to the bottom flex row — it was flush against the
+  row above with no gap.
+  Speedtest and Auto Resets button groups: added flex-wrap:wrap + row-gap:6px to
+  the header div and flex-wrap:wrap to the button container so buttons wrap inside
+  the card instead of overflowing the border at narrow widths.
+
+v3.3.68–v3.3.69 — Uptime/speedtest row height reduction
+  v3.3.68: Reduced p-4 → p-3 on both cards and font 2rem → 1.5rem. Fit on screen
+  but fonts felt too small.
+  v3.3.69: Restored font to 2rem. Padding reduction alone (p-4 → p-3) was sufficient
+  to fit the full dashboard on screen without scrolling. Confirmed working.
+
+Changelog custom theme fix (shipped in v3.3.65/v3.3.66)
+  Changelog pages (release notes + full changelog) are standalone HTML — they never
+  go through Jinja/base.html so the custom CSS injection context processor doesn't
+  apply. Fix: added _build_changelog_palette() helper in webapp.py that reads the
+  current user's custom_color_scheme pref, loads it via theme_manager.get_theme(),
+  and maps CSS variable names to patcher palette keys. Both changelog routes now
+  call this and pass the result as custom_palette to the generator functions.
+  patcher.py generator functions updated with optional custom_palette parameter —
+  if provided, t is copied and updated with the override values.
+  Root cause of initial failure: helper called load_theme() which doesn't exist;
+  correct function is get_theme(). Fixed in v3.3.66.
+  Confirmed working by user.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- Bootstrap col-md-5/3/4 for three-card bottom row: Last Reset card took full width,
+  others wrapped. Even though 5+3+4=12, Bootstrap's grid was not reliable here with
+  this specific card content. Root cause not fully determined — flexbox sidestepped it.
+- Bootstrap col-sm-5/3/4: worse, all three cards stacked individually.
+- Font reduction to 1.5rem: effective for height but visually too small. Reverted;
+  padding reduction alone was sufficient.
+- Changelog theme fix first attempt: called theme_manager.load_theme() which does not
+  exist (correct: get_theme()). Returned None silently every time.
+
+
+DECISIONS MADE
+--------------
+- Bottom row uses plain flexbox, not Bootstrap grid. Do not revert.
+- System health card placed in same row as Last Reset and Auto Resets, not a separate
+  full-width row. Drops to stacked on narrow windows.
+- Uptime/speedtest row uses p-3 padding going forward. Not a global change — only
+  this row. The hero cards above remain p-4.
+- Changelog custom theme: palette override approach (not full CSS injection) keeps
+  patcher.py self-contained with no Flask/Jinja dependency.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- None from this session.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Dashboard system health card (v3.3.63–v3.3.69)
+- Uptime card overflow fix at narrow widths (v3.3.63)
+- Changelog pages inherit active custom color scheme (v3.3.65/v3.3.66)
+
+No new backlog items added.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+None. All detail captured in this base summary.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None. The Bootstrap-vs-flexbox layout lesson and the load_theme typo are documented
+in this summary and in CurrentTask.txt. Neither is a recurring pattern worth a
+Gotchas entry — the flexbox approach is now the established pattern for this row.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.69
+- All services running normally
+- Dashboard confirmed fitting on screen without scrolling (user verified)
+- Next task: open — top candidates:
+    Backup Manager (browse/restore from local archive, configurable retention)
+    MFA (design brief first)
+    Security audit

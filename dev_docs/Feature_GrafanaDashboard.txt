@@ -1,0 +1,146 @@
+FEATURE: Grafana Dashboard for NetWatch Logs
+============================================
+Type: Feature (infrastructure / observability)
+Date: 2026-03-15
+Sessions: Session 18
+Outcome: Complete — dashboard operational in Grafana on ops-pi
+
+BACKGROUND
+----------
+Promtail was confirmed shipping structured JSON logs from the NetWatch Pi to
+Loki on ops-pi at the end of Session 17. The only way to view those logs was
+Grafana Explore with a manual query. This feature builds a persistent named
+dashboard providing at-a-glance operational visibility into NetWatch health.
+
+The structlog rework (v3.3.37) established the log schema. All NetWatch log
+lines are structured JSON with consistent field names. This dashboard is the
+first consumer of that structured data.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Initial latency query (no aggregation):
+  {host="netwatch-pi"} | json | event="health_check" | unwrap latency_ms
+                                                        | __error__=""
+Result: "No data" in the Time series panel.
+Cause: Loki's unwrap operator extracts numeric values from log fields, but
+  requires a range aggregation function to produce a metric series Grafana
+  can plot. Without avg_over_time or similar, Loki returns raw log data, not
+  a plottable metric. The Type: Range setting in the query options confirmed
+  it was returning log-type data, not metric-type.
+Fix: Wrap in avg_over_time([1m]).
+
+Multiple legend entries:
+After adding avg_over_time, the panel showed dozens of "Latency" legend
+entries instead of one line.
+Cause: Loki returns one series per unique combination of stream labels. The
+  NetWatch log stream has multiple label dimensions, producing multiple series.
+Fix: Wrap the entire expression in avg() to collapse all streams into a single
+  averaged line. Final pattern: avg(avg_over_time(...[1m])).
+
+
+WHAT WORKED
+-----------
+Schema verification:
+Before building any panels, a live log line was retrieved from Grafana Explore:
+  {host="netwatch-pi"} | json
+Confirmed field names from a health_check log line:
+  service, event, level, timestamp, lan, wan, wifi, dns,
+  latency_ms, packet_loss, healthy
+Reset event fields confirmed from monitor.py code read (no live reset available):
+  event="reset_performed" with reset_type (modem/router/full) and reason
+  event="initiating_reset" with reset_type and trigger
+
+Standard query pattern for metric panels:
+  avg(avg_over_time({host="netwatch-pi"} | json | <filters>
+    | unwrap <field> | __error__="" [1m]))
+The __error__="" filter removes lines where JSON parsing failed (keeps chart
+clean). The [1m] bucket provides 1-minute averaging granularity. The outer
+avg() collapses multiple Loki streams to a single line.
+
+PANEL 1 — Health Check Latency
+  Type: Time series
+  Query: avg(avg_over_time({host="netwatch-pi"} | json | event="health_check"
+           | unwrap latency_ms | __error__="" [1m]))
+  Settings: Unit = milliseconds (ms), Display name = Latency
+  Confirmed: Plotting at ~20ms, single line in legend.
+
+PANEL 2 — Packet Loss
+  Type: Time series
+  Query: avg(avg_over_time({host="netwatch-pi"} | json | event="health_check"
+           | unwrap packet_loss | __error__="" [1m]))
+  Settings: Unit = Percent (0-100), Display name = Packet Loss
+  Confirmed: Flat line at 0 on healthy system.
+
+PANEL 3 — Reset Events
+  Type: Logs
+  Query: {host="netwatch-pi"} | json | event="reset_performed"
+  Settings: Default Logs panel settings — shows raw structured log lines
+  Confirmed: No data (no resets have occurred — correct behavior).
+  Note: Will populate automatically when a reset occurs. The reset_type and
+  reason fields will be visible inline in the log line display.
+
+PANEL 4 — Errors & Warnings
+  Type: Time series
+  Query: sum(count_over_time({host="netwatch-pi"} | json
+           | level=~"error|warning" [5m]))
+  Settings: Unit = short, Display name = Count, No value = 0
+  Confirmed: Shows 0 (clean system — correct behavior).
+
+PANEL 5 — Monitor Service - Last Seen
+  Type: Stat
+  Query: {host="netwatch-pi"} | json | service="monitor"
+  Settings: Stat styles → Show = Last, Fields = Time
+  Confirmed: Showing 2026-03-15 02:37:19
+
+PANEL 6 — Web Service - Last Seen
+  Type: Stat
+  Query: {host="netwatch-pi"} | json | service="web"
+  Settings: Stat styles → Show = Last, Fields = Time
+  Confirmed: Showing 2026-03-15 02:37:22
+
+PANEL 7 — Unhealthy Check Rate
+  Type: Stat
+  Query: sum(count_over_time({host="netwatch-pi"} | json | event="health_check"
+           | healthy="false" [6h]))
+         / sum(count_over_time({host="netwatch-pi"} | json
+           | event="health_check" [6h])) * 100
+  Settings: Unit = Percent (0-100), Display name = Unhealthy %, No value = 0%
+  Confirmed: Showing 0% on healthy system.
+  Note: The [6h] window is hardcoded in the query. It does not track the
+  dashboard time range selector automatically. This is a known limitation —
+  see KNOWN LIMITATIONS below.
+
+LAYOUT:
+  Row 1 (full width): Health Check Latency | Packet Loss
+  Row 2: Reset Events (widest, ~35%) | Errors & Warnings | Unhealthy Check Rate
+         | Monitor Last Seen | Web Last Seen
+  Dashboard saved as "NetWatch" in Grafana on ops-pi (http://ops-pi.home:3001).
+
+TIME RANGE:
+  Dashboard-level time range selector controls all panels simultaneously.
+  Per-panel time overrides are static design-time settings, not dynamic user
+  controls. Dashboard selector is the primary interaction model for exploration.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Unhealthy Check Rate uses a hardcoded [6h] window rather than the dashboard
+  time variable. Grafana supports $__range and $__interval variables for dynamic
+  window sizing but this requires more complex LogQL. Deferred — the 6h window
+  is reasonable for operational use.
+
+- Reset Events panel shows "No data" when no resets have occurred. This is
+  correct behavior but can look like a broken panel to a new viewer. No visual
+  "empty state" message is possible in the Logs panel type without data.
+
+- Dashboard appearance on wider time ranges (7D, 30D) not tested during
+  build. Behavior confirmed only on Last 6 hours.
+
+- Per-panel interactive time range selection (like NetWatch's segmented buttons)
+  is not possible in Grafana without custom plugin development. The dashboard-
+  level selector is the correct alternative.
+
+- Alloy migration (Promtail EOL March 2026): Promtail is EOL but will continue
+  working. The Pi is ARM64 so Alloy is viable when migration is needed.
+  Not urgent.

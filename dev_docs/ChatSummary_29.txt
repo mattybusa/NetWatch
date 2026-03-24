@@ -1,0 +1,166 @@
+NETWATCH CHAT SUMMARY — SESSION 29
+====================================
+Date: 2026-03-23
+Starting version: v3.3.87
+Ending version: v3.3.89
+Summary: Two features. MFA verification codes redacted from alert history storage
+  (v3.3.88). Role-based alert permissions redesign: new Alerts tab in Users & Roles,
+  per-type Available/Email/SMS controls per role, standalone subscriber defaults via
+  sentinel role_id=0, data-driven replacement of hardcoded ALLOWED_GROUPS in My Account
+  (v3.3.89).
+
+SCOPE NOTE: Two distinct arcs. Expanded summary produced for the alert permissions
+  feature. Redaction fix is fully captured in the base summary.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+v3.3.88 — MFA verification code redaction
+  _redact_sensitive() in database.py had one pattern (temp password). Added two more:
+  - Email-format MFA code: "Your NetWatch login verification code is: X"
+  - SMS-format MFA code: "Your login code: X (expires in N min)"
+  Both are now stripped at write time in log_alert() before the code reaches the DB.
+  The SMS path calls alerts._send_one() directly and bypasses log_alert() entirely —
+  SMS MFA codes were never stored in the DB. Only the email path was the live issue.
+  Existing plaintext records in the DB are not retroactively cleared but are expired
+  codes at this point. Confirmed working by user — [REDACTED] appears in the log.
+
+v3.3.89 — Role-based alert permissions + standalone subscriber defaults
+  (see Feature_RoleAlertPermissions.txt)
+
+  DB change: role_alert_defaults gains an 'available' INTEGER DEFAULT 1 column.
+  ALTER TABLE migration is safe for existing installs — all existing rows get
+  available=1. New seed block in init_alert_subscribers_db() seeds role_id=0
+  (standalone subscriber sentinel) from ALERT_TYPES global defaults on every startup
+  via INSERT OR IGNORE.
+
+  alert_subscribers.py changes:
+  - seed_role_alert_defaults(): available=1 added to INSERT
+  - update_role_alert_defaults(): writes available flag; when available=0, immediately
+    purges that alert_type key from alert_overrides JSON for all subscribers in the role
+    (via JOIN users WHERE role_id=?). Override purge does not apply to standalones
+    (user_id IS NULL) — deliberate limitation documented below.
+  - get_active_recipients(): availability gate added. Standalones use
+    lookup_role_id=0 instead of role_id=None, so their defaults resolve from the
+    sentinel row rather than falling through to global defaults.
+
+  webapp.py change:
+  - type_settings_user endpoint: now includes available field per alert type, resolved
+    from the current user's role's role_alert_defaults row. Used by preferences.html
+    to gate subscription visibility.
+
+  templates/admin_users.html:
+  - New Alerts tab (third tab alongside Users and Roles).
+  - Old "Alert Defaults by Role" collapsible removed from Roles tab entirely.
+  - Alerts tab renders a table: roles as columns, alert types as rows grouped by
+    category (Network / Security / Maintenance with bold group headers).
+  - Three checkboxes per role/type cell: Available, Email (✉), SMS (📱).
+  - Email and SMS cells dim (opacity 0.35, pointer-events:none) when Available is
+    unchecked. Restored when Available is rechecked.
+  - Subscribers sentinel column (role_id=0) appears at right edge, separated by a
+    vertical border, labelled "Subscribers / no account". Represents standalone
+    subscribers managed by the admin.
+  - Guest role excluded — no accounts, no delivery addresses.
+  - Save button per role column. Save message appears below the grid.
+  - Grid compressed vertically: tighter padding on all rows, 14px→13px checkboxes,
+    reduced margins on description and save message.
+  - showTab('alerts') wires to loadAlertsTab() (lazy load on first open).
+  - Role create/delete callbacks reset _alertsTabLoaded=false so grid reloads
+    fresh on next open rather than showing stale data.
+
+  templates/preferences.html:
+  - Removed hardcoded ALLOWED_GROUPS constant and USER_ROLE check.
+  - buildAlertTypeGrids() now filters by val.available from the API response.
+    Types with available=0 for the user's role are simply absent from the grid.
+  - Section headers (Security, Maintenance) only render when the group has
+    at least one available type — no empty headers shown.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- First package build (before this fix) had HTML files at zip root rather than under
+  templates/ subdirectory. Rebuilt with correct directory structure per user's
+  prior experience that patcher requires files in the correct subdirectory.
+
+- Two earlier package builds of v3.3.89 were superseded (compression and standalone
+  column were added iteratively). Final build is the definitive one.
+
+
+DECISIONS MADE
+--------------
+- MFA codes redacted at write time (in log_alert), not at read time. They should
+  never reach storage in plaintext. Read-time redaction kept as belt-and-suspenders
+  for any codes already in the DB.
+
+- role_id=0 as the standalone subscriber sentinel. Deliberate choice, not a shortcut.
+  Full analysis performed:
+  - delete_role() cannot accidentally delete it (role_id=0 does not exist in the
+    roles table; the lookup returns "not found" before delete_role_alert_defaults runs).
+  - Override purge on available=0 does not work for standalones (no user account to
+    JOIN on). Accepted — standalones don't have self-service override UI so in practice
+    they never have overrides to purge.
+  - type_settings_user endpoint irrelevant for standalones (they have no My Account).
+  - Seed runs every startup via INSERT OR IGNORE — new ALERT_TYPES automatically seeded.
+
+- Available=0 enforces at send time (get_active_recipients skips the subscriber) AND
+  purges existing overrides immediately on save. User confirmed: if a role has a type
+  toggled off, it goes away regardless of prior state.
+
+- Guest role excluded from Alerts tab. Guests have no accounts, no verified email/SMS,
+  nowhere to deliver alerts.
+
+- Packages built with files in subdirectories matching Pi filesystem layout
+  (templates/, dev_docs/) per established practice.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [UNVERIFIED] v3.3.89 install confirmed but full end-to-end test (toggle Available
+  off for a role, verify delivery suppressed at send time) not explicitly confirmed
+  in session. Behavior of available=0 in get_active_recipients is correct by code
+  inspection but live fire test was not run.
+
+- [PENDING] Override purge for standalone subscribers (role_id=0): if available=0
+  is set for standalones, any overrides in their alert_overrides JSON are NOT purged
+  (the JOIN users WHERE role_id=? approach doesn't reach them). In practice standalones
+  have no self-service UI so overrides are unlikely, but the gap exists if overrides
+  are ever set programmatically on their behalf.
+
+- Existing plaintext MFA codes in the DB (pre-v3.3.88) not retroactively cleared.
+  They are expired codes; no operational risk. A manual sqlite3 cleanup command was
+  provided in session if desired.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- MFA verification codes redacted from alert history (v3.3.88)
+- Role-based alert permissions: Alerts tab, Available flag, standalone defaults,
+  data-driven My Account filtering (v3.3.89)
+
+No new backlog items added.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_RoleAlertPermissions.txt — Full detail on the Alerts tab, DB schema change,
+  alert_subscribers.py changes, webapp.py endpoint change, preferences.html change,
+  sentinel role_id=0 design, and known limitations.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None. No new hard-learned lessons this session. The directory structure packaging
+rule is already in Gotchas.txt and AI_Session_Process.txt PACKAGING RULES.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.89
+- All services running normally
+- Next task: open — top candidates per backlog:
+    Security audit (attack surface review for package installer, auth/session hardening)
+    Kiosk display (operational quick-glance status view)
+    Package storage + distribution story (design together with distributable installer,
+      update package installer, git strategy)

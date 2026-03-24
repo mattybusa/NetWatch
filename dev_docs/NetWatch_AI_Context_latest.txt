@@ -23,24 +23,20 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.3.30
+- **Pi version:** v3.3.90
 - **Pi path:** `/home/mboynton/netwatch/`
-- **Canonical matches Pi at v3.3.30**
-- **Git:** Initialized in ~/netwatch/, remote origin at https://gitea-pi.home:3000/mboynton/netwatch.git
-- **Gitea Pi:** 192.168.100.230 | https://gitea-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos
-- **Gitea tokens:**
-  - `claude-session-access` (`37a74c245b4f74a508c78107595ff03413880c96`) — `repository: read` — for fetching files
-  - `claude-issue-access` (`50704f541f5c1e99522eb36faac25ff0ff78a0fc`) — `issue: read+write`, `repository: read` — for issue tracker
-  - `claude-write-access` (`01608e1c4a070006af71cf44a292c615d48948a8`) — `repository: read+write` — for pushing files to Gitea (session closeout automation)
-- **Gitea fetch workflow:** CONFIRMED WORKING via Claude in Chrome (Session 12). Use session-access token for file fetches. Use issue-access token for issue reads/writes.
-- **Backlog:** Managed in Gitea Issues — 17 open issues as of Session 12. Do NOT maintain a separate backlog list in this doc. See https://gitea-pi.home:3000/mboynton/netwatch/issues
+- **Canonical matches Pi at v3.3.90**
+- **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (infrastructure works; session-start automation via Claude in Chrome was abandoned Session 13 — see mBase Strategy section)
+- **ops-pi (formerly gitea-pi):** 192.168.100.230 | https://ops-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos (both private, MIT)
+- **ops-pi services:** Gitea 1.25.5 (port 3000 HTTPS), Prometheus 3.5.1 (port 9090), Loki 3.5.1 (port 3100), Grafana (port 3001), Node Exporter 1.9.0 (port 9100) — all running
+- **NetWatch Pi:** Node Exporter 1.9.0 running (port 9100), Prometheus scraping confirmed. Promtail 3.5.1 running (systemd service), shipping journal logs to Loki on ops-pi.
 
 ---
 
 ## Hardware & Network
 
 - **Hardware:** Raspberry Pi 3B+ (1GB RAM), two single relay boards, 5V/3A PSU, momentary pushbutton, USB-SATA adapter (SSD ordered, still on SD card)
-- **Gitea Pi:** Raspberry Pi 3B+, Samsung 860 EVO 500GB SSD at /mnt/gitea-data, static IP 192.168.100.230, hostname gitea-pi
+- **ops-pi:** Raspberry Pi 4 8GB, Samsung 860 EVO 500GB SSD at /mnt/ops-data, static IP 192.168.100.230, hostname ops-pi. Runs: Gitea 1.25.5, Prometheus 3.5.1, Loki 3.5.1, Grafana, Node Exporter 1.9.0
 - **GPIO:** GPIO 17 → Relay 1 (Modem), GPIO 27 → Relay 2 (Router), GPIO 22 → Pushbutton
 - **Physical:** Modem → Router → AP (AP powered via PoE from router)
 - **Pi eth0:** `192.168.100.10` / gateway `192.168.100.254` (wired, .100 automation subnet)
@@ -244,8 +240,8 @@ Do NOT re-import these at module level. Use `from flask import X` inside a funct
 patcher.get_changelog(limit=200)         # list of dicts, newest first
 patcher.get_changelog_entry(entry_id)    # single dict or None
 patcher.update_changelog_notes(id, notes)
-patcher.generate_release_notes_html(entry, site_name, theme)
-patcher.generate_combined_changelog_html(entries, site_name, theme)
+patcher.generate_release_notes_html(entry, site_name, theme, custom_palette=None)
+patcher.generate_combined_changelog_html(entries, site_name, theme, custom_palette=None)
 ```
 
 ---
@@ -558,47 +554,272 @@ Never include in a package zip:
 
 ---
 
-## Planning Documents (Sessions 10-11)
-- **Audit_PreMBase.txt** — structured audit checklist for pre-mBase session;
-  evaluates each subsystem for generic reusability. Read before audit session.
-- **Audit_Findings.txt** — output of Session 11 pre-mBase audit. Full findings
-  with decisions, accepted deviations, and pending discussion items. Read before
-  any mBase extraction work begins.
-- **mBase_Plan.txt** — forward plan for mBase framework extraction; proposed
-  structure, extraction order, open questions, module system design, and
-  integration standards (OpenTelemetry, ONVIF, Matter, webhooks, gRPC, SNMP).
-- **AI_Session_Process.txt v1.4** — added mandatory design-first norm:
-  design brief required before any new feature code is written.
-- **Networked_App_Standards_Summary.txt** — master reference for networked
-  application development standards. BORROW/BUILD/MIXED/ADOPT classification
-  for every major concern: auth, TLS, logging, API design, data storage, UI/UX,
-  IoT protocols, compliance, and more. 29 non-negotiable rules.
-  **Use this document as the design standard during all mBase and audit work.**
-  When making any architectural decision, check here first. The goal is for
+## mBase Strategy — Read This Before Any Architecture Discussion
+
+### What mBase Is and Why It Exists
+
+NetWatch was built iteratively from scratch without prior knowledge of networked
+application best practices. Many things were hand-rolled that could have been
+borrowed, and some architectural choices were made by default rather than by
+design. This was not wasted effort — it produced a working production system and
+a deep understanding of what a networked app actually needs. But it means NetWatch
+carries some technical debt and some deviations from standards.
+
+The user has ~15 future project ideas. The goal of mBase is to build the hard,
+reusable infrastructure once — auth, security, config, package management, backup,
+alerting, the module system — so every future project starts from a solid, proven,
+standards-aligned foundation instead of from scratch.
+
+**mBase = NetWatch minus the network monitoring application layer.**
+After extraction, NetWatch = mBase + network monitoring. When mBase gets improved,
+NetWatch pulls it in. All future projects start from mBase.
+
+### The Strategy (decided Session 15)
+
+Do NOT start mBase from scratch. Continue developing NetWatch, correcting and
+reworking things toward the standards as you go. By the time mBase extraction
+begins, NetWatch will already contain the corrected versions of everything. Then
+strip the NetWatch-specific pieces out to create mBase v1. Both projects end up
+better simultaneously.
+
+This means: when a PENDING DISCUSSION item in Audit_Findings.txt gets decided
+and requires a code change, that change goes into NetWatch first. mBase inherits
+the corrected version at extraction time.
+
+### Key Reference Documents (load when doing architecture or mBase work)
+
+All four of these documents must be read at the start of any session that involves
+architecture decisions, mBase planning, or standards alignment work. Do not load
+them speculatively for routine NetWatch bug fixes.
+
+- **Networked_App_Standards_Summary.txt** — Master reference. BORROW/BUILD/MIXED/
+  ADOPT classification for every major concern: auth, TLS, logging, API design,
+  data storage, UI/UX, IoT protocols, compliance, 29 non-negotiable rules.
+  CHECK THIS FIRST before making any architectural decision. The goal is for
   mBase and all projects built on it to conform to these standards.
 
-## Git/Gitea Infrastructure (Session 11)
-- **Git initialized** in ~/netwatch/ on NetWatch Pi
-- **Remote:** https://gitea-pi.home:3000/mboynton/netwatch.git
-- **Push:** cd ~/netwatch && git add . && git commit -m "msg" && git push
-- **Credentials:** stored via credential.helper store (passwordless)
-- **Gitea Pi:** 192.168.100.230, https://gitea-pi.home:3000
-- **Repos:** mboynton/netwatch, mboynton/mbase (both private, MIT)
-- **Hosts file:** 192.168.100.230 gitea-pi.home in /etc/hosts on NetWatch Pi
-- **CA trust:** netwatch-ca.crt installed system-wide on NetWatch Pi
-- **Next feature:** git webhook auto-deployment (see CurrentTask.txt)
+- **Audit_Findings.txt** — Output of the Session 11 pre-mBase audit. Evaluates
+  all 13 NetWatch subsystems. Contains: confirmed decisions (OK AS-IS, EXTRACT
+  AS-IS, ACCEPTED DEVIATION), and PENDING DISCUSSION items that still need
+  decisions. The PENDING DISCUSSION items are the active work queue for
+  mBase design sessions.
 
-## Backlog
+- **mBase_Plan.txt** — Forward plan: what mBase provides, module system design,
+  integration standards (OpenTelemetry, ONVIF, Matter, webhooks, gRPC, SNMP),
+  proposed extraction order (Phase 1-6), proposed directory structure, open
+  questions. Read before any extraction or module system work begins.
 
-**Backlog is now managed in Gitea Issues — do not maintain a list here.**
+- **Audit_PreMBase.txt** — The audit agenda used in Session 11. Useful as a
+  checklist reference but the findings are in Audit_Findings.txt. Lower priority
+  than the other three once the audit is complete.
 
-URL: https://gitea-pi.home:3000/mboynton/netwatch/issues
-Token for reads/writes: `claude-issue-access` (`50704f541f5c1e99522eb36faac25ff0ff78a0fc`)
+### PENDING DISCUSSION Items (active decision queue)
 
-At session start, fetch open issues via:
-  GET /api/v1/repos/mboynton/netwatch/issues?type=issues&state=open&limit=50
+These are from Audit_Findings.txt. Full decision details recorded there.
 
-Labels: security | ui | feature | infrastructure | testing | documentation
+DECIDED Session 15:
+- **11.1 API versioning** — /api/v1/ path versioning in both NetWatch and mBase.
+  NetWatch gets retrofitted in a future package. mBase starts clean.
+  Path versioning chosen over header versioning: simpler, visible, debuggable.
+- **7.1/7.2 Logging** — structlog, JSON format, LOG_FORMAT config key (pretty
+  default for Pi), Loki+Prometheus+Grafana on Gitea Pi, OTEL-compatible endpoint
+  configurable at first-run wizard, correlation IDs, separate audit/app log streams,
+  log level discipline as mBase convention.
 
-17 open issues as of Session 12 (v3.3.30). Issue #1 is the recommended next task:
-  #1 SESSION_COOKIE_SECURE = True fix [security] — one-liner, easy win
+NOT YET DISCUSSED (work through in dedicated design sessions):
+- **1.4** Session storage: Flask signed cookie vs SQLite-backed server-side store
+- **1.7 / 3.3** Schema migration versioning: ALTER TABLE try/except vs migration table
+- **3.5** user_prefs table: move from database.py during Blueprint refactor
+- **11.2** Blueprint refactor: required for module system (~2800 line flat webapp.py)
+- **11.3** Error response standardization: raw str(e) vs RFC 7807 standard format
+- **12.2** CSS direction: keep hand-rolled CSS variable system vs migrate to Tailwind
+- **12.3** JS architecture: how modules contribute JS without editing base templates
+- **9.2** Alert type registration: how modules define alert types in module system
+- **CC.5** Input validation: manual .strip()/int() casting vs Pydantic at boundaries
+
+Accepted deviations (no action needed — document in mBase):
+- Hand-rolled auth (IdP like Keycloak requires ~512MB RAM; Pi has 1GB total)
+- config.py file vs environment variables (pragmatic for Pi; AES-GCM export compensates)
+- Self-signed CA vs Let's Encrypt (no public domain for LAN deployment)
+
+SCOPE CHANGES (Session 15):
+- Host monitoring and device telemetry REMOVED from NetWatch/mBase build scope.
+  Node Exporter + Prometheus + Grafana handles this. No custom code needed.
+- NetWatch dashboard charts (latency, packet loss, speedtest) to be reviewed
+  once Grafana is running — some may be retired in favor of Grafana dashboards.
+
+### Git, Version Control, and CI/CD — Open Discussion Items
+
+**Current state:** Git is initialized in ~/netwatch/ with remote origin at
+https://gitea-pi.home:3000/mboynton/netwatch.git. The Gitea Pi (192.168.100.230)
+is running with repos for both netwatch and mbase. Credentials stored passwordless.
+Both repos exist (private, MIT license).
+
+**What failed:** Sessions 11-13 attempted to use Gitea as the session-start
+source — Claude fetching context docs directly from Gitea via Claude in Chrome
+instead of the user uploading a zip. This was repeatedly blocked by browser
+extension security filters (session keyword filter, JWT token filter on dotted
+filenames) and sessions were shut down. The infrastructure works; the automated
+session-start workflow does not. Session 13 rolled back to the zip upload method.
+
+**Three open discussions needed (not blocking current work, but important):**
+
+1. **Version control and change tracking:** How to use git properly for NetWatch
+   and mBase going forward — commit discipline, branching, what belongs in git
+   (code + dev_docs? or code only?). The zip package workflow is fine for
+   *deploying* to the Pi; git solves *version control and change history*.
+   These are two different problems and both need to be solved correctly.
+
+2. **Sharing and publishing:** What open source or commercial distribution looks
+   like for these projects. GitHub vs self-hosted Gitea. Licensing decisions.
+   README and documentation requirements. How mBase gets versioned independently
+   from projects built on it.
+
+3. **Session workflow improvement:** Whether there is a better way to get Claude
+   context at session start that doesn't require the manual zip upload. The Gitea
+   direct-fetch approach is the right idea but the Claude in Chrome method hit
+   too many security filters. Other approaches (GitHub public repo + web_fetch,
+   different automation method) have not been tried. Not a blocker; the zip
+   workflow is reliable. Worth solving eventually for the multi-repo future.
+
+**Do not attempt the Gitea Claude-in-Chrome session-start workflow again without
+a new plan that addresses the filter problems documented in Gotchas.txt.**
+
+**Note: Gitea is now hosted on ops-pi (192.168.100.230), not gitea-pi. All
+references to gitea-pi.home should be updated to ops-pi.home.**
+
+## Backlog (as of v3.3.90, updated Session 29)
+
+**Security**
+- ✅ SESSION_COOKIE_SECURE = True — shipped v3.3.34.
+- ✅ MFA: TOTP primary + email/SMS/backup code fallbacks. Admin/Operator mandatory
+  (7-day grace). Monitor optional. SHIPPED v3.3.86, closeout v3.3.87.
+- ✅ MFA verification codes redacted from alert history: _redact_sensitive() in database.py
+  now strips email-format and SMS-format MFA codes at write time. SHIPPED v3.3.88.
+- ✅ Role-based alert permissions: new Alerts tab in Users & Roles with Available/Email/SMS
+  per alert type per role. available=0 purges user overrides immediately and enforces at
+  send time in get_active_recipients(). Replaces hardcoded ALLOWED_GROUPS in preferences.html
+  with data-driven check from type_settings_user API. SHIPPED v3.3.89.
+- Security audit: review attack surface for package installer and deployed files uploader
+  (malicious package injection, path traversal, code execution). Broader auth/session/
+  physical/remote access hardening review. Goal: confidence before distributing to others.
+
+**UI**
+- ✅ System log viewer: pkg_update.log tail in Admin page, collapsible card with
+  line count selector (50/100/200/500) and Refresh button. SHIPPED v3.3.60.
+- ✅ updater.py context doc backup: dated backup created on upload via Dev Docs (save_dev_doc)
+  and Deployed Files (backup_file). SHIPPED v3.3.51/v3.3.52.
+- ✅ System log JSON formatter: logs.html formatLogLine() parses structured JSON lines and
+  renders them as HH:MM:SS · LEVEL · service › event  field=value. Boolean fields as ✓/✗,
+  latency as Xms, packet_loss as X%. Non-JSON lines fall back gracefully. SHIPPED v3.3.54.
+- ✅ System log filter bar: event group checkboxes (Health, Network, Resets, Speedtest,
+  System, Web Requests [off by default], Other) and level radio (All/Warn+/Errors only).
+  Client-side filtering against cached allFormatted[]. SHIPPED v3.3.55.
+- ✅ Dashboard system health card: monitor heartbeat (last check-in vs expected interval),
+  last check-in age, disk space remaining. SHIPPED v3.3.69.
+- ✅ Dashboard layout polish: Last Reset and System Health cards equalized (both flex:4);
+  row 2→3 gap matched to row 1→2 using padding-top:calc(var(--gap)*0.5). SHIPPED v3.3.77.
+- ✅ System log line count selector: controls post-filter lines; active button highlight;
+  alert history count selector (10/20/50/100); admin System Info gap; pkg update log
+  auto-loads on page open. SHIPPED v3.3.78.
+- ✅ System log scroll anchor: auto-scroll only when already at bottom. SHIPPED v3.3.79.
+- ✅ Backup email delivery logging: backup_notify.py logs DB and full backup email
+  sends to alert_deliveries table; backup_db and backup_full audit types added.
+  SHIPPED v3.3.82.
+- ✅ Config editor false-positive "could not find/replace" warning suppressed for
+  unchanged values; Export Data card days now dynamic from config; security page period
+  buttons now filter event log table; alert type preferences filtered by role
+  (Monitor/Guest see network only); send_daily_summary() implemented. SHIPPED v3.3.82.
+- ✅ Appearance popover layout bug: selecting system layout while custom layout active now
+  works in one click (setLayout() clears custom_layout pref first). SHIPPED v3.3.70.
+- ✅ Package installer confirm row spacing: margin-top added to confirm bar, margin-bottom
+  added to preview panel. SHIPPED v3.3.83.
+- ✅ Backup Manager: consolidated backup card replacing two old cards. Stored backup list
+  (DB + full) with download/delete per row. DB Backup Now and Full Backup Now buttons.
+  Restore-from-upload with decrypt reminder. New config keys DB_BACKUP_RETENTION (default 14)
+  and FULL_BACKUP_RETENTION (default 7). Shell scripts read retention from config.py.
+  SHIPPED v3.3.84.
+- ✅ Config Editor new-keys modal: fires on page load when pending notifications exist.
+  Shows each new key with label, description, and editable input. Save applies values
+  to form and triggers Save & Restart Monitor. Dismiss closes without saving. Both actions
+  dismiss all notifications. SHIPPED v3.3.85.
+
+**Features**
+- ✅ Dev Documents system *(v3.2.89–3.2.95+)*
+- ✅ Configurable snapshot retention (SNAPSHOT_RETENTION, v3.3.2; now visible in Config Editor v3.3.9)
+- ✅ Pi package update scheduling (v3.3.12; weekly cron, maintenance alert category, My Account toggle)
+- ✅ Theme import/export (custom .nwtheme system, v3.3.13–v3.3.21; confirmed working Session 9)
+- ✅ Network interface verification rework (v3.3.22)
+- ~~Host monitoring~~ — REMOVED Session 15.
+- ~~Device telemetry tab~~ — REMOVED Session 15.
+- Kiosk display — scope narrowed: operational quick-glance NetWatch status view only.
+- Package storage + push (design together with: distributable installer, update package
+  installer, git strategy — these four are a cohesive update/distribution story)
+- ✅ Backup Manager — SHIPPED v3.3.84. See completed items above.
+
+**Observability Stack (ops-pi)**
+- ✅ Prometheus 3.5.1 installed and scraping both Pis (Session 16)
+- ✅ Loki 3.5.1 installed (Session 16)
+- ✅ Grafana installed, both data sources connected (Session 16)
+- ✅ Node Exporter on both Pis, confirmed scraping (Session 16)
+- ✅ NetWatch structlog rework: add structlog library, LOG_FORMAT config key
+  (pretty/json), rework logging in ALL modules to emit OTEL-compatible JSON.
+  SHIPPED v3.3.37 (main services), v3.3.43 (all remaining modules — full coverage).
+  Gunicorn HTTP access log also converted to JSON via StructlogAccessLogger
+  in gunicorn.conf.py. SHIPPED v3.3.44.
+- ✅ Promtail on NetWatch Pi: ships structured JSON logs to Loki on ops-pi.
+  SHIPPED Session 17. Running as systemd service, confirmed working.
+- ✅ Grafana dashboard for NetWatch logs: 7 panels built and confirmed working.
+  Saved as "NetWatch" on ops-pi. SHIPPED Session 18.
+- ✅ Grafana "NetWatch Logs" dashboard: 3 panels (pkg_update activity, NetWatch
+  app log, OS events). Built manually Session 19.
+- ✅ pkg_update.sh journald logging: logger calls + systemd-cat crontab wrapper.
+  SHIPPED v3.3.39. Smoke tested confirmed working.
+- ✅ Promtail max_age: increased from 1h to 24h. Loki reject_old_samples_max_age
+  confirmed at default (1 week). Clean restart confirmed Session 21.
+- TLS for Grafana/Prometheus/Loki on ops-pi: currently HTTP only on LAN.
+  Low priority until external access is needed.
+
+**Infrastructure**
+- SSD migration (hardware ordered — for NetWatch Pi)
+- ✅ Fix patcher.py temp file handling -- tempfile.mkstemp() with explicit cfile,
+  cleanup in finally block, PermissionError reported accurately. SHIPPED v3.3.53.
+- ✅ Dedicated service account (netwatch-svc) — v3.3.25
+- ✅ Cron scripts $HOME fix (backup.sh, backup_db.sh, pkg_update.sh) — v3.3.39-v3.3.41
+- ✅ GPG keyring for netwatch-svc — manual setup Session 19, /home/mboynton/netwatch/.gnupg
+- ✅ All three cron jobs verified working as netwatch-svc — Session 19
+- ✅ install.sh gaps fixed: structlog+packaging added to pip install, sudoers without
+  .service suffix added, chmod 751 on home dir, chown netwatch-svc on ~/backups. SHIPPED v3.3.60.
+- ✅ Gunicorn lifecycle messages (startup, worker boot/exit, crashes) now emit JSON via
+  StructlogAccessLogger error logger overrides. Previously plain text in Loki. v3.3.60
+  attempt failed (structlog unconfigured at gunicorn startup). Fixed in v3.3.61 by
+  writing JSON directly to stdout via print() instead of using structlog. SHIPPED v3.3.61.
+- ✅ SystemSetup.txt created in dev_docs: complete Pi system state reference, all manual
+  steps, install.sh gap inventory, log format reference, wizard requirements. Session 23.
+- ✅ Package installer changelog: session number from manifest.json "session" field now
+  shown in release notes header and combined changelog view. SHIPPED v3.3.60.
+
+**Testing**
+- Full system backup — needs SD cards
+- Distributable installer — needs second Pi / SD cards (design with package storage,
+  update installer, and git strategy as a cohesive distribution story)
+- Update package installer (design with above)
+- ✅ Rollback DB restore verified working (confirmed Session 9)
+- ✅ Verify GPG decrypt of encrypted backup file locally on Windows, then full restore
+  flow end-to-end: decrypt → upload decrypted file → restore via UI. CONFIRMED Session 28.
+
+**Documentation**
+- User PDF
+- Admin guide PDF
+- Developer reference
+- Changelog PDF retroactive
+- NetWatch brochure
+
+**mBase & Architecture (active design work — see mBase Strategy section)**
+- Work through all PENDING DISCUSSION items in Audit_Findings.txt (9 decisions needed)
+- Decide git strategy: commit discipline, what goes in git, branching approach
+- Decide sharing/publishing approach: GitHub vs Gitea, licensing, README requirements
+- Decide session workflow improvement: better session-start method for multi-repo future
+- Blueprint refactor design brief (required for module system — biggest structural change)
+- Module system design brief (most consequential decision; propagates to all future projects)
+- mBase directory/repo setup on Pi (separate dir in /home/mboynton/mbase/ to start)

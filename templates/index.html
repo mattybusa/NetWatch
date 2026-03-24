@@ -54,42 +54,81 @@
 <!-- Uptime + Speedtest -->
 <div class="row mb-4">
   <div class="col-md-6">
-    <div class="nw-card p-4 h-100">
-      <div class="nw-label mb-3">Uptime</div>
+    <div class="nw-card p-3 h-100">
+      <div class="nw-label mb-2">Uptime</div>
       <div class="row text-center">
-        <div class="col-3"><div class="nw-big-stat" id="up-1h">—</div><div class="nw-label mt-1">1 hr</div></div>
-        <div class="col-3"><div class="nw-big-stat" id="up-24h">—</div><div class="nw-label mt-1">24 hr</div></div>
-        <div class="col-3"><div class="nw-big-stat" id="up-7d">—</div><div class="nw-label mt-1">7 day</div></div>
-        <div class="col-3"><div class="nw-big-stat" id="up-30d">—</div><div class="nw-label mt-1">30 day</div></div>
+        <div class="col-6 col-sm-3"><div class="nw-big-stat" id="up-1h" style="font-size:2rem;">—</div><div class="nw-label mt-1">1 hr</div></div>
+        <div class="col-6 col-sm-3"><div class="nw-big-stat" id="up-24h" style="font-size:2rem;">—</div><div class="nw-label mt-1">24 hr</div></div>
+        <div class="col-6 col-sm-3"><div class="nw-big-stat" id="up-7d" style="font-size:2rem;">—</div><div class="nw-label mt-1">7 day</div></div>
+        <div class="col-6 col-sm-3"><div class="nw-big-stat" id="up-30d" style="font-size:2rem;">—</div><div class="nw-label mt-1">30 day</div></div>
       </div>
     </div>
   </div>
   <div class="col-md-6">
-    <div class="nw-card p-4 h-100">
-      <div class="nw-label mb-3">Last Speedtest</div>
-      <div class="row text-center">
-        <div class="col-4"><div class="nw-big-stat" id="spd-dl">—</div><div class="nw-label mt-1">↓ Mbps</div></div>
-        <div class="col-4"><div class="nw-big-stat" id="spd-ul">—</div><div class="nw-label mt-1">↑ Mbps</div></div>
-        <div class="col-4"><div class="nw-big-stat" id="spd-ping">—</div><div class="nw-label mt-1">ping ms</div></div>
+    <div class="nw-card p-3 h-100">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:6px;margin-bottom:8px;">
+        <div class="nw-label">Speedtest</div>
+        <div id="spd-range-btns" style="display:flex;flex-wrap:wrap;gap:3px;">
+          <button class="range-btn range-btn-active" data-spd="latest" onclick="setSpdRange('latest',this)">Latest</button>
+          <button class="range-btn" data-spd="1"      onclick="setSpdRange('1',this)">1D</button>
+          <button class="range-btn" data-spd="7"      onclick="setSpdRange('7',this)">7D</button>
+          <button class="range-btn" data-spd="30"     onclick="setSpdRange('30',this)">30D</button>
+          <button class="range-btn" data-spd="all"    onclick="setSpdRange('all',this)">All</button>
+        </div>
       </div>
-      <div class="text-center mt-2 nw-label" id="spd-when"></div>
+      <div class="row text-center">
+        <div class="col-4"><div class="nw-big-stat" id="spd-dl" style="font-size:2rem;">—</div><div class="nw-label mt-1">↓ Mbps</div></div>
+        <div class="col-4"><div class="nw-big-stat" id="spd-ul" style="font-size:2rem;">—</div><div class="nw-label mt-1">↑ Mbps</div></div>
+        <div class="col-4"><div class="nw-big-stat" id="spd-ping" style="font-size:2rem;">—</div><div class="nw-label mt-1">ping ms</div></div>
+      </div>
+      <div class="text-center mt-1 nw-label" id="spd-when"></div>
     </div>
   </div>
 </div>
 
-<!-- Last reset + resets today -->
-<div class="row">
-  <div class="col-md-8">
-    <div class="nw-card p-4">
+<!-- Last reset + auto resets + system health (flex row, wraps to stack below 600px) -->
+<div style="display:flex; flex-wrap:wrap; gap:var(--gap, 1rem); padding-top:calc(var(--gap, 16px) * 0.5);">
+  <div style="flex:4; min-width:240px;">
+    <div class="nw-card p-4 h-100">
       <div class="nw-label mb-2">Last Reset Event</div>
       <div id="last-reset-info" style="color:var(--text-muted); font-size:0.83rem;">No resets on record</div>
     </div>
   </div>
-  <div class="col-md-4">
-    <div class="nw-card p-4 text-center">
-      <div class="nw-label mb-1">Auto Resets Today</div>
+  <div style="flex:3; min-width:180px;">
+    <div class="nw-card p-4 text-center h-100">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:6px;margin-bottom:8px;">
+        <div class="nw-label">Auto Resets</div>
+        <div style="display:flex;flex-wrap:wrap;gap:3px;">
+          <button class="range-btn range-btn-active" data-rst="1"   onclick="setRstRange('1',this)">1D</button>
+          <button class="range-btn" data-rst="7"   onclick="setRstRange('7',this)">7D</button>
+          <button class="range-btn" data-rst="30"  onclick="setRstRange('30',this)">30D</button>
+          <button class="range-btn" data-rst="all" onclick="setRstRange('all',this)">All</button>
+        </div>
+      </div>
       <div class="nw-big-stat" id="resets-today">—</div>
-      <div class="nw-label">of 5 maximum</div>
+      <div class="nw-label" id="resets-sublabel">today</div>
+    </div>
+  </div>
+  <div style="flex:4; min-width:240px;">
+    <div class="nw-card p-4 h-100">
+      <div class="nw-label mb-3">System Health</div>
+      <div class="row text-center">
+        <div class="col-4">
+          <div class="nw-label mb-1">Monitor</div>
+          <div id="sh-monitor-stat" class="nw-big-stat" style="font-size:1.3rem;">—</div>
+          <div id="sh-monitor-label" class="nw-label mt-1" style="text-transform:none; letter-spacing:0;">—</div>
+        </div>
+        <div class="col-4">
+          <div class="nw-label mb-1">Last Check</div>
+          <div id="sh-checkin-stat" class="nw-big-stat" style="font-size:1.3rem;">—</div>
+          <div id="sh-checkin-label" class="nw-label mt-1" style="text-transform:none; letter-spacing:0;">—</div>
+        </div>
+        <div class="col-4">
+          <div class="nw-label mb-1">Disk Free</div>
+          <div id="sh-disk-stat" class="nw-big-stat" style="font-size:1.3rem;">—</div>
+          <div id="sh-disk-label" class="nw-label mt-1" style="text-transform:none; letter-spacing:0;">—</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -98,7 +137,127 @@
 
 {% block scripts %}
 <script>
-// Load network config labels once on page load
+// ── Range button styling ──────────────────────────────────────────────────────
+// Injected here so it inherits CSS variables from the active theme at render time.
+// Using a <style> tag in scripts block is intentional — avoids a separate CSS file
+// for a small set of dashboard-specific styles.
+const _rangeStyle = document.createElement("style");
+_rangeStyle.textContent = `
+  .range-btn {
+    font-size: 0.68rem;
+    font-family: var(--font-mono);
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .range-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .range-btn-active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg-card);
+  }
+`;
+document.head.appendChild(_rangeStyle);
+
+// ── Active range state ────────────────────────────────────────────────────────
+// Initialised from user prefs on page load; updated when buttons are clicked.
+let spdRange = "latest";  // "latest" | "1" | "7" | "30" | "all"
+let rstRange = "1";       // "1" | "7" | "30" | "all"
+
+// ── Speedtest range ───────────────────────────────────────────────────────────
+function setSpdRange(val, btn) {
+  spdRange = val;
+  document.querySelectorAll("#spd-range-btns .range-btn").forEach(b => b.classList.remove("range-btn-active"));
+  btn.classList.add("range-btn-active");
+  updateSpdCard();
+}
+
+async function updateSpdCard() {
+  const dl   = document.getElementById("spd-dl");
+  const ul   = document.getElementById("spd-ul");
+  const ping = document.getElementById("spd-ping");
+  const when = document.getElementById("spd-when");
+
+  if (spdRange === "latest") {
+    // Pull from the cached status response
+    try {
+      const status = await fetch("/api/status").then(r => r.json());
+      if (status.last_speedtest) {
+        const s = status.last_speedtest;
+        dl.textContent   = s.download_mbps ? s.download_mbps.toFixed(1) : "—";
+        ul.textContent   = s.upload_mbps   ? s.upload_mbps.toFixed(1)   : "—";
+        ping.textContent = s.ping_ms       ? s.ping_ms.toFixed(0)       : "—";
+        when.textContent = "As of " + new Date(s.timestamp).toLocaleString();
+      } else {
+        dl.textContent = ul.textContent = ping.textContent = "—";
+        when.textContent = "No speedtest data";
+      }
+    } catch(e) { dl.textContent = ul.textContent = ping.textContent = "—"; }
+  } else {
+    try {
+      const avg = await fetch(`/api/speedtest_avg?days=${spdRange}`).then(r => r.json());
+      if (avg.count > 0) {
+        dl.textContent   = avg.download_mbps != null ? avg.download_mbps.toFixed(1) : "—";
+        ul.textContent   = avg.upload_mbps   != null ? avg.upload_mbps.toFixed(1)   : "—";
+        ping.textContent = avg.ping_ms       != null ? avg.ping_ms.toFixed(0)       : "—";
+        const label = spdRange === "all" ? "all time" :
+                      spdRange === "1"   ? "past day" :
+                      spdRange === "7"   ? "past 7 days" : "past 30 days";
+        when.textContent = `Avg over ${label} · ${avg.count} test${avg.count !== 1 ? "s" : ""}`;
+      } else {
+        dl.textContent = ul.textContent = ping.textContent = "—";
+        when.textContent = "No data for this range";
+      }
+    } catch(e) { dl.textContent = ul.textContent = ping.textContent = "—"; }
+  }
+}
+
+// ── Reset events range ────────────────────────────────────────────────────────
+const RST_LABELS = { "1": "today", "7": "past 7 days", "30": "past 30 days", "all": "all time" };
+
+function setRstRange(val, btn) {
+  rstRange = val;
+  document.querySelectorAll("[data-rst]").forEach(b => b.classList.remove("range-btn-active"));
+  btn.classList.add("range-btn-active");
+  updateRstCard();
+}
+
+async function updateRstCard() {
+  try {
+    const data  = await fetch(`/api/reset_count?days=${rstRange}`).then(r => r.json());
+    const rt    = data.count ?? "—";
+    const rtEl  = document.getElementById("resets-today");
+    rtEl.textContent = rt;
+    rtEl.style.color = (rstRange === "1" && rt >= 5) ? "var(--fail)"
+                     : (rstRange === "1" && rt >= 3) ? "var(--warn)"
+                     : "var(--ok)";
+    document.getElementById("resets-sublabel").textContent = RST_LABELS[rstRange] || "";
+  } catch(e) {}
+}
+
+// ── Load user prefs and initialise controls ───────────────────────────────────
+async function loadDashboardPrefs() {
+  try {
+    const prefs = await fetch("/api/preferences/dashboard").then(r => r.json());
+    spdRange = prefs.speedtest_range || "latest";
+    rstRange = prefs.resets_range    || "1";
+
+    // Activate the correct speedtest button
+    document.querySelectorAll("#spd-range-btns .range-btn").forEach(b => {
+      b.classList.toggle("range-btn-active", b.dataset.spd === spdRange);
+    });
+    // Activate the correct reset button
+    document.querySelectorAll("[data-rst]").forEach(b => {
+      b.classList.toggle("range-btn-active", b.dataset.rst === rstRange);
+    });
+  } catch(e) {}
+}
+
+// ── Network config labels ─────────────────────────────────────────────────────
 async function loadNetworkLabels() {
   try {
     const cfg = await fetch("/api/config/network").then(r => r.json());
@@ -108,6 +267,55 @@ async function loadNetworkLabels() {
   } catch(e) {}
 }
 
+// ── System health card ────────────────────────────────────────────────────────
+async function updateSystemHealthCard() {
+  try {
+    const h = await fetch("/api/system_health").then(r => r.json());
+
+    const monitorStat  = document.getElementById("sh-monitor-stat");
+    const monitorLabel = document.getElementById("sh-monitor-label");
+    const checkinStat  = document.getElementById("sh-checkin-stat");
+    const checkinLabel = document.getElementById("sh-checkin-label");
+    const diskStat     = document.getElementById("sh-disk-stat");
+    const diskLabel    = document.getElementById("sh-disk-label");
+
+    // Monitor status dot + age
+    if (h.age_seconds === null) {
+      monitorStat.innerHTML  = `<span class="sh-dot sh-dot-muted"></span><span style="color:var(--text-muted);">No data</span>`;
+      monitorLabel.textContent = "No records yet";
+      checkinStat.innerHTML  = `<span style="color:var(--text-muted);">—</span>`;
+      checkinLabel.textContent = "—";
+    } else {
+      const dotCls   = h.overdue ? "sh-dot-error" : "sh-dot-ok";
+      const ageLabel = h.overdue ? "OVERDUE" : "OK";
+      const ageColor = h.overdue ? "var(--fail)" : "var(--ok)";
+      monitorStat.innerHTML  = `<span class="sh-dot ${dotCls}"></span><span style="color:${ageColor};">${ageLabel}</span>`;
+      monitorLabel.textContent = h.overdue ? "Check not running?" : "Heartbeat healthy";
+
+      // Format age as human-readable
+      const age = h.age_seconds;
+      let ageStr;
+      if      (age < 60)   ageStr = Math.round(age) + "s ago";
+      else if (age < 3600) ageStr = Math.round(age / 60) + "m ago";
+      else                 ageStr = (age / 3600).toFixed(1) + "h ago";
+      checkinStat.innerHTML    = `<span style="color:var(--text-primary);">${ageStr}</span>`;
+      checkinLabel.textContent = `every ${h.expected_interval}s`;
+    }
+
+    // Disk free
+    if (h.disk_free_gb !== null) {
+      const pct        = h.disk_free_pct;
+      const diskColor  = pct < 10 ? "var(--fail)" : pct < 20 ? "var(--warn)" : "var(--ok)";
+      diskStat.innerHTML    = `<span style="color:${diskColor};">${h.disk_free_gb} GB</span>`;
+      diskLabel.textContent = `${pct}% free`;
+    } else {
+      diskStat.innerHTML    = `<span style="color:var(--text-muted);">—</span>`;
+      diskLabel.textContent = "unavailable";
+    }
+  } catch(e) { /* silent — card stays at last value */ }
+}
+
+// ── Main dashboard refresh ────────────────────────────────────────────────────
 async function refresh() {
   try {
     const [status, uptime] = await Promise.all([
@@ -166,16 +374,10 @@ async function refresh() {
     document.getElementById("up-7d").textContent  = uptime["7d"]  + "%";
     document.getElementById("up-30d").textContent = uptime["30d"] + "%";
 
-    // Speedtest
-    if (status.last_speedtest) {
-      const s = status.last_speedtest;
-      document.getElementById("spd-dl").textContent   = s.download_mbps ? s.download_mbps.toFixed(1) : "—";
-      document.getElementById("spd-ul").textContent   = s.upload_mbps   ? s.upload_mbps.toFixed(1)   : "—";
-      document.getElementById("spd-ping").textContent = s.ping_ms       ? s.ping_ms.toFixed(0)       : "—";
-      document.getElementById("spd-when").textContent = "As of " + new Date(s.timestamp).toLocaleString();
-    }
+    // Speedtest — delegate to range-aware updater
+    updateSpdCard();
 
-    // Last reset
+    // Last reset event
     if (status.last_reset) {
       const r = status.last_reset;
       document.getElementById("last-reset-info").innerHTML =
@@ -183,17 +385,21 @@ async function refresh() {
          <span style="color:var(--text-muted);">${new Date(r.timestamp).toLocaleString()} · triggered by ${r.triggered_by}</span>`;
     }
 
-    // Resets today
-    const rt   = status.resets_today ?? "—";
-    const rtEl = document.getElementById("resets-today");
-    rtEl.textContent = rt;
-    rtEl.style.color = rt >= 5 ? "var(--fail)" : rt >= 3 ? "var(--warn)" : "var(--ok)";
+    // Reset count — delegate to range-aware updater on every refresh
+    updateRstCard();
+
+    // System health card
+    updateSystemHealthCard();
 
   } catch(e) { console.error("Dashboard refresh error:", e); }
 }
 
-refresh();
-loadNetworkLabels();
-setInterval(refresh, 10000);  // 10s — fast enough for host monitoring
+// ── Initialise ────────────────────────────────────────────────────────────────
+(async () => {
+  await loadDashboardPrefs();   // set spdRange/rstRange and highlight buttons
+  await refresh();              // loads all dashboard data including both cards
+  loadNetworkLabels();
+  setInterval(refresh, 10000);
+})();
 </script>
 {% endblock %}

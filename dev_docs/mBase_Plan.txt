@@ -2,41 +2,87 @@ MBASE — FORWARD PLAN
 =====================
 Created: 2026-03-13 | Session 10
 Revised: 2026-03-13 | Session 10 (added module system and integration standards)
-Status: Planning phase. Audit session required before extraction begins.
+Revised: 2026-03-14 | Session 15 (added core design philosophy, observability decisions)
+Status: Planning phase. Audit session complete (Session 11). PENDING DISCUSSION items
+        being worked through in dedicated design sessions (Sessions 15+).
+
+
+CORE DESIGN PHILOSOPHY (established Session 15)
+------------------------------------------------
+mBase CONNECTS. It does not DUPLICATE.
+
+Before any capability gets built into mBase, the question is always:
+  "Does a better version of this already exist that mBase should connect to instead?"
+
+Things that get BUILT in mBase:
+  - The package installer / patcher workflow (nothing else does zero-SSH web-based
+    updates with snapshots and rollback for a Pi deployment model)
+  - The first-run setup wizard (application-specific by definition)
+  - The AI session documentation system (no equivalent exists)
+  - Auth and RBAC (accepted deviation — IdP requires too much RAM for Pi 3B+)
+  - The configuration system (schema-driven, Pi-deployment specific)
+
+Things that get CONNECTED TO in mBase (not built):
+  - Observability: structured logs → Loki. Metrics → Prometheus. Both → Grafana.
+  - Host monitoring: Node Exporter on each device. Prometheus scrapes. Grafana displays.
+  - Video/camera integration: ONVIF protocol via existing library. Not hand-rolled.
+  - Smart home devices: Matter/Zigbee via existing stack (zigbee2mqtt + Mosquitto).
+  - Any capability where a best-of-breed open source tool already exists.
+
+The module system provides the plumbing for connections. Modules are thin connectors
+to existing tools and standards, not full reimplementations of what those tools do.
+
+This principle keeps mBase small, maintainable, and genuinely better than hand-rolled
+alternatives. Every project built on mBase inherits not just mBase's code but its
+connections to a whole ecosystem of best-of-breed tools.
+
+BEFORE BUILDING ANY NEW MBASE COMPONENT: check Networked_App_Standards_Summary.txt
+first. If a BORROW or ADOPT answer exists, use it. Only BUILD when nothing adequate
+exists for the deployment model.
+
 
 PURPOSE
 -------
 mBase is a personal application framework extracted from NetWatch. The goal is to
-build the hard, reusable infrastructure once — authentication, security, package
-management, backup, configuration, alerting — so that each new project starts from
-a solid, proven foundation rather than from scratch.
+connect to the hard, reusable infrastructure once — authentication, security, package
+management, backup, configuration, alerting, observability — so that each new project
+starts from a solid, proven, standards-aligned foundation rather than from scratch.
 
-Every future project (NetWatch features that need external servers, new standalone
-apps, etc.) will be built on mBase. Decisions made in mBase are inherited by
-everything built on it, so correctness and clean design matter more here than
-anywhere else.
+Every future project will be built on mBase. Decisions made in mBase are inherited by
+everything built on it, so correctness and clean design matter more here than anywhere
+else. The ~15 future project ideas in the pipeline are the reason mBase exists.
 
 
 WHAT MBASE PROVIDES
 --------------------
-Core (every project needs this):
+Core (every project needs this — built in mBase):
 - User authentication and session management
 - Role-based access control (admin / user / guest)
-- First-run setup wizard
+- First-run setup wizard (includes log collection configuration)
 - Configuration system (schema-driven, validated, editable via UI)
 - Package installer / patcher workflow (deploy updates without SSH)
 - Backup and restore (GPG encrypted, scheduled)
 - Rollback (atomic snapshot restore)
-- Security logging
+- Security logging + audit log (separate streams, separate retention)
+- Structured logging via structlog (pretty mode default, JSON mode for aggregation)
 - SSL/TLS with self-signed CA
-- Service account (netwatch-svc pattern)
+- Service account pattern
 - Systemd service management
-- Module system (see MODULE SYSTEM section below)
+- Module system (thin connectors to external tools and standards)
 - Dev docs and AI context system
 - Session documentation workflow
 
-Optional (included in mBase, activated per-project):
-- Alert / notification system (email, extensible to SMS etc.)
+Observability stack (connected to, not built — runs on Gitea Pi):
+- Loki: log aggregation (receives structured logs from all project Pis)
+- Prometheus: metrics aggregation (scrapes Node Exporter + app metrics endpoints)
+- Grafana: single pane of glass for logs, metrics, dashboards across all projects
+- Node Exporter: installed on every Pi, exposes host metrics to Prometheus
+- Promtail: installed on every Pi, ships structured logs to Loki
+- Configuration: log collection endpoint configurable at first-run wizard
+  (local-only works out of the box; central collection optional)
+
+Optional application modules (included in mBase, activated per-project):
+- Alert / notification system (email, SMS via carrier gateways)
 - Package update scheduling (apt-get, cron-based)
 - User management UI
 - Delivery history tracking

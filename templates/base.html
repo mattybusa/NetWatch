@@ -411,6 +411,9 @@
             ('RPi.GPIO',         'MIT'),
             ('lgpio',            'lgpl2.1'),
             ('speedtest-cli',    'Apache 2.0'),
+            ('structlog',        'Apache 2.0'),
+            ('pyotp',            'MIT'),
+            ('qrcode',           'BSD 3-Clause'),
             ('SQLite3',          'Public Domain'),
             ('Chart.js',         'MIT'),
             ('Bootstrap Icons',  'MIT'),
@@ -475,6 +478,45 @@
     </div>
     {% endif %}
 
+    {% if mfa_warning %}
+    <div id="mfa-warn-banner" style="
+        background: rgba({% if mfa_warning.expired %}192,57,43{% else %}210,153,34{% endif %},0.12);
+        border: 1px solid {% if mfa_warning.expired %}#c0392b{% else %}#d29922{% endif %};
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 18px;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;">
+      <i class="bi bi-shield-exclamation" style="color:{% if mfa_warning.expired %}#c0392b{% else %}#d29922{% endif %};font-size:1.1rem;margin-top:2px;flex-shrink:0;"></i>
+      <div style="flex:1;">
+        <div style="font-size:0.85rem;font-weight:600;color:{% if mfa_warning.expired %}#c0392b{% else %}#d29922{% endif %};margin-bottom:4px;">
+          {% if mfa_warning.expired %}
+            Two-factor authentication required
+          {% else %}
+            Two-factor authentication required for your account
+          {% endif %}
+        </div>
+        <div style="font-size:0.8rem;color:var(--text-secondary);">
+          {% if mfa_warning.expired %}
+            Your grace period has expired. You must set up MFA before continuing.
+          {% elif mfa_warning.days_left <= 1 %}
+            You must set up two-factor authentication today.
+          {% else %}
+            Please set up two-factor authentication within {{ mfa_warning.days_left }} day{% if mfa_warning.days_left != 1 %}s{% endif %}.
+          {% endif %}
+          <a href="/account/mfa/setup" style="color:{% if mfa_warning.expired %}#c0392b{% else %}#d29922{% endif %};text-decoration:underline;margin-left:6px;">Set up now →</a>
+        </div>
+      </div>
+      {% if not mfa_warning.expired %}
+      <button onclick="dismissMfaBanner()" title="Dismiss for this session"
+              style="background:none;border:none;color:#d29922;cursor:pointer;font-size:1.1rem;padding:0;flex-shrink:0;">
+        <i class="bi bi-x-lg"></i>
+      </button>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% block content %}{% endblock %}
   </div>
 
@@ -492,6 +534,11 @@ async function dismissAllNotifications() {
   await fetch("/api/config/notifications/dismiss_all", { method: "POST" });
   const banner = document.getElementById("config-notify-banner");
   if (banner) banner.style.display = "none";
+}
+
+async function dismissMfaBanner() {
+  document.getElementById("mfa-warn-banner").style.display = "none";
+  await fetch("/api/mfa/dismiss_banner", { method: "POST" });
 }
 
 function toggleGuestMenu() {
@@ -678,6 +725,13 @@ async function setCustomLayout(name) {
 
 // ── Layout switcher ───────────────────────────────────────────────────────────
 async function setLayout(layout) {
+  // Clear any active custom layout first so the system layout takes effect.
+  // Same pattern as setColorScheme() which clears custom_scheme before applying.
+  await fetch("/api/preferences/custom_layout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "" })
+  });
   await fetch("/api/preferences", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

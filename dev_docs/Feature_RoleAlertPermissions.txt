@@ -1,0 +1,169 @@
+FEATURE: Role-Based Alert Permissions
+======================================
+Type: Feature
+Date: 2026-03-23
+Session: 29
+Outcome: Complete (with one known limitation on standalone override purge)
+
+
+BACKGROUND
+----------
+Two gaps existed in the alert permission system:
+
+1. Whether a role could subscribe to a given alert group (network/security/maintenance)
+   was hardcoded as a JavaScript constant ALLOWED_GROUPS in preferences.html. Monitor
+   and Guest were locked to network-only. This was not configurable without a code
+   change and was not enforced at send time — it only hid UI elements.
+
+2. The role alert defaults panel (email/SMS per type per role) was a collapsible section
+   buried in the Roles tab with no category grouping and no concept of "this type is
+   not available to this role at all."
+
+The goal was to make availability data-driven and admin-configurable, enforce it at
+send time, and give standalone subscribers (admin-managed, no user account) their own
+configurable defaults.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+- First package build had HTML files at the zip root rather than under templates/ and
+  dev_docs/ subdirectories. Rebuilt with correct directory structure. The patcher's
+  _find_in_zip() function can theoretically find files by basename anywhere in the zip,
+  but prior session experience confirmed it requires the correct subdirectory layout.
+  Rule: always mirror the Pi filesystem structure in the zip.
+
+- Two intermediate package builds were superseded within the session as vertical
+  compression and the standalone subscriber column were added iteratively. Not
+  regressions — incremental improvements before the user installed anything.
+
+
+WHAT WORKED
+-----------
+
+DB SCHEMA CHANGE — alert_subscribers.py
+  Added available INTEGER DEFAULT 1 to role_alert_defaults table:
+    ALTER TABLE role_alert_defaults ADD COLUMN available INTEGER DEFAULT 1
+  Wrapped in try/except so it is safe for existing installs (column already exists
+  silently passes). New CREATE TABLE statement also includes the column for fresh installs.
+
+STANDALONE SENTINEL — alert_subscribers.py init_alert_subscribers_db()
+  A new seed block runs every startup using INSERT OR IGNORE to populate role_id=0
+  rows in role_alert_defaults for every ALERT_TYPE at global default values. role_id=0
+  is the sentinel representing admin-managed standalone subscribers (no user account).
+  Safe to run repeatedly — INSERT OR IGNORE means existing values are never overwritten
+  by the startup seed. Admin changes persist across restarts.
+
+seed_role_alert_defaults(role_id)
+  Updated INSERT to include available=1 so new roles get the column populated from day one.
+
+update_role_alert_defaults(role_id, settings)
+  Now accepts and writes the available flag alongside email_enabled and sms_enabled.
+  When available is set to 0 for a type, immediately purges that alert_type key from
+  the alert_overrides JSON blob for all subscribers whose user account belongs to this
+  role:
+    SELECT s.id, s.alert_overrides FROM alert_subscribers s
+    JOIN users u ON s.user_id = u.id WHERE u.role_id = ?
+  For each affected subscriber, the key is deleted from the JSON dict and written back.
+  This makes available=0 take effect immediately — users don't continue receiving alerts
+  they had previously subscribed to.
+
+get_active_recipients(alert_type) — send-time enforcement
+  Before resolving email/SMS defaults, checks availability:
+    lookup_role_id = role_id if role_id else 0
+    role_defaults = all_role_defaults.get(lookup_role_id, {}).get(alert_type, {})
+    if role_defaults and not bool(role_defaults.get("available", 1)):
+        continue
+  The lookup_role_id=0 fallback for standalone subscribers means their defaults resolve
+  from the sentinel row rather than falling through to global defaults. This is the
+  correct enforcement point — even if a user somehow had an override, availability=0
+  skips them entirely before overrides are consulted.
+
+WEBAPP.PY — type_settings_user endpoint
+  Added available field to the per-type response. Looks up the current user's role_id
+  from the users table, fetches all_role_defaults, resolves the available flag from
+  the user's role's row (defaults to 1 if no row exists). Preferences page now receives
+  availability data in the same fetch it already makes — no additional API call needed.
+
+TEMPLATES/ADMIN_USERS.HTML
+  Three-tab layout: Users | Roles | Alerts.
+  Old "Alert Defaults by Role" collapsible removed from Roles tab.
+
+  Alerts tab panel (tab-alerts):
+  - Intro paragraph explaining the three controls.
+  - alerts-tab-grid div populated by renderAlertsTab().
+  - alerts-tab-msg div for save confirmation (below grid).
+
+  renderAlertsTab(roles, defs, typeSettings):
+  - Sorts roles: system (Admin/Operator/Monitor in that order) → custom → Subscribers sentinel.
+  - Guest filtered out (no accounts, no delivery).
+  - Subscribers sentinel: { id: 0, name: 'Subscribers', _isSentinel: true }
+  - Table layout (display:table) with label column (30% width) + equal role columns.
+  - Role header row: role name, "custom" badge for non-system, "no account" badge for sentinel.
+    Sentinel column has a left border separator (border-left:2px solid var(--border-color)).
+  - Sub-header row: Avail / ✉ / 📱 labels under each role column.
+  - Group header rows: Network / Security / Maintenance with bold uppercase text and
+    a top border. Alternating row background (bg-card / bg-input) within each group.
+  - Data rows: label cell + one role cell per role. Each role cell has three checkboxes:
+      rd-available (data-role, data-key) — triggers onAvailChange() on change
+      rd-email (data-role, data-key) — default email on/off
+      rd-sms (data-role, data-key) — default SMS on/off
+    Email and SMS wrappers have class rd-email-wrap and rd-sms-wrap. When Available is
+    unchecked, the corresponding wrapper gets opacity:0.35 and pointer-events:none.
+  - Save buttons row: one nw-btn-primary per role column, calls saveAlertsTab(role.id, role.name).
+  - All left-border separator styles applied to sentinel column cells in every row type.
+
+  Vertical compression applied throughout:
+  - Header row: padding 6px → 3px top/bottom
+  - Sub-header row: padding 4px → 2px top/bottom
+  - Group headers: padding 10px → 5px top
+  - Data rows: padding 6px → 3px (label), 4px → 2px (role cells)
+  - Save row: padding 12px → 6px top
+  - Checkboxes: 14px → 13px
+  - Description paragraph margin-bottom: 16px → 8px
+  - Save message margin-top: 12px → 6px
+
+  onAvailChange(cb):
+  - Finds rd-email-wrap and rd-sms-wrap for the same role/key combination.
+  - Sets opacity and pointer-events to dim or restore them.
+
+  saveAlertsTab(roleId, roleName):
+  - Collects all rd-available, rd-email, rd-sms checkboxes for the role.
+  - Builds settings dict: { alert_type: { available, email_enabled, sms_enabled } }
+  - POSTs to /api/alerts/role_defaults/<roleId> (existing endpoint, now handles available).
+  - Shows success/failure message in alerts-tab-msg.
+
+  loadAlertsTab():
+  - Lazy — only fetches on first open (guarded by _alertsTabLoaded flag).
+  - Parallel fetch: /api/auth/roles, /api/alerts/role_defaults, /api/alerts/type_settings.
+  - showTab('alerts') calls loadAlertsTab().
+  - Role create/edit/delete callbacks reset _alertsTabLoaded=false so grid refreshes
+    on next open.
+
+TEMPLATES/PREFERENCES.HTML
+  Removed:
+    const USER_ROLE = "{{ current_user.role_name }}";
+    const ALLOWED_GROUPS = ...
+  buildAlertTypeGrids() now:
+    if (!val.available) continue;  // skip types unavailable for this role
+  Section headers (Security, Maintenance) only render when the group has at least one
+  available type — guards removed from ALLOWED_GROUPS checks, now implicit in the loop.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+1. Override purge does not apply to standalones (role_id=0).
+   update_role_alert_defaults() purges overrides via JOIN users WHERE role_id=?.
+   Standalone subscribers have user_id IS NULL so they are never returned by this join.
+   In practice standalones have no self-service override UI and are unlikely to have
+   overrides in their alert_overrides JSON. If overrides were ever set programmatically
+   on their behalf, setting available=0 would suppress delivery at send time (correctly)
+   but would not clean up the stale override data. Fixing this would require a separate
+   purge path targeting WHERE user_id IS NULL directly.
+
+2. type_settings_user available field does not apply to standalones.
+   Standalones have no user account and never hit My Account or the preferences page.
+   This is correct behavior — the endpoint is irrelevant for standalones.
+
+3. Send-time enforcement confirmed by code inspection. Live fire test (trigger an alert
+   for a type set available=0 for a role, confirm that role's user does not receive it)
+   was not run during this session. [UNVERIFIED]

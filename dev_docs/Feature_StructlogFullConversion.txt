@@ -1,0 +1,70 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: STRUCTLOG FULL CONVERSION
+==============================================================
+Name: Structlog conversion of all remaining modules
+Type: Feature
+Date: 2026-03-18
+Session: 20
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+Session 17 (v3.3.37) converted the four main entry-point files to structlog: main.py,
+wsgi.py, monitor.py, webapp.py. However 13 other modules remained on plain
+logging.getLogger(), causing their output to appear as plain text mixed in with the
+JSON from the converted files. This was first noticed when a patcher [patcher] line
+appeared in plain text alongside JSON health_check lines. The goal was full JSON
+coverage so Loki queries work consistently across all log output.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Nothing failed during implementation. The conversion was straightforward once the
+pattern was established. The only friction was the multi-response nature of the work
+(13 files required several "continue" prompts across multiple turns).
+
+
+WHAT WORKED
+-----------
+All 13 files converted in v3.3.43. The approach was identical for each file:
+
+1. Add "import structlog" after "import logging" (kept logging import since stdlib
+   handlers are still configured in wsgi.py/main.py)
+2. Replace logging.getLogger("netwatch.X") with structlog.get_logger().bind(service="X")
+3. Convert all log call sites from f-string format to keyword argument format
+
+SERVICE BINDINGS:
+- service="web"     — patcher.py, updater.py, configeditor.py, certmanager.py,
+                      config_validator.py, security_log.py, auth.py (web-primary)
+- service="monitor" — relay.py, network.py, button.py, alerts.py (monitor-primary),
+                      alert_subscribers.py, database.py
+
+Note: alerts.py, alert_subscribers.py, auth.py, database.py are "both" services per
+SERVICE_MAP. They bind at import time so the service label reflects the first service
+that loaded them. This is acceptable — the important thing is they emit JSON.
+
+KEY CONVERSION PATTERN:
+- Old: log.info(f"[patcher] Replaced {target}")
+- New: log.info("File replaced", path=target)
+- The [patcher] prefix was dropped — service field handles identification
+- All f-string interpolation moved to keyword args for proper field extraction in Loki
+
+VERIFICATION:
+- Zero remaining f-string log calls across all 13 files (confirmed by grep)
+- Zero stale logging.getLogger() calls (confirmed by grep)
+- All 13 files pass python3 -m py_compile
+- Journalctl confirmed: all log lines JSON after v3.3.43 restart (except gunicorn
+  access log which was addressed in v3.3.44)
+
+FILES CHANGED: patcher.py, alerts.py, alert_subscribers.py, auth.py, database.py,
+  certmanager.py, config_validator.py, security_log.py, updater.py, configeditor.py,
+  relay.py, network.py, button.py
+SHIPPED: v3.3.43
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Gunicorn's own lifecycle messages (Starting gunicorn, Booting worker, Handling signal)
+  remain plain text. These come from gunicorn's internal error logger, separate from
+  the access log. They are low-value operational noise and not worth converting.
+  Loki queries can filter them with | json (non-JSON lines are skipped).

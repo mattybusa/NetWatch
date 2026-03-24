@@ -165,6 +165,46 @@
 
 </div>
 
+<!-- ── New keys modal ── -->
+{% if pending_notifications %}
+<div id="new-keys-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);
+     z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--bg-card);border-radius:12px;padding:28px;max-width:540px;width:92%;
+              border:1px solid var(--border-color);box-shadow:var(--shadow);
+              max-height:85vh;display:flex;flex-direction:column;">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:6px;">
+      <i class="bi bi-stars" style="color:var(--accent);font-size:1.3rem;flex-shrink:0;margin-top:2px;"></i>
+      <div>
+        <div class="nw-label" style="font-size:0.9rem;margin-bottom:4px;">
+          {{ pending_notifications|length }} New Setting{{ 's' if pending_notifications|length != 1 else '' }} Added
+        </div>
+        <p style="font-size:0.8rem;color:var(--text-muted);margin:0;line-height:1.5;">
+          A recent update added the following setting{{ 's' if pending_notifications|length != 1 else '' }}.
+          Default values have been applied — review and adjust if needed, then save.
+        </p>
+      </div>
+    </div>
+
+    <!-- Scrollable key list -->
+    <div style="overflow-y:auto;flex:1;margin:16px 0;padding-right:4px;">
+      <div id="new-keys-list"></div>
+    </div>
+
+    <!-- Buttons -->
+    <div style="display:flex;gap:10px;justify-content:flex-end;flex-shrink:0;">
+      <button class="nw-btn" onclick="dismissNewKeys()" style="font-size:0.82rem;">
+        Dismiss
+      </button>
+      <button class="nw-btn nw-btn-primary" onclick="saveNewKeys()" style="font-size:0.82rem;">
+        <i class="bi bi-check-lg me-1"></i>Save &amp; Restart Monitor
+      </button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- ── Passphrase modal (export + import) ── -->
 <div id="passphrase-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);
      z-index:1000;align-items:center;justify-content:center;">
@@ -703,6 +743,137 @@ function closeDiffModal() {
 document.getElementById("import-diff-modal").addEventListener("click", function(e) {
   if (e.target === this) closeDiffModal();
 });
+
+// ── New keys modal ────────────────────────────────────────────────────────────
+{% if pending_notifications %}
+(function() {
+  const notifications = {{ pending_notifications | tojson }};
+  const fields        = {{ fields_json | safe }};
+  const values        = {{ values | tojson }};
+  const fieldMap      = {};
+  for (const f of fields) fieldMap[f.key] = f;
+
+  function buildModalRows() {
+    const container = document.getElementById("new-keys-list");
+    if (!container) return;
+    let html = "";
+    for (const notif of notifications) {
+      const field = fieldMap[notif.key];
+      if (!field) continue;
+      const val = values[field.key] !== undefined ? values[field.key] : field.default;
+
+      let inputHtml = "";
+      if (field.type === "bool") {
+        const checked = (val === true || val === "True" || val === "true");
+        inputHtml = `
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="position:relative;display:inline-block;width:44px;height:24px;cursor:pointer;"
+                 onclick="toggleModalBool('modal_${esc(field.key)}')">
+              <input type="checkbox" id="modal_${esc(field.key)}"
+                     ${checked ? "checked" : ""}
+                     style="opacity:0;width:0;height:0;position:absolute;"
+                     onclick="event.stopPropagation()">
+              <span id="modal_toggle_${esc(field.key)}"
+                    style="position:absolute;inset:0;border-radius:24px;
+                           background:${checked ? "var(--ok)" : "var(--border-color)"};
+                           transition:background 0.2s;cursor:pointer;pointer-events:none;">
+                <span style="position:absolute;left:${checked ? "22px" : "2px"};top:2px;
+                             width:20px;height:20px;border-radius:50%;background:white;
+                             transition:left 0.2s;"></span>
+              </span>
+            </div>
+            <span id="modal_bool_label_${esc(field.key)}" style="font-size:0.83rem;
+                  color:${checked ? "var(--ok)" : "var(--text-muted)"};">
+              ${checked ? "Enabled" : "Disabled"}
+            </span>
+          </div>`;
+      } else if (field.type === "int") {
+        inputHtml = `<input class="nw-input" type="number" id="modal_${esc(field.key)}"
+                       value="${esc(String(val))}"
+                       ${field.min !== undefined ? 'min="' + field.min + '"' : ""}
+                       ${field.max !== undefined ? 'max="' + field.max + '"' : ""}
+                       style="max-width:200px;">
+                     ${field.min !== undefined && field.max !== undefined
+                       ? '<span style="font-size:0.72rem;color:var(--text-muted);margin-left:8px;">Range: ' + field.min + " – " + field.max + "</span>"
+                       : ""}`;
+      } else if (field.type === "password") {
+        inputHtml = `<input class="nw-input" type="password" id="modal_${esc(field.key)}"
+                       value="${esc(String(val))}" style="font-family:var(--font-mono);">`;
+      } else {
+        inputHtml = `<input class="nw-input" type="text" id="modal_${esc(field.key)}"
+                       value="${esc(String(val))}">`;
+      }
+
+      html += `
+      <div style="border:1px solid var(--border-color);border-radius:8px;padding:14px;
+                  margin-bottom:10px;background:var(--bg-input);"
+           data-key="${esc(field.key)}" data-type="${esc(field.type)}">
+        <div style="font-size:0.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;
+                    color:var(--accent);margin-bottom:6px;">${esc(field.label)}</div>
+        ${inputHtml}
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">
+          ${esc(field.description || "")}
+        </div>
+      </div>`;
+    }
+    container.innerHTML = html;
+  }
+
+  window.toggleModalBool = function(id) {
+    const cb     = document.getElementById(id);
+    const key    = id.replace("modal_", "");
+    const toggle = document.getElementById("modal_toggle_" + key);
+    const label  = document.getElementById("modal_bool_label_" + key);
+    const dot    = toggle.querySelector("span");
+    cb.checked = !cb.checked;
+    if (cb.checked) {
+      toggle.style.background = "var(--ok)";
+      dot.style.left = "22px";
+      label.style.color = "var(--ok)";
+      label.textContent = "Enabled";
+    } else {
+      toggle.style.background = "var(--border-color)";
+      dot.style.left = "2px";
+      label.style.color = "var(--text-muted)";
+      label.textContent = "Disabled";
+    }
+  };
+
+  window.saveNewKeys = async function() {
+    // Copy modal values into the main form fields
+    const rows = document.querySelectorAll("#new-keys-list [data-key]");
+    for (const row of rows) {
+      const key   = row.dataset.key;
+      const type  = row.dataset.type;
+      const modalInput = document.getElementById("modal_" + key);
+      const mainInput  = document.getElementById("field_" + key);
+      if (!modalInput || !mainInput) continue;
+
+      if (type === "bool") {
+        const checked = modalInput.checked;
+        const mainCb  = mainInput;
+        if (mainCb.checked !== checked) toggleBool(key);
+      } else {
+        mainInput.value = modalInput.value;
+      }
+    }
+    // Dismiss all notifications
+    await fetch("/api/config/notifications/dismiss_all", { method: "POST" });
+    document.getElementById("new-keys-modal").style.display = "none";
+    // Trigger save
+    saveConfig();
+  };
+
+  window.dismissNewKeys = async function() {
+    await fetch("/api/config/notifications/dismiss_all", { method: "POST" });
+    document.getElementById("new-keys-modal").style.display = "none";
+  };
+
+  // Fire on page load
+  buildModalRows();
+  document.getElementById("new-keys-modal").style.display = "flex";
+})();
+{% endif %}
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 function esc(s) {

@@ -17,17 +17,18 @@
 import time
 import threading
 import logging
+import structlog
 
 import config
 
-log = logging.getLogger("netwatch.button")
+log = structlog.get_logger().bind(service="monitor")
 
 try:
     import RPi.GPIO as GPIO
     GPIO_AVAILABLE = True
 except ImportError:
     GPIO_AVAILABLE = False
-    log.warning("RPi.GPIO not available — button handler in SIMULATION mode")
+    log.warning("RPi.GPIO not available: button handler in simulation mode")
 
 
 class ButtonHandler:
@@ -63,7 +64,7 @@ class ButtonHandler:
     def start(self):
         """Register GPIO interrupt and begin listening for button presses."""
         if not GPIO_AVAILABLE:
-            log.info("[SIM] Button handler not started (no GPIO)")
+            log.info("Button handler not started (simulation)")
             return
 
         # Set up the button pin with internal pull-up resistor
@@ -80,15 +81,12 @@ class ButtonHandler:
                 callback=self._on_edge,
                 bouncetime=self.DEBOUNCE_MS
             )
-            log.info(f"Button handler started on GPIO {config.BUTTON_PIN}")
+            log.info("Button handler started", gpio=config.BUTTON_PIN)
         except RuntimeError as e:
             # Edge detection can fail if the pin is already in use or not ready.
             # Log a warning but allow the monitor to continue — network monitoring
             # is more important than the button, and this can be debugged separately.
-            log.warning(
-                f"Button edge detection failed: {e} — "
-                f"button will be unavailable but monitor continues normally"
-            )
+            log.warning("Button edge detection failed: button unavailable, monitor continues", error=str(e))
 
     def stop(self):
         """Remove GPIO event detection."""
@@ -107,7 +105,7 @@ class ButtonHandler:
                 # Button pressed — record the time
                 self.hold_start = time.time()
                 self.press_count += 1
-                log.debug(f"Button pressed (count: {self.press_count})")
+                log.debug("Button pressed", press_count=self.press_count)
 
             else:
                 # Button released — check if it was a long press
@@ -119,7 +117,7 @@ class ButtonHandler:
 
                 if hold_duration >= self.LONG_PRESS_DURATION:
                     # Long press detected — act immediately, clear press count
-                    log.info(f"Long press detected ({hold_duration:.1f}s) → modem reset")
+                    log.info("Long press detected: modem reset", hold_duration_s=round(hold_duration, 1))
                     self.press_count = 0
                     if self.eval_timer:
                         self.eval_timer.cancel()
@@ -148,18 +146,18 @@ class ButtonHandler:
             self.press_count = 0
             self.eval_timer  = None
 
-        log.debug(f"Evaluating {count} press(es)")
+        log.debug("Evaluating button presses", count=count)
 
         if count == 0:
             return
         elif count == 1:
-            log.info("Single press → full reset")
+            log.info("Single press: full reset")
             threading.Thread(target=self._do_full_reset, daemon=True).start()
         elif count == 2:
             # Two presses — no defined action, log it
-            log.info("Double press detected (no action assigned)")
+            log.info("Double press: no action assigned")
         elif count >= 3:
-            log.info("Triple press → toggling lockout mode")
+            log.info("Triple press: toggling lockout mode")
             self._toggle_lockout()
 
     # ── Actions ───────────────────────────────────────────────────────────────
@@ -182,7 +180,7 @@ class ButtonHandler:
         """Toggle lockout mode on the shared monitor state."""
         self.state.lockout = not self.state.lockout
         status = "ENABLED" if self.state.lockout else "DISABLED"
-        log.info(f"Lockout mode {status} via button triple-press")
+        log.info("Lockout mode toggled via button", status=status)
 
         import alerts
         alerts.send_alert(

@@ -307,14 +307,17 @@ in a package.
 
 2026-03-13 | v3.3.25
 PATCHER LEAVES TEMP .pyc FILES IN /tmp/__pycache__/ -- NEVER CLEANED UP
+FIXED in v3.3.53 -- this entry retained for historical reference.
 patcher.py performs a syntax check by compiling each Python file to a temp .pyc in
 /tmp/__pycache__/. It never cleans up these files. They accumulate across every package
 install and are owned by whatever user ran the install. If the directory exists with
 wrong ownership/permissions when a new user (e.g. netwatch-svc via web service) tries
 to write there, the patcher reports a misleading "syntax error in filename.py" when the
 real error is a permission failure on the temp file. Workaround: sudo chmod 777
-/tmp/__pycache__. Real fix (backlog): use tempfile.mkstemp() in patcher.py and clean
-up after the syntax check completes or fails.
+/tmp/__pycache__. Fixed in v3.3.53 by using tempfile.mkstemp() with an explicit cfile
+argument so py_compile never touches /tmp/__pycache__/, and cleaning up both temp files
+in a finally block. PermissionError now reported accurately instead of as a false syntax
+error. If /tmp/__pycache__ accumulated files before v3.3.53: sudo rm -rf /tmp/__pycache__
 
 ---
 
@@ -489,3 +492,197 @@ Fix: AI_Session_Process.txt explicitly lists these three files by name so
 a new session never relies on the API listing to discover them. Always fetch
 ChatSummary_1.1.txt, ChatSummary_1.2.txt, and ChatSummary_1.3.txt by explicit
 URL regardless of what the directory listing returns.
+
+---
+
+2026-03-14 | v3.3.31
+SUDOERS EXACT MATCH — systemctl COMMANDS MUST MATCH WITH AND WITHOUT .service SUFFIX
+patcher.py calls sudo systemctl restart netwatch-web (no .service suffix).
+Sudoers was configured with /usr/bin/systemctl restart netwatch-web.service only.
+Sudoers does exact string matching — no suffix != .service suffix, so the restart
+was rejected with "command not allowed" and the web service never restarted after
+package install. Symptom: package appears to install successfully but changes have
+no effect (old code still running).
+Fix: add both forms to sudoers:
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-web
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-monitor
+Keep the .service versions too — having both is harmless. This applies to any
+service account that needs to restart systemd services via sudo.
+
+---
+
+2026-03-14 | v3.3.32
+PATCHER.PY HAS NO IMPLICIT ACCESS TO config — MUST IMPORT EXPLICITLY
+patcher.py used getattr(config, "SNAPSHOT_RETENTION", 10) in the pruning block
+without importing config. When patcher is called from webapp.py, config happens
+to be in the global namespace so it works incidentally. But this is not reliable
+and the pruning block was silently failing with "name 'config' is not defined"
+every single package install since the codebase was first set up — causing snapshots
+to accumulate indefinitely (44 snapshots observed before fix).
+Rule: patcher.py must import everything it needs explicitly. Never rely on another
+module having imported something into the shared namespace. The bare
+"except Exception: pass" on the pruning block was masking this for months.
+Fix: added "import config" to patcher.py imports. Also added logging.basicConfig
+to wsgi.py so web service log output (including patcher) appears in journalctl.
+
+---
+
+2026-03-14 | v3.3.31
+WEB SERVICE HAS NO LOGGING HANDLER WITHOUT basicConfig IN wsgi.py
+wsgi.py had no logging.basicConfig() call. All log.info(), log.error() etc. from
+patcher.py, webapp.py, and other modules imported by the web service were silently
+dropped — never appearing in journalctl or the log file. Only the monitor service
+(main.py) had logging configured. Fix: added logging.basicConfig to wsgi.py matching
+the same pattern as main.py (INFO level, same format, FileHandler + StreamHandler).
+Both services now write to the same log file and both appear in journalctl.
+
+---
+
+2026-03-14 | Session 16 (ops-pi setup)
+LOKI 3.X REQUIRES delete_request_store WHEN RETENTION ENABLED
+When retention_enabled: true is set in the Loki compactor block, Loki 3.x
+also requires delete_request_store to be configured. Without it, Loki fails
+at startup with:
+  "invalid compactor config: compactor.delete-request-store should be
+  configured when retention is enabled"
+Fix: add delete_request_store: filesystem to the compactor block.
+This is a breaking change from older Loki config examples which did not
+require this field.
+
+---
+
+2026-03-14 | Session 16 (ops-pi setup)
+GITEA REQUIRES WRITE ACCESS TO app.ini ON FIRST STARTUP
+Gitea generates and saves an internal token to app.ini on first startup.
+If app.ini is not writable by the gitea service user at that point, Gitea
+crashes with "permission denied" writing to app.ini.
+Fix: set app.ini to root:gitea ownership with 660 permissions before first
+start. After Gitea has started successfully and written its token, lock back
+down to 640. The GITEA INITIAL SETUP WIZARD REWRITES app.ini gotcha from
+Session 11 covers a related but distinct scenario (wizard rewriting the file).
+This gotcha is specifically about the internal token generation on first run.
+
+---
+
+2026-03-14 | Session 16 (ops-pi setup)
+GITEA DATABASE MIGRATION VERSION MUST MATCH OR BE BELOW BINARY VERSION
+Gitea refuses to start if the SQLite database migration version is newer than
+the binary supports. Error message:
+  "Your database (migration version: N) is for a newer Gitea, you can not
+  use the newer database for this old Gitea release (M)."
+When migrating a Gitea installation to new hardware, always match the binary
+version to what was running on the old hardware, or use a newer version.
+Never use an older binary with an existing database.
+Migration version 323 = Gitea 1.25.x. Check startup logs for the version
+numbers if Gitea crashes immediately after install on an existing database.
+
+2026-03-15 | Session 17 (Promtail install)
+PI 3B+ IS 64-BIT (ARM64) -- DO NOT ASSUME 32-BIT
+The Raspberry Pi 3B+ has a Cortex-A53 processor (ARMv8), which is 64-bit capable.
+When running Raspberry Pi OS Lite 64-bit, the kernel and userspace are both 64-bit.
+Always use linux-arm64 binaries, not linux-arm (armhf/32-bit) binaries. The 32-bit
+binary will fail at execution with "required file not found" because the 32-bit ELF
+interpreter (/lib/ld-linux-armhf.so.3) is not installed on the 64-bit OS.
+Confirmed: node_exporter and promtail both installed as arm64 on this Pi.
+
+---
+
+2026-03-15 | Session 18
+MANIFEST.JSON KEY IS "actions" NOT "files"
+patcher.py checks for manifest["actions"] and rejects the package with
+"manifest.json has no 'actions' list" if the key is named anything else.
+The correct manifest structure is:
+  { "version": "...", "description": "...", "actions": [...], "restart": [] }
+Do not use "files" — it will be silently ignored and the package will be rejected.
+
+---
+
+2026-03-15 | Session 17 (Promtail install)
+CREATE SERVICE USER BEFORE RUNNING A DAEMON MANUALLY
+If a systemd service will run as a dedicated user (e.g. promtail), create that user
+and set correct ownership on all data directories BEFORE doing any manual test runs.
+Running the daemon manually as a different user (e.g. mboynton) creates data files
+owned by that user. When the service then starts as the service account, it cannot
+write those files and fails immediately with "permission denied". The fix is
+sudo chown -R <service-user>:<service-user> <data-dir>, but it wastes time and
+causes confusing restart loops. Always: create user, set ownership, then test.
+
+---
+
+2026-03-17 | Session 19
+WEBAPP CRONTAB OPERATIONS RUN AS netwatch-svc, NOT mboynton
+The web service runs as netwatch-svc. Any crontab reads or writes executed by webapp.py
+(e.g. subprocess.run(["crontab", "-l"]) or subprocess.run(["crontab", "-"], ...))
+operate on netwatch-svc's crontab, not mboynton's. This is correct behavior but
+non-obvious. Consequence: cron jobs written by the UI will not appear in
+"crontab -e" when SSH'd in as mboynton. Check with: sudo crontab -l -u netwatch-svc.
+Also: any shell scripts invoked by these cron jobs run as netwatch-svc and must not
+use $HOME (resolves to /nonexistent). Use script-relative paths instead:
+  NETWATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+---
+
+2026-03-17 | Session 19
+GPG KEYRING IS USER-SPECIFIC — netwatch-svc NEEDS ITS OWN
+GPG refuses to use a keyring owned by a different user, even with --homedir pointing
+at it. Running gpg as netwatch-svc with --homedir /home/mboynton/.gnupg fails with
+"unsafe ownership" and "Permission denied". Fix: create a dedicated keyring for
+netwatch-svc at a path it owns (e.g. /home/mboynton/netwatch/.gnupg), import the
+public key into it, and point all gpg calls at that path with --homedir.
+  sudo mkdir -p /home/mboynton/netwatch/.gnupg
+  sudo chmod 700 /home/mboynton/netwatch/.gnupg
+  sudo chown netwatch-svc:netwatch-svc /home/mboynton/netwatch/.gnupg
+  gpg --export --armor recipient@email.com > /tmp/pubkey.asc
+  sudo -u netwatch-svc gpg --homedir /home/mboynton/netwatch/.gnupg --import /tmp/pubkey.asc
+
+---
+
+---
+
+2026-03-18 | v3.3.51-v3.3.52
+UPDATER.PY HAS TWO SEPARATE UPLOAD PATHS — backup_file() vs save_dev_doc()
+updater.py handles two distinct upload flows that are easy to confuse:
+- backup_file() / apply_file(): the Deployed Files drag-and-drop path (/admin/update)
+- save_dev_doc(): the Dev Docs upload path (/api/devdocs/upload)
+The context doc (NetWatch_AI_Context_latest.txt) is uploaded via Dev Docs, so
+logic targeting it must go in save_dev_doc(), not backup_file(). v3.3.51 put the
+dated backup in the wrong function; v3.3.52 corrected it to save_dev_doc().
+Rule: when adding special-case logic for a specific file in updater.py, verify
+which upload path that file actually uses before deciding which function to modify.
+
+---
+
+---
+
+2026-03-20 | v3.3.57-v3.3.59
+SESSION IDLE TIMEOUT — THREE COMPOUNDING BUGS
+The session idle timeout feature had three separate bugs that had to be fixed in sequence:
+1. /api/session/status and /api/session/ping had @auth.login_required. When the session
+   expired, these returned a redirect instead of JSON. The client JS catch() swallowed
+   the error silently and the redirect to /login never fired.
+2. /api/session/status and /api/session/ping were missing from _POLLING_PATHS, so the
+   30-second checkRemaining() call was resetting last_activity every tick via
+   update_last_activity() before_request hook.
+3. Every auto-refreshing page (dashboard every 10s, logs, metrics) called API endpoints
+   not in _POLLING_PATHS, resetting last_activity continuously. The blocklist approach
+   is fundamentally fragile — any new polling endpoint not added to the list breaks
+   idle timeout silently. Fix: removed update_last_activity() from before_request
+   entirely. last_activity is now updated ONLY by /api/session/ping, which is triggered
+   by real user events (mousedown, keydown, touchstart, scroll, wheel).
+After installing the fix, users must log out and back in to get a clean session —
+the old cookie carries a stale last_activity timestamp that the new code reads correctly
+but which may be arbitrarily old.
+
+---
+
+2026-03-21 | v3.3.81
+SHELL SCRIPTS CALLING PYTHON HELPERS THAT IMPORT NETWATCH MODULES MUST USE VENV
+Shell scripts (backup.sh, backup_db.sh, pkg_update.sh) use bare python3 for simple
+one-liners that only import config (stdlib-compatible). Any Python helper that imports
+NetWatch modules (alert_subscribers, alerts, database, etc.) must use the venv Python:
+  "$NETWATCH_DIR/venv/bin/python3" "$NETWATCH_DIR/helper.py" ...
+Using bare python3 for these fails with ModuleNotFoundError on structlog and other
+venv-only packages. pkg_update_alert.py works because alerts.py is its only import
+and alerts.py's dependencies are all in the venv -- but the call must still use venv
+python3. Always use "$NETWATCH_DIR/venv/bin/python3" for any helper that goes beyond
+stdlib + config.

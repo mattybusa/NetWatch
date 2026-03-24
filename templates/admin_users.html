@@ -59,6 +59,7 @@
 <div style="margin-bottom:-1px;">
   <button class="tab-btn active" onclick="showTab('users')">Users</button>
   <button class="tab-btn" onclick="showTab('roles')">Roles</button>
+  <button class="tab-btn" onclick="showTab('alerts')">Alerts</button>
 
 </div>
 
@@ -99,27 +100,22 @@
       </table>
     </div>
 
-    <!-- ── Alert Defaults by Role (collapsible) ── -->
-    <div style="margin-top:24px;">
-      <div onclick="toggleRoleDefaults()" style="display:flex;align-items:center;gap:8px;
-           cursor:pointer;user-select:none;padding:10px 14px;background:var(--bg-input);
-           border-radius:8px;border:1px solid var(--border-color);">
-        <span id="role-defaults-chevron" style="font-size:0.75rem;transition:transform 0.2s;">▶</span>
-        <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);letter-spacing:1px;text-transform:uppercase;">
-          Alert Defaults by Role
-        </span>
-        <span style="font-size:0.72rem;color:var(--text-muted);margin-left:4px;">
-          — email &amp; SMS defaults per alert type for each role
-        </span>
-      </div>
-      <div id="role-defaults-panel" style="display:none;padding:16px 4px 4px;">
-        <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:14px;">
-          Subscribers inherit these defaults unless they've set their own overrides in Alert Subscriptions.
-        </p>
-        <div id="role-defaults-grid-admin" style="display:block;width:100%;"></div>
-        <div id="role-defaults-msg" style="display:none;font-size:0.8rem;margin-top:10px;"></div>
-      </div>
+  </div>
+
+
+  <!-- ── Alerts Tab ── -->
+  <div id="tab-alerts" class="tab-panel">
+    <div class="d-flex align-items-center mb-3" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <div class="nw-label mb-0">Alert Permissions by Role</div>
     </div>
+    <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:8px;">
+      Control which alert types each role may subscribe to, and set default email &amp; SMS delivery.
+      Unchecking <strong>Available</strong> removes the type from that role's subscription page and
+      immediately clears any existing overrides for users in that role.
+      Email &amp; SMS defaults apply when a user has not set their own override.
+    </p>
+    <div id="alerts-tab-grid" style="width:100%;"></div>
+    <div id="alerts-tab-msg" style="display:none;font-size:0.8rem;margin-top:6px;"></div>
   </div>
 
 
@@ -194,10 +190,16 @@
     <div class="modal-title">Reset Password</div>
     <input type="hidden" id="rp-user-id">
     <div style="font-size:0.83rem;color:var(--text-muted);margin-bottom:14px;">
-      Resetting <strong id="rp-username"></strong>'s password. They will be required to change it on next login.
+      Resetting <strong id="rp-username"></strong>'s password.
     </div>
     <label class="f-label">New Temporary Password</label>
     <input class="f-input" type="password" id="rp-password" placeholder="min 8 characters">
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;margin-bottom:4px;">
+      <input type="checkbox" id="rp-force-change" checked style="width:15px;height:15px;cursor:pointer;">
+      <label for="rp-force-change" style="font-size:0.83rem;cursor:pointer;">
+        Require password change on next login
+      </label>
+    </div>
     <div class="btn-row">
       <button class="nw-btn" onclick="closeModal('resetPassModal')">Cancel</button>
       <button class="nw-btn nw-btn-primary" style="flex:1;" onclick="resetPassword()">Reset Password</button>
@@ -252,6 +254,7 @@ function showTabByName(name) {
 }
 function showTab(name) {
   showTabByName(name);
+  if (name === 'alerts') loadAlertsTab();
 }
 
 // ── Modal helpers ─────────────────────────────────────────────────────────────
@@ -320,6 +323,7 @@ async function loadUsers() {
       <td>
         <button class="range-btn" onclick="openEditUser(${u.id},'${u.username}',${u.role_id},${u.is_active},${u.must_change_pass})">Edit</button>
         <button class="range-btn" onclick="openResetPass(${u.id},'${u.username}')">Reset PW</button>
+        ${u.mfa_enabled ? `<button class="range-btn" style="color:var(--warn);" onclick="resetMfa(${u.id},'${u.username}')">Reset MFA</button>` : ""}
         ${u.is_locked ? `<button class="range-btn" style="color:var(--warn);" onclick="unlockUser(${u.id},'${u.username}')">Unlock</button>` : ""}
         ${u.is_active
           ? `<button class="range-btn" style="color:var(--warn);" onclick="setUserActive(${u.id},'${u.username}',false)">Disable</button>`
@@ -397,20 +401,22 @@ function openResetPass(id, username) {
   document.getElementById("rp-user-id").value        = id;
   document.getElementById("rp-username").textContent = username;
   document.getElementById("rp-password").value       = "";
+  document.getElementById("rp-force-change").checked = true;  // default to requiring change
   document.getElementById("rp-result").style.display = "none";
   openModal("resetPassModal");
 }
 
 async function resetPassword() {
-  const id       = parseInt(document.getElementById("rp-user-id").value);
-  const password = document.getElementById("rp-password").value;
+  const id           = parseInt(document.getElementById("rp-user-id").value);
+  const password     = document.getElementById("rp-password").value;
+  const force_change = document.getElementById("rp-force-change").checked;
 
   if (password.length < 8) {
     showResult("rp-result", "Password must be at least 8 characters", false);
     return;
   }
 
-  const res = await api(`/api/auth/users/${id}/password`, "POST", { new_password: password, force_change: true });
+  const res = await api(`/api/auth/users/${id}/password`, "POST", { new_password: password, force_change });
   showResult("rp-result", res.message || (res.status === "ok" ? "Password reset" : "Failed"), res.status === "ok");
   if (res.status === "ok") { setTimeout(() => closeModal("resetPassModal"), 800); }
 }
@@ -478,6 +484,14 @@ async function unlockUser(id, username) {
   if (!confirm(`Remove temporary lock from '${username}'?`)) return;
   const res = await api(`/api/admin/users/${id}/unlock`, "POST");
   showToast(res.status === "ok" ? `${username} unlocked` : (res.message || "Failed"),
+            res.status === "ok" ? "success" : "error");
+  if (res.status === "ok") loadUsers();
+}
+
+async function resetMfa(id, username) {
+  if (!confirm(`Reset MFA for '${username}'? This will disable their MFA and set a fresh grace period.`)) return;
+  const res = await api(`/api/admin/mfa_reset/${id}`, "POST");
+  showToast(res.status === "ok" ? `MFA reset for ${username}` : (res.message || "Failed"),
             res.status === "ok" ? "success" : "error");
   if (res.status === "ok") loadUsers();
 }
@@ -580,8 +594,7 @@ async function saveRole() {
       loadUsers();
       showTabByName('roles');
       // Refresh role alert defaults if panel is open
-      const panel = document.getElementById('role-defaults-panel');
-      if (panel && panel.style.display !== 'none') loadRoleDefaults();
+      _alertsTabLoaded = false;  // force Alerts tab to reload on next open
     }, 800);
   }
 }
@@ -591,8 +604,7 @@ async function deleteRole(id, name) {
   if (res.status === 'ok') {
     showToast(`Role '${name}' deleted`, 'success');
     loadRoles(); loadUsers();
-    const dp = document.getElementById('role-defaults-panel');
-    if (dp && dp.style.display !== 'none') loadRoleDefaults();
+    _alertsTabLoaded = false;  // force Alerts tab to reload on next open
     return;
   }
   if (res.status === 'has_users') {
@@ -680,8 +692,7 @@ async function confirmRoleDelete(roleId) {
     document.body.removeChild(modal);
     showToast('Role deleted and users reassigned', 'success');
     loadRoles(); loadUsers();
-    const dp2 = document.getElementById('role-defaults-panel');
-    if (dp2 && dp2.style.display !== 'none') loadRoleDefaults();
+    _alertsTabLoaded = false;  // force Alerts tab to reload on next open
   } else {
     const msg = modal.querySelector('#reassign-msg');
     msg.style.display = 'block'; msg.style.color = 'var(--fail)';
@@ -690,137 +701,226 @@ async function confirmRoleDelete(roleId) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MY ACCOUNT
+// ALERTS TAB — role alert permissions grid
 // ══════════════════════════════════════════════════════════════════════════════
-// ROLE ALERT DEFAULTS
-// ══════════════════════════════════════════════════════════════════════════════
-let _roleDefaults = {};
-let _alertTypeKeys = [];
 
-function toggleRoleDefaults() {
-  const panel   = document.getElementById('role-defaults-panel');
-  const chevron = document.getElementById('role-defaults-chevron');
-  const open = panel.style.display === 'none';
-  panel.style.display = open ? 'block' : 'none';
-  chevron.style.transform = open ? 'rotate(90deg)' : '';
-  if (open && !_alertTypeKeys.length) loadRoleDefaults();
-}
+// Group display order and labels for the alerts tab grid
+const ALERT_GROUP_ORDER = ['network', 'security', 'maintenance'];
+const ALERT_GROUP_LABELS = { network: 'Network', security: 'Security', maintenance: 'Maintenance' };
 
-async function loadRoleDefaults() {
+// Loaded once when the Alerts tab is first opened
+let _alertsTabLoaded = false;
+
+async function loadAlertsTab() {
+  if (_alertsTabLoaded) return;
+  _alertsTabLoaded = true;
   const [roles, defs, typeSettings] = await Promise.all([
     api('/api/auth/roles'),
     fetch('/api/alerts/role_defaults').then(r => r.json()),
     fetch('/api/alerts/type_settings').then(r => r.json()),
   ]);
-  _roleDefaults  = defs;
-  _alertTypeKeys = Object.keys(typeSettings);
-  renderRoleDefaultsAdmin(roles, defs, typeSettings);
+  renderAlertsTab(roles, defs, typeSettings);
 }
 
-function roleCardHtml(role, rd, atypes) {
-  const rows = atypes.map(([key, global]) => {
-    const d      = rd[key] || {};
-    const emailOn = d.email_enabled !== undefined ? !!d.email_enabled : !!global.email_enabled;
-    const smsOn   = d.sms_enabled   !== undefined ? !!d.sms_enabled   : !!global.sms_enabled;
-    return `<div style="display:flex;align-items:center;justify-content:space-between;
-                        padding:5px 0;border-bottom:1px solid var(--border-color);font-size:0.78rem;">
-      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:6px;">${global.label || key}</span>
-      <label style="display:flex;align-items:center;gap:3px;margin-right:8px;cursor:pointer;font-size:0.72rem;" title="Email">
-        <input type="checkbox" class="rdadmin-email" data-role="${role.id}" data-key="${key}"
-               style="width:13px;height:13px;" ${emailOn ? 'checked' : ''}> ✉
-      </label>
-      <label style="display:flex;align-items:center;gap:3px;cursor:pointer;font-size:0.72rem;" title="SMS">
-        <input type="checkbox" class="rdadmin-sms" data-role="${role.id}" data-key="${key}"
-               style="width:13px;height:13px;" ${smsOn ? 'checked' : ''}> 📱
-      </label>
-    </div>`;
-  }).join('');
+function renderAlertsTab(roles, defs, typeSettings) {
+  const grid = document.getElementById('alerts-tab-grid');
 
-  const isSystem = !!role.is_system;
-  const label = isSystem
-    ? `<span style="font-size:0.78rem;font-weight:600;color:var(--accent);letter-spacing:1px;text-transform:uppercase;">${role.name}</span>`
-    : `<span style="font-size:0.78rem;font-weight:600;color:var(--accent);letter-spacing:1px;text-transform:uppercase;">${role.name}</span>
-       <span style="font-size:0.62rem;color:var(--text-muted);margin-left:6px;font-weight:normal;
-                    text-transform:none;letter-spacing:0;background:var(--bg-card);
-                    padding:1px 5px;border-radius:3px;border:1px solid var(--border-color);">custom</span>`;
-
-  // cardFlex is passed in by the caller based on context
-  const cardBase = 'background:var(--bg-input);border-radius:8px;padding:14px;border:1px solid var(--border-color);box-sizing:border-box;';
-  return `<div style="${cardBase}${role._cardFlex || 'flex:1;'}">
-    <div style="display:flex;align-items:baseline;margin-bottom:10px;">${label}</div>
-    ${rows}
-    <button class="nw-btn nw-btn-primary mt-2" style="width:100%;font-size:0.75rem;"
-            onclick="saveRoleDefaultsAdmin(${role.id})">✓ Save</button>
-  </div>`;
-}
-
-function renderRoleDefaultsAdmin(roles, defs, typeSettings) {
-  const grid   = document.getElementById('role-defaults-grid-admin');
-  const atypes = Object.entries(typeSettings);
-
-  // Coerce is_system — SQLite returns 0/1 integers
-  const SYSTEM_ORDER = {Admin: 0, Operator: 1, Monitor: 2};
+  // Sort roles: system roles (Admin, Operator, Monitor) first, then custom,
+  // then the Subscribers sentinel (role_id=0) representing standalone subscribers.
+  const SYSTEM_ORDER = { Admin: 0, Operator: 1, Monitor: 2 };
   const systemRoles = roles
     .filter(r => r.is_system === 1 || r.is_system === true)
+    .filter(r => r.name !== 'Guest')   // Guests have no accounts, can't receive alerts
     .sort((a, b) => {
       const ai = SYSTEM_ORDER[a.name] ?? 99, bi = SYSTEM_ORDER[b.name] ?? 99;
       return ai !== bi ? ai - bi : a.name.localeCompare(b.name);
     });
   const customRoles = roles.filter(r => r.is_system !== 1 && r.is_system !== true);
+  // Sentinel column for admin-managed standalone subscribers (no user account)
+  const subscriberSentinel = { id: 0, name: 'Subscribers', is_system: false, _isSentinel: true };
+  const displayRoles = [...systemRoles, ...customRoles, subscriberSentinel];
 
-  // System roles — always fill full width equally
-  systemRoles.forEach(r => r._cardFlex = 'flex:1;min-width:calc(20% - 10px);');
-  let html = `<div style="display:flex;flex-wrap:nowrap;gap:12px;width:100%;${customRoles.length ? 'padding-bottom:16px;border-bottom:1px solid var(--border-color);' : ''}">`;
-  html += systemRoles.map(r => roleCardHtml(r, defs[r.id] || {}, atypes)).join('');
-  html += '</div>';
+  // Group alert types by category, preserving ALERT_GROUP_ORDER
+  const grouped = {};
+  ALERT_GROUP_ORDER.forEach(g => grouped[g] = []);
+  Object.entries(typeSettings).forEach(([key, val]) => {
+    const g = val.group || 'network';
+    if (grouped[g]) grouped[g].push({ key, ...val });
+  });
 
-  // Custom roles — width depends on count:
-  // 1-2: same individual width as a system role (≈33% - gap), centered
-  // 3-4: fill full width (flex:1), same as system roles
-  if (customRoles.length) {
-    const perRow = 5;  // max cards per row
-    const fillRow = customRoles.length >= 3;
-    if (fillRow) {
-      // flex:1 fills row; max-width caps at 1/5 so 6+ cards wrap at 5 per row
-      // flex:0 1 = won't grow beyond natural width, can shrink; centering handles lone remainder card
-      customRoles.forEach(r => r._cardFlex = 'flex:0 1 calc(20% - 10px);min-width:calc(20% - 10px);');
-    } else {
-      // Match system role width: (100% - 2*gap) / 3 per card
-      customRoles.forEach(r => r._cardFlex = 'flex:0 0 calc(33.333% - 8px);max-width:calc(33.333% - 8px);');
+  // Column widths: label col + one col per role
+  const roleCols = displayRoles.length;
+  const labelPct = 30;
+  const rolePct  = ((100 - labelPct) / roleCols).toFixed(1);
+
+  // Header row: blank label cell + one role name cell per role
+  let html = `<div style="display:table;width:100%;border-collapse:collapse;font-size:0.78rem;">`;
+
+  // Sticky-ish header
+  html += `<div style="display:table-row;">`;
+  html += `<div style="display:table-cell;width:${labelPct}%;padding:3px 8px 6px;font-size:0.68rem;
+                       color:var(--text-muted);font-weight:600;letter-spacing:1px;
+                       text-transform:uppercase;border-bottom:2px solid var(--border-color);"></div>`;
+  displayRoles.forEach(role => {
+    const isCustom = !role.is_system && !role._isSentinel;
+    const leftBorder = role._isSentinel ? 'border-left:2px solid var(--border-color);' : '';
+    const nameColor  = role._isSentinel ? 'var(--text-secondary)' : 'var(--accent)';
+    html += `<div style="display:table-cell;width:${rolePct}%;padding:3px 4px 6px;text-align:center;
+                         border-bottom:2px solid var(--border-color);${leftBorder}">
+      <span style="font-size:0.75rem;font-weight:600;color:${nameColor};letter-spacing:0.5px;
+                   text-transform:uppercase;">${role.name}</span>`;
+    if (isCustom) {
+      html += `<span style="display:block;font-size:0.6rem;color:var(--text-muted);margin-top:2px;">custom</span>`;
     }
+    if (role._isSentinel) {
+      html += `<span style="display:block;font-size:0.6rem;color:var(--text-muted);margin-top:2px;">no account</span>`;
+    }
+    html += `</div>`;
+  });
+  html += `</div>`;
 
-    html += `<div style="width:100%;margin-top:16px;">
-      <div style="font-size:0.7rem;color:var(--text-muted);letter-spacing:1.5px;
-                  text-transform:uppercase;margin-bottom:10px;padding-left:2px;">Custom Roles</div>
-      <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;">`;
-    html += customRoles.map(r => roleCardHtml(r, defs[r.id] || {}, atypes)).join('');
-    html += '</div></div>';
-  }
+  // Sub-header: Available / Email / SMS labels under each role column
+  html += `<div style="display:table-row;background:var(--bg-input);">`;
+  html += `<div style="display:table-cell;padding:2px 8px;font-size:0.65rem;color:var(--text-muted);"></div>`;
+  displayRoles.forEach(role => {
+    const subLeftBorder = role._isSentinel ? 'border-left:2px solid var(--border-color);' : '';
+    html += `<div style="display:table-cell;text-align:center;padding:2px 2px;${subLeftBorder}">
+      <span style="display:inline-flex;gap:10px;font-size:0.62rem;color:var(--text-muted);
+                   text-transform:uppercase;letter-spacing:0.5px;">
+        <span style="min-width:44px;text-align:center;">Avail</span>
+        <span style="min-width:28px;text-align:center;">✉</span>
+        <span style="min-width:28px;text-align:center;">📱</span>
+      </span>
+    </div>`;
+  });
+  html += `</div>`;
 
+  // Rows grouped by category
+  ALERT_GROUP_ORDER.forEach(groupKey => {
+    const types = grouped[groupKey] || [];
+    if (!types.length) return;
+
+    // Group header row
+    html += `<div style="display:table-row;">
+      <div style="display:table-cell;padding:5px 8px 2px;font-size:0.66rem;font-weight:700;
+                  color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase;
+                  border-top:2px solid var(--border-color);" colspan="1">
+        ${ALERT_GROUP_LABELS[groupKey] || groupKey}
+      </div>`;
+    displayRoles.forEach(role => {
+      const ghLeft = role._isSentinel ? 'border-left:2px solid var(--border-color);' : '';
+      html += `<div style="display:table-cell;border-top:2px solid var(--border-color);${ghLeft}"></div>`;
+    });
+    html += `</div>`;
+
+    // One row per alert type
+    types.forEach((atype, idx) => {
+      const rowBg = idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-input)';
+      html += `<div style="display:table-row;background:${rowBg};">`;
+      html += `<div style="display:table-cell;padding:3px 8px;vertical-align:middle;">
+        ${atype.label || atype.key}
+      </div>`;
+
+      displayRoles.forEach(role => {
+        const rd       = (defs[role.id] || {})[atype.key] || {};
+        const avail    = rd.available    !== undefined ? !!rd.available    : true;
+        const emailOn  = rd.email_enabled !== undefined ? !!rd.email_enabled : !!atype.email_enabled;
+        const smsOn    = rd.sms_enabled   !== undefined ? !!rd.sms_enabled   : !!atype.sms_enabled;
+        const dimStyle = avail ? '' : 'opacity:0.35;pointer-events:none;';
+
+        const cellLeftBorder = role._isSentinel ? 'border-left:2px solid var(--border-color);' : '';
+        html += `<div style="display:table-cell;text-align:center;vertical-align:middle;padding:2px 2px;${cellLeftBorder}">
+          <span style="display:inline-flex;align-items:center;gap:10px;justify-content:center;">
+            <input type="checkbox" class="rd-available"
+                   data-role="${role.id}" data-key="${atype.key}"
+                   style="width:13px;height:13px;accent-color:var(--accent);"
+                   title="Available to this role"
+                   ${avail ? 'checked' : ''}
+                   onchange="onAvailChange(this)">
+            <span class="rd-email-wrap" data-role="${role.id}" data-key="${atype.key}"
+                  style="${dimStyle}">
+              <input type="checkbox" class="rd-email"
+                     data-role="${role.id}" data-key="${atype.key}"
+                     style="width:13px;height:13px;accent-color:var(--accent);"
+                     title="Email default on"
+                     ${emailOn ? 'checked' : ''}>
+            </span>
+            <span class="rd-sms-wrap" data-role="${role.id}" data-key="${atype.key}"
+                  style="${dimStyle}">
+              <input type="checkbox" class="rd-sms"
+                     data-role="${role.id}" data-key="${atype.key}"
+                     style="width:13px;height:13px;accent-color:var(--accent);"
+                     title="SMS default on"
+                     ${smsOn ? 'checked' : ''}>
+            </span>
+          </span>
+        </div>`;
+      });
+
+      html += `</div>`;
+    });
+  });
+
+  // Save buttons row — one per role column
+  html += `<div style="display:table-row;">`;
+  html += `<div style="display:table-cell;padding:6px 8px 4px;border-top:2px solid var(--border-color);"></div>`;
+  displayRoles.forEach(role => {
+    const saveLB = role._isSentinel ? 'border-left:2px solid var(--border-color);' : '';
+    html += `<div style="display:table-cell;padding:6px 4px 4px;text-align:center;
+                         border-top:2px solid var(--border-color);${saveLB}">
+      <button class="nw-btn nw-btn-primary" style="font-size:0.72rem;padding:4px 10px;"
+              onclick="saveAlertsTab(${role.id}, '${role.name}')">✓ Save</button>
+    </div>`;
+  });
+  html += `</div>`;
+
+  html += `</div>`;  // end table
   grid.innerHTML = html;
 }
 
-async function saveRoleDefaultsAdmin(roleId) {
+// When Available is toggled, dim/undim the Email and SMS checkboxes for that cell
+function onAvailChange(cb) {
+  const role = cb.dataset.role;
+  const key  = cb.dataset.key;
+  const dim  = !cb.checked;
+  ['email', 'sms'].forEach(ch => {
+    const wrap = document.querySelector(`.rd-${ch}-wrap[data-role="${role}"][data-key="${key}"]`);
+    if (wrap) wrap.style.opacity = dim ? '0.35' : '';
+    if (wrap) wrap.style.pointerEvents = dim ? 'none' : '';
+  });
+}
+
+async function saveAlertsTab(roleId, roleName) {
   const settings = {};
-  document.querySelectorAll(`.rdadmin-email[data-role="${roleId}"]`).forEach(cb => {
+
+  document.querySelectorAll(`.rd-available[data-role="${roleId}"]`).forEach(cb => {
+    const key = cb.dataset.key;
+    if (!settings[key]) settings[key] = {};
+    settings[key].available = cb.checked ? 1 : 0;
+  });
+  document.querySelectorAll(`.rd-email[data-role="${roleId}"]`).forEach(cb => {
     const key = cb.dataset.key;
     if (!settings[key]) settings[key] = {};
     settings[key].email_enabled = cb.checked ? 1 : 0;
   });
-  document.querySelectorAll(`.rdadmin-sms[data-role="${roleId}"]`).forEach(cb => {
+  document.querySelectorAll(`.rd-sms[data-role="${roleId}"]`).forEach(cb => {
     const key = cb.dataset.key;
     if (!settings[key]) settings[key] = {};
     settings[key].sms_enabled = cb.checked ? 1 : 0;
   });
+
   const res = await fetch(`/api/alerts/role_defaults/${roleId}`, {
-    method: 'POST', headers: {'Content-Type':'application/json'},
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings)
   }).then(r => r.json());
-  const msg = document.getElementById('role-defaults-msg');
+
+  const msg = document.getElementById('alerts-tab-msg');
   msg.style.display = 'block';
   msg.style.color   = res.status === 'ok' ? 'var(--ok)' : 'var(--fail)';
-  msg.textContent   = res.status === 'ok' ? 'Defaults saved.' : (res.message || 'Save failed');
-  setTimeout(() => msg.style.display = 'none', 2500);
+  msg.textContent   = res.status === 'ok'
+    ? `${roleName} alert permissions saved.`
+    : (res.message || 'Save failed.');
+  setTimeout(() => msg.style.display = 'none', 3000);
 }
 
 // ── Initial load ──────────────────────────────────────────────────────────────

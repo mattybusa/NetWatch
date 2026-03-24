@@ -1,0 +1,130 @@
+FEATURE: Structlog Rework
+=========================
+Type: Feature
+Date: 2026-03-15
+Session: 17
+Outcome: Complete -- v3.3.37 shipped and verified
+
+
+BACKGROUND
+----------
+NetWatch's four logging entry points (wsgi.py, main.py, monitor.py, webapp.py) used
+Python's stdlib logging module with a plain-text format. This produced human-readable
+output but unstructured text that Loki cannot query by field. The goal was to replace
+this with structlog so log lines emit OTEL-compatible JSON in production (LOG_FORMAT=json)
+and human-readable output for SSH/journalctl (LOG_FORMAT=pretty). This was required
+before Promtail could be installed to ship useful queryable logs to Loki.
+
+Decision to use structlog was made in Session 15 (see Audit_Findings.txt finding 7.1/7.2).
+This session implemented it.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Nothing failed in implementation. The design brief surfaced one near-mistake: the initial
+recommendation in the brief was to keep the existing dotted Python logger names
+(netwatch.monitor, netwatch.webapp). After the user asked a follow-up question about
+naming, the reasoning was examined more carefully and the recommendation was reversed in
+favor of flat service names. The flip was acknowledged directly. No code was written
+before the naming decision was settled.
+
+
+WHAT WORKED
+-----------
+
+DESIGN DECISIONS:
+- Full structlog adoption (Option B of three): every log call converted to keyword
+  argument form. Only option that produces queryable fields in Loki.
+- Flat service names: monitor, web, main. Bound via structlog.get_logger().bind(service=...)
+  at module level. Rationale: dotted hierarchy is a stdlib logging concept; in structlog
+  with structured fields, shorter names are cleaner in Grafana label filters.
+- LOG_FORMAT config key: "pretty" (default) or "json". Controls output at startup;
+  requires service restart to take effect. Added to config_schema.py in a new Logging
+  section so it appears in the Config Editor UI.
+
+PREREQUISITE:
+- structlog 25.5.0 installed in venv:
+    sudo -u netwatch-svc ~/netwatch/venv/bin/pip install structlog
+  Note: must run as netwatch-svc (not mboynton) since the venv is owned by the service
+  account. The pip cache warning about /nonexistent is harmless -- that is the expected
+  no-home-dir behavior for netwatch-svc (see Gotchas.txt: SERVICE ACCOUNT WITH
+  --no-create-home).
+
+FILES CHANGED (v3.3.37):
+
+config_schema.py:
+  Added LOG_FORMAT entry in a new "Logging" section between Security and Server sections.
+  type=str, default="pretty", options described in description field. ui_hidden=False
+  so it appears in Config Editor.
+
+wsgi.py (full rewrite):
+  - Reads LOG_FORMAT from config before any other import
+  - Calls logging.basicConfig with format="%(message)s" (structlog renders the full line)
+  - Defines _configure_structlog(log_format) -- shared processors: add_log_level,
+    TimeStamper(fmt="iso", utc=True), StackInfoRenderer, format_exc_info.
+    Pretty mode uses ConsoleRenderer(colors=False); JSON mode uses JSONRenderer.
+  - Calls _configure_structlog(LOG_FORMAT) at module level
+  - Creates _startup_log = structlog.get_logger().bind(service="web") for startup messages
+  - Logs web_service_starting event with log_format field
+
+main.py (full rewrite):
+  - Same _configure_structlog() function (must be identical to wsgi.py -- both services
+    must configure structlog the same way)
+  - log = structlog.get_logger().bind(service="monitor")
+  - All log calls converted: f-strings replaced with keyword args
+    Examples:
+      Old: log.info(f"LAN:{'checkmark' if status['lan_ok'] else 'X'}  WAN:...")
+      New: log.info("health_check", lan=status["lan_ok"], wan=status["wan_ok"], ...)
+    startup() now logs netwatch_starting with all config values as fields
+    shutdown() logs shutdown_signal_received and netwatch_stopped
+    main loop logs health_check with all status fields
+    web command handler logs web_command_received, lockout_toggled, web_command_error
+
+monitor.py (full rewrite):
+  - log = structlog.get_logger().bind(service="monitor")
+  - All log calls converted to event + keyword args:
+      reset_suppressed (reason, remaining_s)
+      conservative_mode_entered (resets_today, max_resets)
+      reset_performed (reset_type, reason)
+      network_restored
+      network_degraded (latency_ms, packet_loss)
+      sustained_degradation (duration_min, latency_ms, packet_loss)
+      network_issue_detected (lan, wan, wifi, confirm_window_s)
+      issue_persisting (elapsed_s, confirm_window_s, lan, wan, wifi)
+      initiating_reset (reset_type, trigger)
+      speedtest_scheduled
+  Note: alert body strings retained as HTML (used by alerts.py email system) -- only
+  the log calls were converted, not the alert message content.
+
+webapp.py (partial update):
+  - Added "import structlog" alongside existing "import logging"
+  - Changed log = logging.getLogger("netwatch.webapp") to:
+      log = structlog.get_logger().bind(service="web")
+  - All 18 log calls converted from f-string to keyword arg form:
+      setup_apply_failed, subscriber_backfill_failed, role_defaults_backfill_failed,
+      owner_seed_failed, config_validator_new_keys (count=), config_validator_failed,
+      password_reset_email_failed, password_reset_sms_failed, verification_email_failed,
+      subscriber_merged_on_verify (subscriber_id=, username=), self_registration (username=),
+      backup_failed (stderr=), update_package_generated (path=, size_mb=),
+      update_package_failed, distributable_generated (path=, size_mb=),
+      distributable_failed, database_restored, release_notes_failed
+
+VERIFICATION:
+  LOG_FORMAT changed to "json" in Config Editor, both services restarted. journalctl
+  showed clean JSON lines:
+    {"service": "monitor", "lan": true, "wan": true, ..., "event": "health_check",
+     "level": "info", "timestamp": "2026-03-15T06:37:27.081985Z"}
+    {"service": "web", "log_format": "json", "event": "web_service_starting", ...}
+  No errors. Both services confirmed running on JSON mode before Promtail install.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- The gunicorn access log lines (HTTP request logs) are still in gunicorn's own format,
+  not structlog JSON. These come from gunicorn itself, not from NetWatch code. They will
+  appear in Loki as unstructured lines mixed with the structured NetWatch lines. This is
+  acceptable -- the gunicorn lines are still useful as HTTP access logs. No action needed.
+
+- LOG_FORMAT is a startup-time config: changing it requires a service restart to take
+  effect. This is by design (structlog configures itself once at module load) and is
+  documented in the config schema description field.

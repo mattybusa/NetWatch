@@ -225,6 +225,13 @@ body.theme-high-contrast {
 .status-warn { color: var(--warn); }
 .status-fail { color: var(--fail); }
 
+/* System health card — monitor status dot */
+.sh-dot        { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.sh-dot-ok     { background: var(--ok); }
+.sh-dot-warn   { background: var(--warn); }
+.sh-dot-error  { background: var(--fail); }
+.sh-dot-muted  { background: var(--text-muted); }
+
 .nw-btn {
   border-radius: 7px;
   padding: 10px 18px;
@@ -658,6 +665,17 @@ body.layout-sidebar .nw-content {
 .log-ERROR   { color: var(--fail); }
 .log-WARNING { color: var(--warn); }
 .log-INFO    { color: var(--text-secondary); }
+
+/* Structured JSON log formatter — field value coloring */
+.log-ts      { color: var(--text-secondary); }
+.log-sep     { color: var(--border-color); }
+.log-svc     { color: var(--text-secondary); }
+.log-evt     { color: var(--text-primary); font-weight: 500; }
+.log-fields  { color: var(--text-secondary); }
+.log-fok     { color: var(--ok); }
+.log-ffail   { color: var(--fail); }
+.log-fwarn   { color: var(--warn); }
+.log-raw     { color: var(--text-secondary); font-style: italic; }
 
 /* ══════════════════════════════════════════════════════════════════════════════
    RANGE / FILTER BUTTONS

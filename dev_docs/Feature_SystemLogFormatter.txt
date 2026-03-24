@@ -1,0 +1,141 @@
+FEATURE: System Log JSON Formatter + Filter Bar
+===============================================
+Type: Feature
+Date: 2026-03-19
+Sessions: Session 21
+Versions: v3.3.54 (formatter), v3.3.55 (filter bar)
+Outcome: Complete
+
+
+BACKGROUND
+----------
+Since v3.3.37 (structlog rework), all NetWatch logs are emitted as structured JSON
+when LOG_FORMAT=json. The System Log card in logs.html was reading raw lines from
+netwatch.log and displaying them as-is — resulting in unreadable JSON blobs in the UI.
+
+The feature goal: parse each log line in the display layer and render it in a compact
+human-readable format. Log files on disk remain untouched as OTEL-formatted JSON.
+
+A secondary problem emerged after v3.3.54 was installed: http_request entries from
+the gunicorn access logger (added in v3.3.44) were dominating the view with many
+verbose fields (user_agent, referer, remote_addr). This led to the filter bar feature
+in v3.3.55.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+- v3.3.54 initial assessment: user reported "it didn't work." A screenshot revealed
+  the formatter was working correctly — health_check lines were rendering in the new
+  format. The real problem was http_request entries filling the view with long wrapping
+  field lists. Not a formatter bug; led to filter bar feature.
+
+
+WHAT WORKED
+-----------
+
+── v3.3.54: JSON Formatter ──────────────────────────────────────────────────────
+
+FILES CHANGED: templates/logs.html, static/themes.css
+
+themes.css — new CSS classes added after existing .log-INFO/.log-WARNING/.log-ERROR:
+  .log-ts      — timestamp color (text-secondary)
+  .log-sep     — separator color (border-color)
+  .log-svc     — service name color (text-secondary)
+  .log-evt     — event name color (text-primary, font-weight 500)
+  .log-fields  — extra fields color (text-secondary)
+  .log-fok     — ok value color (--ok, used for ✓)
+  .log-ffail   — fail value color (--fail, used for ✗ and errors)
+  .log-fwarn   — warn value color (--warn, used for elevated packet loss)
+  .log-raw     — raw non-JSON line color (text-secondary, italic)
+
+logs.html — loadLog() replaced with formatLogLine() + loadLog():
+
+  Constants:
+    LOG_BOOL_FIELDS — Set of fields rendered as ✓/✗: lan, wan, wifi, dns, healthy
+    LOG_SKIP_FIELDS — Set of fields suppressed from extra display: event, level,
+                      timestamp, service, _record
+
+  formatLogLine(raw):
+    Tries JSON.parse() on trimmed line. On failure: applies legacy [ERROR]/[WARNING]
+    class detection, returns {html, text} with log-raw class (italic).
+    On success:
+    - Extracts timestamp — regex matches T(HH:MM:SS) portion only, drops date/subseconds
+    - Determines level: "warning"/"warn" → WARN + log-WARNING class;
+      "error" → ERR + log-ERROR class; else INFO + log-INFO class
+    - Iterates remaining fields, skipping LOG_SKIP_FIELDS:
+        LOG_BOOL_FIELDS → key=<span class="log-fok/ffail">✓/✗</span>
+        latency_ms      → latency=<span>Xms</span>
+        packet_loss     → loss=<span class="log-fwarn if >0">X%</span>
+        error           → error=<span class="log-ffail">value</span>
+        all others      → key=<span>value</span>
+    - Builds html string: ts · LEVEL · svc › event  fields
+    - Builds plain text string for filter matching (all fields joined)
+    - Returns {html, text, level, group, evt} — group/evt added in v3.3.55
+
+  loadLog(lines):
+    Fetches /api/logs?lines=N, maps all lines through formatLogLine(),
+    applies filter, renders to log-box.
+
+  structlog JSON field reference (confirmed from wsgi.py/main.py):
+    timestamp — ISO string with T separator, UTC, e.g. "2026-03-19T14:32:01.123456Z"
+    level     — "info", "warning", "error", "debug"
+    service   — "monitor", "web", "main"
+    event     — event name string
+
+── v3.3.55: Event/Level Filter Bar ─────────────────────────────────────────────
+
+FILES CHANGED: templates/logs.html only
+
+HTML — filter bar added between card header and log-box:
+  Level radio group (name="lvl-filter"): All (default) / Warn+ / Errors only
+  Event group checkboxes (class="grp-filter"):
+    health   — health_check (checked)
+    network  — network_degraded, network_restored, network_issue_detected,
+               issue_persisting, sustained_degradation (checked)
+    reset    — initiating_reset, reset_performed, reset_suppressed,
+               conservative_mode_entered, lockout_toggled, web_command_received (checked)
+    speed    — speedtest_scheduled, speedtest_complete, speedtest_started,
+               speedtest_failed (checked)
+    system   — netwatch_starting, netwatch_stopped, web_service_starting,
+               all_subsystems_initialized, shutdown_signal_received,
+               monitor_loop_started, monitor_loop_error (checked)
+    web      — http_request (UNCHECKED by default — high frequency, low signal)
+    other    — any event not in above groups (checked)
+
+JS — key additions:
+
+  EVT_GROUP map: object keyed by group name, values are Sets of event strings.
+  eventGroup(evt): iterates EVT_GROUP entries, returns matching group name or "other".
+
+  formatLogLine() updated to return group and evt fields in addition to html/text/level.
+  Non-JSON fallback returns group:"other", evt:"".
+
+  allFormatted[] — module-level array caching all formatted line objects from last fetch.
+
+  applyFilters(): reads current lvl-filter radio value, all checked .grp-filter values
+    into a Set, and free-text input. Filters allFormatted[] on all three criteria
+    (short-circuit: level first, then group, then text). Renders to log-box.
+    Called by: loadLog(), checkbox onchange, radio onchange, text oninput.
+
+  loadLog(lines): now populates allFormatted[] then calls applyFilters().
+    No longer does its own filtering directly.
+
+  Auto-refresh setInterval: calls loadLog(currentLines) — re-fetches and re-applies
+    current filter state every 5 seconds.
+
+Adding new event types to the filter:
+  1. Add the event name string to the appropriate Set in EVT_GROUP, or add a new group.
+  2. Add a checkbox label in the filter bar HTML with matching value= attribute.
+  No other changes needed — eventGroup() and applyFilters() handle the rest.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- The log-box uses white-space:pre-wrap from themes.css. Long field values (e.g.
+  full user_agent strings in http_request entries when Web Requests is enabled)
+  will still wrap. Acceptable since Web Requests is off by default.
+- Filter state is not persisted — resets to defaults on page reload. Could be added
+  via user_prefs in a future session if desired.
+- The "Other" group is a catch-all for any event not explicitly mapped in EVT_GROUP.
+  As new event types are added to the codebase, they will appear under Other until
+  EVT_GROUP is updated.

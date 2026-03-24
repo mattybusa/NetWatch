@@ -1,0 +1,168 @@
+NETWATCH CHAT SUMMARY — SESSION 15
+====================================
+Date: 2026-03-14
+Starting version: v3.3.36
+Ending version: v3.3.36 (no code packages this session)
+Focus: mBase strategy discussion, architecture design decisions, documentation update.
+
+SCOPE NOTE: Pure planning and documentation session. No code written. All four mBase
+planning documents read for the first time alongside full session history. Three
+PENDING DISCUSSION items resolved. Major scope change on NetWatch backlog. Five
+documents updated.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+- All four mBase planning documents read and absorbed for the first time in a session
+  alongside full base summaries: Networked_App_Standards_Summary.txt, Audit_Findings.txt,
+  mBase_Plan.txt, Audit_PreMBase.txt.
+
+- mBase strategy confirmed and articulated clearly:
+  NetWatch was built iteratively without prior knowledge of best practices — many things
+  hand-rolled that could have been borrowed. Not wasted effort; produced deep understanding
+  of what a networked app actually needs. ~15 future project ideas make mBase worth building.
+  Strategy: do NOT start from scratch. Continue developing NetWatch, correcting things
+  toward standards as you go. Extract mBase from corrected NetWatch when ready. Both
+  projects end up better simultaneously.
+
+- Core mBase design philosophy established (Session 15):
+  "mBase CONNECTS. It does not DUPLICATE."
+  Before building any mBase component, the question is always: does a better version of
+  this already exist that mBase should connect to instead? Things get BUILT only when
+  nothing adequate exists for the deployment model. Everything else gets CONNECTED TO.
+  This principle keeps mBase small, maintainable, and better than hand-rolled alternatives.
+
+- DECISION: API versioning (Finding 11.1)
+  Both NetWatch AND mBase use /api/v1/ path versioning from this point forward.
+  NetWatch gets retrofitted in a future package (all template JS calls updated).
+  mBase starts with it from the first line of code.
+  Path versioning chosen over header versioning: simpler, visible, debuggable,
+  correct for browser clients and community integrations.
+  Breaking vs non-breaking change distinction documented. API documentation (OpenAPI)
+  is part of definition of done for public API surface.
+
+- DECISION: Logging format (Findings 7.1/7.2)
+  Both NetWatch and mBase use structured JSON logging via structlog library.
+  LOG_FORMAT config key: "pretty" (default, human-readable) or "json" (for aggregation).
+  Central collection stack: Loki + Prometheus + Grafana on Gitea Pi.
+  Promtail on each Pi ships logs to Loki over HTTPS (LAN CA handles certs).
+  Log collection configurable at first-run wizard — local-only default, central optional.
+  Endpoint is a URL, not assumed LAN-only; external/cross-WAN shipping supported.
+  Not locked to Loki specifically — OTEL-compatible endpoint design means any backend works.
+  Correlation IDs added: every request gets a short ID on all related log lines.
+  Log level discipline: ERROR=broken, WARNING=unexpected/handled, INFO=normal, DEBUG=dev.
+  Audit logs and application logs are separate streams with separate retention.
+  Never log passwords, full auth tokens, or session IDs — non-negotiable rule.
+  Browser-based log viewer in Admin UI scoped to handle JSON format.
+  SSH + journalctl remains authoritative crash debugging path.
+  jq installed on Pi as standard SSH tooling.
+
+- SCOPE CHANGE: Host monitoring and device telemetry removed from NetWatch/mBase build scope.
+  Discovery: Grafana + Node Exporter + Prometheus handles this better than anything that
+  would be built custom. NetWatch was building visibility features (latency charts, speed
+  test history, future host monitoring) because it was the only dashboard available — not
+  because it was the right place for them. Grafana is the right place.
+  NetWatch's true identity is the AUTOMATION layer, not the visibility layer:
+    NetWatch owns: connectivity failure detection, automated recovery, GPIO/relay hardware,
+    reset sequences, NetWatch-specific alerting, automation configuration UI.
+    Grafana owns: historical latency/packet loss visualization, speed test trends,
+    host metrics across all servers, cross-server pattern analysis.
+  NetWatch dashboard charts (latency, packet loss, speedtest) to be reviewed once
+  Grafana is running — some may be retired.
+  Kiosk display scope narrowed: operational quick-glance NetWatch status only.
+  Full infrastructure dashboard = Grafana on a screen.
+
+- Three open discussion areas identified and documented:
+  1. Git/version control strategy: commit discipline, branching, what belongs in git.
+     Deploy workflow (zip packages) and version control are two different problems.
+  2. Sharing/publishing: GitHub vs Gitea, licensing, README requirements, mBase
+     versioning independent from projects built on it.
+  3. Session workflow improvement: better session-start method for multi-repo future.
+     Gitea Claude-in-Chrome approach abandoned. Other approaches not yet tried.
+
+- Question raised: is there already an existing application that does what mBase is trying
+  to do? Honest answer: no single tool covers the specific combination (Pi deployment model,
+  zero-SSH updates, session-based AI workflow, personal+semi-public distribution). But
+  individual components exist and should be used: Loki, Grafana, Prometheus, Node Exporter,
+  structlog, Alembic for migrations. Home Assistant noted as relevant for home automation
+  use cases specifically — worth knowing deeply if future projects are in that space.
+
+- Documentation updates (five files):
+  NetWatch_AI_Context_latest.txt: Added comprehensive mBase Strategy section (replaces
+    old Planning Documents + Git/Gitea sections). Updated PENDING DISCUSSION list with
+    decided/not-yet-discussed split. Updated backlog (host monitoring and device telemetry
+    removed, kiosk scope narrowed). Added mBase & Architecture backlog category.
+  AI_Session_Process.txt: Added item 5b — load all four mBase planning docs when session
+    involves architecture, mBase design, or standards alignment work.
+  mBase_Plan.txt: Added CORE DESIGN PHILOSOPHY section at top. Updated WHAT MBASE PROVIDES
+    to reflect observability stack (Loki/Prometheus/Grafana) as connected infrastructure.
+  Audit_Findings.txt: Recorded decisions for 11.1 and 7.1/7.2. Updated PENDING DISCUSSION
+    summary section with decided/not-yet-discussed split and scope changes.
+  CurrentTask.txt: Updated to reflect Session 15 state and next session options.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+Nothing failed this session.
+
+
+DECISIONS MADE
+--------------
+- mBase strategy: fix NetWatch first, extract later. Both projects improved simultaneously.
+- mBase core philosophy: connects, doesn't duplicate. BORROW/ADOPT before BUILD.
+- API versioning: /api/v1/ path versioning in both NetWatch and mBase.
+- Logging: structlog + JSON + Loki + Grafana + Prometheus. Pretty mode default for Pi.
+- Host monitoring and device telemetry: removed from build scope. Use existing tools.
+- NetWatch identity: automation layer, not visibility layer. Grafana is the visibility layer.
+- Next concrete action (agreed): set up Grafana/Loki/Prometheus on Gitea Pi, then rework
+  NetWatch logging to ship to it. Tangible deliverable before continuing design discussions.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- 9 PENDING DISCUSSION items remain in Audit_Findings.txt (1.4, 1.7/3.3, 3.5, 11.2,
+  11.3, 12.2, 12.3, 9.2, CC.5). Work through in future dedicated design sessions.
+- Git strategy, publishing approach, session workflow: three open discussions documented
+  in mBase Strategy section of context doc.
+- Weekly Pi update cron (v3.3.12): still not confirmed fired in the wild.
+- Web service silent-exit after delayed restart: still unconfirmed.
+
+
+BACKLOG CHANGES
+---------------
+Removed from NetWatch backlog:
+- Host monitoring (handled by Node Exporter + Prometheus + Grafana)
+- Device telemetry tab (same reasoning)
+
+Scope narrowed:
+- Kiosk display: operational NetWatch status only, not full infrastructure dashboard
+
+Added to mBase & Architecture backlog:
+- Work through remaining 9 PENDING DISCUSSION items
+- Git strategy discussion
+- Sharing/publishing discussion
+- Session workflow improvement discussion
+- Blueprint refactor design brief
+- Module system design brief
+- mBase directory/repo setup
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+None. All detail captured in this base summary.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None. No new hard-learned technical lessons this session.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.36 (unchanged)
+- All services running normally
+- Next action: set up Grafana + Loki + Prometheus on Gitea Pi (concrete deliverable),
+  then rework NetWatch logging to ship to it.
+  OR: continue PENDING DISCUSSION items (1.4 session storage is a good next one).
+  User preference is to do the concrete deliverable first, then continue discussions.

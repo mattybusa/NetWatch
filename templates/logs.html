@@ -10,13 +10,32 @@
     <div class="d-flex gap-2 align-items-center flex-wrap">
       <input id="log-filter" type="text" placeholder="Filter lines..."
              class="nw-input" style="width:180px;"
-             oninput="loadLog()">
-      <button class="range-btn" onclick="loadLog(100)">100</button>
-      <button class="range-btn" onclick="loadLog(300)">300</button>
-      <button class="range-btn" onclick="loadLog(500)">500</button>
+             oninput="applyFilters()">
+      <button class="range-btn active" id="log-btn-100" onclick="loadLog(100)">100</button>
+      <button class="range-btn" id="log-btn-300" onclick="loadLog(300)">300</button>
+      <button class="range-btn" id="log-btn-500" onclick="loadLog(500)">500</button>
       <span class="nw-label">lines</span>
     </div>
   </div>
+
+  <!-- Filter bar -->
+  <div style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;padding:10px 14px;margin-bottom:12px;">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+      <span style="font-size:0.7rem;color:var(--text-label);letter-spacing:1px;text-transform:uppercase;font-weight:600;margin-right:4px;">Level:</span>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;"><input type="radio" name="lvl-filter" value="all"  checked onchange="applyFilters()"> All</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;"><input type="radio" name="lvl-filter" value="warn"        onchange="applyFilters()"> Warn+</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;"><input type="radio" name="lvl-filter" value="error"       onchange="applyFilters()"> Errors only</label>
+      <span style="margin-left:12px;font-size:0.7rem;color:var(--text-label);letter-spacing:1px;text-transform:uppercase;font-weight:600;margin-right:4px;">Show:</span>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="grp-filter" value="health"  checked onchange="applyFilters()"> 💓 Health</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="grp-filter" value="network" checked onchange="applyFilters()"> 🌐 Network</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="grp-filter" value="reset"   checked onchange="applyFilters()"> 🔄 Resets</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="grp-filter" value="speed"   checked onchange="applyFilters()"> ⚡ Speedtest</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="grp-filter" value="system"  checked onchange="applyFilters()"> ⚙️ System</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="grp-filter" value="web"              onchange="applyFilters()"> 🌍 Web Requests</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="grp-filter" value="other"   checked onchange="applyFilters()"> 📄 Other</label>
+    </div>
+  </div>
+
   <div class="log-box" id="log-box">Loading...</div>
 </div>
 
@@ -35,7 +54,16 @@
 
 <!-- Alert History -->
 <div class="nw-card p-4">
-  <div class="nw-label mb-3">Alert History (last 50)</div>
+  <div class="d-flex align-items-center mb-3 flex-wrap gap-2" style="justify-content:space-between;">
+    <div class="nw-label mb-0">Alert History</div>
+    <div class="d-flex gap-1 align-items-center">
+      <button class="range-btn" id="alert-btn-10"  onclick="loadAlerts(10)">10</button>
+      <button class="range-btn" id="alert-btn-20"  onclick="loadAlerts(20)">20</button>
+      <button class="range-btn active" id="alert-btn-50"  onclick="loadAlerts(50)">50</button>
+      <button class="range-btn" id="alert-btn-100" onclick="loadAlerts(100)">100</button>
+      <span class="nw-label">entries</span>
+    </div>
+  </div>
   <div class="overflow-auto">
     <table class="nw-table">
       <thead><tr><th>Timestamp</th><th>Type</th><th>Message</th><th>Email Sent</th></tr></thead>
@@ -49,26 +77,160 @@
 {% block scripts %}
 <script>
 let currentLines = 100;
+let allFormatted = [];  // cache of all parsed+formatted lines from last fetch
 
-async function loadLog(lines) {
-  if (lines) currentLines = lines;
-  const filter = document.getElementById("log-filter").value.toLowerCase();
-  const data   = await fetch(`/api/logs?lines=${currentLines}`).then(r => r.json());
-  const box    = document.getElementById("log-box");
+// ── Event groupings ────────────────────────────────────────────────────────────
+const EVT_GROUP = {
+  health:  new Set(["health_check"]),
+  network: new Set(["network_degraded","network_restored","network_issue_detected",
+                    "issue_persisting","sustained_degradation"]),
+  reset:   new Set(["initiating_reset","reset_performed","reset_suppressed",
+                    "conservative_mode_entered","lockout_toggled","web_command_received"]),
+  speed:   new Set(["speedtest_scheduled","speedtest_complete","speedtest_started",
+                    "speedtest_failed"]),
+  system:  new Set(["netwatch_starting","netwatch_stopped","web_service_starting",
+                    "all_subsystems_initialized","shutdown_signal_received",
+                    "monitor_loop_started","monitor_loop_error"]),
+  web:     new Set(["http_request"]),
+};
 
-  const html = (data.lines || [])
-    .filter(l => !filter || l.toLowerCase().includes(filter))
-    .map(line => {
-      let cls = "log-INFO";
-      if (line.includes("[ERROR]"))   cls = "log-ERROR";
-      if (line.includes("[WARNING]")) cls = "log-WARNING";
-      return `<span class="${cls}">${esc(line.trimEnd())}</span>`;
-    }).join("\n");
-
-  box.innerHTML = html || `<span style="color:var(--text-muted);">No entries match filter</span>`;
-  box.scrollTop = box.scrollHeight;
+function eventGroup(evt) {
+  for (const [grp, evts] of Object.entries(EVT_GROUP)) {
+    if (evts.has(evt)) return grp;
+  }
+  return "other";
 }
 
+// ── Known boolean fields rendered as ✓ / ✗ ───────────────────────────────────
+const LOG_BOOL_FIELDS = new Set(["lan", "wan", "wifi", "dns", "healthy"]);
+
+// Fields suppressed from the extra-fields list (shown in fixed positions or irrelevant)
+const LOG_SKIP_FIELDS = new Set(["event", "level", "timestamp", "service", "_record"]);
+
+function formatLogLine(raw) {
+  const line = raw.trimEnd();
+  let parsed;
+  try { parsed = JSON.parse(line); } catch(e) { parsed = null; }
+
+  if (!parsed || typeof parsed !== "object") {
+    // Non-JSON fallback — apply legacy level coloring and display as-is
+    let cls = "log-INFO";
+    if (line.includes("[ERROR]"))   cls = "log-ERROR";
+    if (line.includes("[WARNING]")) cls = "log-WARNING";
+    return { html: `<span class="${cls} log-raw">${esc(line)}</span>`, text: line,
+             level: "info", group: "other", evt: "" };
+  }
+
+  // Timestamp — time portion only (drop date and sub-seconds)
+  let ts = parsed.timestamp || "";
+  const tMatch = ts.match(/T(\d{2}:\d{2}:\d{2})/);
+  ts = tMatch ? tMatch[1] : ts.substring(0, 19);
+
+  // Level
+  const lvlRaw = (parsed.level || "info").toLowerCase();
+  let lvlCls = "log-INFO";
+  let lvlTag = "INFO";
+  if (lvlRaw === "warning" || lvlRaw === "warn") { lvlCls = "log-WARNING"; lvlTag = "WARN"; }
+  if (lvlRaw === "error")                         { lvlCls = "log-ERROR";   lvlTag = "ERR "; }
+
+  const svc = esc(parsed.service || "");
+  const evt = parsed.event || "";
+  const grp = eventGroup(evt);
+
+  // Extra fields
+  const parts = [];
+  for (const [k, v] of Object.entries(parsed)) {
+    if (LOG_SKIP_FIELDS.has(k)) continue;
+    const key = esc(k);
+    if (LOG_BOOL_FIELDS.has(k)) {
+      const isOk = v === true || v === "true";
+      parts.push(`${key}=<span class="${isOk ? "log-fok" : "log-ffail"}">${isOk ? "✓" : "✗"}</span>`);
+    } else if (k === "latency_ms") {
+      parts.push(`latency=<span>${esc(String(v))}ms</span>`);
+    } else if (k === "packet_loss") {
+      const num = parseFloat(v);
+      parts.push(`loss=<span class="${num > 0 ? "log-fwarn" : ""}">${esc(String(v))}%</span>`);
+    } else if (k === "error") {
+      parts.push(`error=<span class="log-ffail">${esc(String(v))}</span>`);
+    } else {
+      parts.push(`${key}=<span>${esc(String(v))}</span>`);
+    }
+  }
+
+  const fieldsHtml = parts.length
+    ? `  <span class="log-fields">${parts.join("  ")}</span>`
+    : "";
+
+  const html =
+    `<span class="log-ts">${esc(ts)}</span>` +
+    `<span class="log-sep"> · </span>` +
+    `<span class="${lvlCls}">${lvlTag}</span>` +
+    `<span class="log-sep"> · </span>` +
+    `<span class="log-svc">${svc}</span>` +
+    `<span class="log-sep"> › </span>` +
+    `<span class="log-evt">${esc(evt)}</span>` +
+    fieldsHtml;
+
+  // Plain text for free-text filter matching
+  const text = [ts, lvlTag, svc, evt, ...Object.entries(parsed)
+    .filter(([k]) => !LOG_SKIP_FIELDS.has(k))
+    .map(([k, v]) => `${k}=${v}`)
+  ].join(" ");
+
+  return { html, text, level: lvlRaw, group: grp, evt };
+}
+
+// ── Filter application (no re-fetch) ─────────────────────────────────────────
+function applyFilters() {
+  const box       = document.getElementById("log-box");
+  const textQ     = document.getElementById("log-filter").value.toLowerCase();
+  const lvlSel    = document.querySelector("input[name='lvl-filter']:checked").value;
+  const grpChecked = new Set(
+    [...document.querySelectorAll(".grp-filter:checked")].map(el => el.value)
+  );
+
+  const visible = allFormatted.filter(f => {
+    // Level filter
+    if (lvlSel === "warn"  && f.level !== "warning" && f.level !== "warn" && f.level !== "error") return false;
+    if (lvlSel === "error" && f.level !== "error") return false;
+    // Group filter
+    if (!grpChecked.has(f.group)) return false;
+    // Free text
+    if (textQ && !f.text.toLowerCase().includes(textQ)) return false;
+    return true;
+  }).slice(-currentLines);  // show only the most recent N post-filter lines
+
+  // Only auto-scroll to bottom if the user is already there (within 40px).
+  // If they've scrolled up to read or copy, leave their position alone.
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+
+  box.innerHTML = visible.length
+    ? visible.map(f => `<span>${f.html}</span>`).join("\n")
+    : `<span style="color:var(--text-muted);">No entries match current filters</span>`;
+
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+// ── Fetch + render ────────────────────────────────────────────────────────────
+// Fetch a large raw buffer so filters have plenty to work with.
+// currentLines controls how many post-filter lines are shown, not raw lines fetched.
+const LOG_FETCH_BUFFER = 2000;
+
+async function loadLog(lines) {
+  if (lines) {
+    currentLines = lines;
+    // Update active button highlight
+    [100, 300, 500].forEach(n => {
+      const btn = document.getElementById(`log-btn-${n}`);
+      if (btn) btn.classList.toggle("active", n === lines);
+    });
+  }
+  const data = await fetch(`/api/logs?lines=${LOG_FETCH_BUFFER}`).then(r => r.json());
+  allFormatted = (data.lines || []).map(formatLogLine);
+  applyFilters();
+}
+
+// ── Reset Events ──────────────────────────────────────────────────────────────
 async function loadResets() {
   const rows = await fetch("/api/reset_history?days=30").then(r => r.json());
   const tb   = document.getElementById("reset-tbody");
@@ -79,15 +241,46 @@ async function loadResets() {
   tb.innerHTML = rows.map(r => `
     <tr>
       <td style="white-space:nowrap;">${new Date(r.timestamp).toLocaleString()}</td>
-      <td><strong>${r.reset_type}</strong></td>
+      <td><strong>${({'full_reset':'Full Reset','modem_only':'Modem Only','router_only':'Router/AP Only'}[r.reset_type] || r.reset_type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()))}</strong></td>
       <td>${r.reason}</td>
       <td>${r.triggered_by}</td>
       <td style="color:${r.success ? 'var(--ok)' : 'var(--fail)'};">${r.success ? "✓" : "✗"}</td>
     </tr>`).join("");
 }
 
-async function loadAlerts() {
-  const rows = await fetch("/api/alerts?limit=50").then(r => r.json());
+// ── Alert History ─────────────────────────────────────────────────────────────
+let currentAlertLimit = 50;
+
+const ALERT_FRIENDLY_LABELS = {
+  outage:            'Network Outage',
+  restored:          'Network Restored',
+  reset_performed:   'Device Reset',
+  degraded:          'Degraded Performance',
+  conservative_mode: 'Max Resets Reached',
+  lockout_changed:   'Lockout Mode Changed',
+  daily_summary:     'Daily Summary',
+  test:              'Test Alert',
+  brute_force:       'Brute Force Attempt',
+  security_event:    'Security Event',
+  email_verification:'Email Verification',
+  password_reset:    'Password Reset',
+  pkg_update:        'Pi Package Update',
+  backup_db:         'Daily DB Backup',
+  backup_full:       'Full System Backup',
+};
+function friendlyAlertType(raw) {
+  return ALERT_FRIENDLY_LABELS[raw] || raw.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+async function loadAlerts(limit) {
+  if (limit) {
+    currentAlertLimit = limit;
+    [10, 20, 50, 100].forEach(n => {
+      const btn = document.getElementById(`alert-btn-${n}`);
+      if (btn) btn.classList.toggle("active", n === limit);
+    });
+  }
+  const rows = await fetch(`/api/alerts?limit=${currentAlertLimit}`).then(r => r.json());
   const tb   = document.getElementById("alert-tbody");
   if (!rows.length) {
     tb.innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No alerts on record</td></tr>`;
@@ -96,9 +289,9 @@ async function loadAlerts() {
   tb.innerHTML = rows.map(r => `
     <tr>
       <td style="white-space:nowrap;">${new Date(r.timestamp).toLocaleString()}</td>
-      <td><span style="font-size:0.7rem;padding:2px 8px;border-radius:10px;
+      <td style="white-space:nowrap;"><span style="font-size:0.7rem;padding:2px 8px;border-radius:10px;
                        background:var(--accent-glow);color:var(--accent);
-                       border:1px solid var(--border-color);">${r.alert_type}</span></td>
+                       border:1px solid var(--border-color);">${friendlyAlertType(r.alert_type)}</span></td>
       <td style="color:var(--text-muted);">${r.message.replace(/<[^>]+>/g," ")}</td>
       <td style="color:${r.sent ? 'var(--ok)' : 'var(--text-muted)'};">${r.sent ? "✓" : "—"}</td>
     </tr>`).join("");
@@ -112,9 +305,9 @@ loadLog(100);
 loadResets();
 loadAlerts();
 
-// Auto-refresh every 5s — catches new events quickly
+// Auto-refresh — re-fetches lines, then re-applies current filters
 setInterval(() => {
-  loadLog(currentLines);
+  loadLog();
   loadResets();
   loadAlerts();
 }, 5000);

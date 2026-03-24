@@ -1,0 +1,94 @@
+FEATURE: Backup Email Delivery Logging
+TYPE: Feature
+DATE: 2026-03-21
+SESSION: 26
+OUTCOME: Complete
+
+BACKGROUND
+----------
+backup.sh (full GPG backup, weekly) and backup_db.sh (DB backup, daily) send emails
+directly via Python heredoc + Gmail SMTP. These sends were never logged to the
+alert_deliveries table, so they never appeared in Delivery History on the Alerts page.
+User wanted to see backup email history alongside other alert deliveries.
+
+The constraint: shell scripts run as netwatch-svc via cron. They have no direct access
+to the Python alert delivery infrastructure.
+
+DESIGN DECISION
+---------------
+Approach A chosen over alternatives: a Python helper (backup_notify.py) is called by
+the shell script after the email send attempt, logs the delivery to alert_deliveries,
+and exits. The email send with file attachment stays in the shell script (send_alert()
+doesn't support attachments). This mirrors the existing pkg_update_alert.py pattern.
+
+backup_db and backup_full are added to ALERT_TYPES with group "system". The "system"
+group is not in any role's ALLOWED_GROUPS in preferences.html, so these types never
+appear in subscription preferences -- they are audit-only entries in Delivery History,
+not subscribable alerts.
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+v3.3.81 first install: backup_notify.py failed with:
+  ModuleNotFoundError: No module named 'structlog'
+
+Cause: backup_notify.py imports alert_subscribers, which imports structlog (a venv-only
+package). The shell scripts called backup_notify.py with bare python3, which is the
+system Python without the venv. The same latent bug existed in pkg_update.sh for
+pkg_update_alert.py.
+
+Fix: changed all three scripts to use "$NETWATCH_DIR/venv/bin/python3" for calls to
+Python helpers that import NetWatch modules. Bare python3 remains acceptable for
+simple one-liner config reads (import config only -- stdlib-compatible). v3.3.81 was
+rebuilt. Confirmed working on second run.
+
+Also discovered during this session: the GPG keyring had drifted to wrong ownership
+on the Pi, causing "unsafe ownership" and "Permission denied" errors. Manual fix:
+  sudo chown -R netwatch-svc:netwatch-svc /home/mboynton/netwatch/.gnupg
+  sudo chmod 700 /home/mboynton/netwatch/.gnupg
+This is unrelated to the code changes and would have been failing before this session.
+SystemSetup.txt updated with recovery procedure.
+
+WHAT WORKED
+-----------
+backup_notify.py (new file):
+- Called by backup.sh and backup_db.sh after send_backup_email with $? check.
+- Arguments: OK|FAIL, full|db, filename, recipient address, [error message]
+- Calls alert_subscribers.log_delivery() with appropriate alert_type (backup_db or
+  backup_full), event message (filename + error if failed), channel="email", and
+  success flag.
+- Non-fatal: if DB write fails (e.g. Pi storage issue), prints a warning but does not
+  affect the backup result.
+- Uses $NETWATCH_DIR/venv/bin/python3 (called by shell scripts).
+
+alert_subscribers.py:
+- Added to ALERT_TYPES:
+    {"key": "backup_db",   "label": "Daily DB Backup",    "group": "system", ...}
+    {"key": "backup_full", "label": "Full System Backup",  "group": "system", ...}
+- "system" group never appears in subscription UI (not in any ALLOWED_GROUPS set).
+
+backup.sh and backup_db.sh:
+- Added $? check after send_backup_email call.
+- On success: calls backup_notify.py OK full|db filename address
+- On failure: calls backup_notify.py FAIL full|db filename address "Email send failed"
+- Uses venv python3 for the call.
+
+pkg_update.sh:
+- Same venv fix applied to all pkg_update_alert.py calls (same latent bug).
+
+templates/logs.html and templates/alert_settings.html:
+- Added friendly labels: backup_db -> "Daily DB Backup", backup_full -> "Full System Backup"
+- These appear in Delivery History type column and filter dropdowns.
+
+Package: v3.3.81 (rebuilt after venv fix)
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- The email send itself stays in the shell script as a heredoc using bare python3. This
+  works because the heredoc only imports smtplib (stdlib). Long-term, moving email
+  sending to a Python helper that uses the full alert infrastructure would be cleaner,
+  but it would require adding attachment support to send_alert(). Deferred.
+
+- backup_notify.py passes subscriber_id=None since backup emails go to config.ALERT_TO
+  directly, not via a subscriber record. The delivery row has no subscriber association.
+  This is correct for audit purposes but means the Delivery History subscriber column
+  will show blank for backup entries. Acceptable.

@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import logging
+import structlog
 import sqlite3
 import py_compile
 import tempfile
@@ -21,7 +22,7 @@ from datetime import datetime
 
 NETWATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 
-log = logging.getLogger("netwatch.updater")
+log = structlog.get_logger().bind(service="web")
 
 # Base directory where NetWatch files live
 NETWATCH_DIR = NETWATCH_DIR
@@ -128,19 +129,34 @@ def validate_python(content_bytes):
 
 def backup_file(target_path):
     """
-    Create a .bak copy of the existing file before overwriting.
+    Create a backup copy of the existing file before overwriting.
+
+    For NetWatch_AI_Context_latest.txt: creates a dated copy in the same directory
+    using the format NetWatch_AI_Context_YYYY-MM-DD_HHMMSS.txt so that multiple
+    uploads on the same day each produce a distinct archive copy. Matches the
+    behavior of patcher.py _backup() for consistency.
+
+    For all other files: creates path.bak (overwrites any previous .bak).
+
     Returns the backup path, or None if the original didn't exist.
     """
     if not os.path.exists(target_path):
         return None
 
-    backup_path = target_path + ".bak"
+    basename = os.path.basename(target_path)
+    if basename == "NetWatch_AI_Context_latest.txt":
+        ts = datetime.utcnow().strftime("%Y-%m-%d_%H%M%S")
+        dated_name = f"NetWatch_AI_Context_{ts}.txt"
+        backup_path = os.path.join(os.path.dirname(target_path), dated_name)
+    else:
+        backup_path = target_path + ".bak"
+
     try:
         shutil.copy2(target_path, backup_path)
-        log.info(f"Backup created: {backup_path}")
+        log.info("Backup created", path=backup_path)
         return backup_path
     except Exception as e:
-        log.warning(f"Could not create backup of {target_path}: {e}")
+        log.warning("Could not create backup", path=target_path, error=str(e))
         return None
 
 
@@ -161,13 +177,13 @@ def apply_file(filename, content_bytes, uploaded_by="web"):
     target_path = get_target_path(filename)
     ext         = os.path.splitext(basename)[1].lower()
 
-    log.info(f"Applying update: {basename} → {target_path} (uploaded by {uploaded_by})")
+    log.info("Applying update", filename=basename, target=target_path, uploaded_by=uploaded_by)
 
     # ── Step 1: Validate Python syntax ──────────────────────────────────────
     if ext == ".py":
         valid, syntax_error = validate_python(content_bytes)
         if not valid:
-            log.warning(f"Syntax error in {basename}: {syntax_error}")
+            log.warning("Syntax error in file", filename=basename, error=str(syntax_error))
             _log_upload(basename, uploaded_by, success=False, notes=f"Syntax error: {syntax_error}")
             return {
                 "success":           False,
@@ -186,9 +202,9 @@ def apply_file(filename, content_bytes, uploaded_by="web"):
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
         with open(target_path, "wb") as f:
             f.write(content_bytes)
-        log.info(f"File written: {target_path} ({len(content_bytes)} bytes)")
+        log.info("File written", path=target_path, bytes=len(content_bytes))
     except Exception as e:
-        log.error(f"Failed to write {target_path}: {e}")
+        log.error("Failed to write file", path=target_path, error=str(e))
         _log_upload(basename, uploaded_by, success=False, notes=str(e))
         return {
             "success":           False,
@@ -252,7 +268,7 @@ def rollback_file(filename):
 
     try:
         shutil.copy2(backup_path, target_path)
-        log.info(f"Rolled back {filename} from {backup_path}")
+        log.info("File rolled back", filename=filename, backup=backup_path)
     except Exception as e:
         return False, f"Rollback failed: {e}"
 
@@ -293,7 +309,7 @@ def _restart_service(service_name):
             if result.returncode != 0:
                 return False, result.stderr.strip()
 
-        log.info(f"Service restarted: {service_name}")
+        log.info("Service restarted", service=service_name)
         return True, None
     except subprocess.TimeoutExpired:
         return False, "Restart timed out"
@@ -343,7 +359,7 @@ def get_upload_history(limit=50):
         conn.close()
         return [dict(r) for r in rows]
     except Exception as e:
-        log.error(f"Failed to get upload history: {e}")
+        log.error("Failed to get upload history", error=str(e))
         return []
 
 
@@ -359,7 +375,7 @@ def _log_upload(filename, uploaded_by, success, notes=""):
         conn.commit()
         conn.close()
     except Exception as e:
-        log.error(f"Failed to log upload: {e}")
+        log.error("Failed to log upload", error=str(e))
 
 
 def _ensure_upload_log_table():
@@ -410,6 +426,11 @@ def list_dev_docs():
 def save_dev_doc(filename, content_bytes):
     """
     Save a file to dev_docs. Accepts any file type — no syntax check, no service restart.
+
+    For NetWatch_AI_Context_latest.txt: creates a dated backup copy
+    (NetWatch_AI_Context_YYYY-MM-DD_HHMMSS.txt) before overwriting, so each
+    upload produces a distinct archive. Matches patcher.py _backup() behavior.
+
     Returns (True, None) or (False, error_message).
     """
     _ensure_dev_docs_dir()
@@ -418,10 +439,22 @@ def save_dev_doc(filename, content_bytes):
     if not basename or basename.startswith("."):
         return False, "Invalid filename"
     target = os.path.join(DEV_DOCS_DIR, basename)
+
+    # Dated backup for context doc before overwriting
+    if basename == "NetWatch_AI_Context_latest.txt" and os.path.exists(target):
+        ts = datetime.utcnow().strftime("%Y-%m-%d_%H%M%S")
+        dated_name = f"NetWatch_AI_Context_{ts}.txt"
+        dated_path = os.path.join(DEV_DOCS_DIR, dated_name)
+        try:
+            shutil.copy2(target, dated_path)
+            log.info("Context doc backup created", path=dated_path)
+        except Exception as e:
+            log.warning("Could not create context doc backup", error=str(e))
+
     try:
         with open(target, "wb") as f:
             f.write(content_bytes)
-        log.info(f"Dev doc saved: {target} ({len(content_bytes)} bytes)")
+        log.info("Dev doc saved", path=target, bytes=len(content_bytes))
         return True, None
     except Exception as e:
         return False, str(e)
@@ -439,7 +472,7 @@ def delete_dev_doc(filename):
         return False, f"File not found: {basename}"
     try:
         os.remove(target)
-        log.info(f"Dev doc deleted: {target}")
+        log.info("Dev doc deleted", path=target)
         return True, None
     except Exception as e:
         return False, str(e)
@@ -463,7 +496,7 @@ def rename_dev_doc(old_filename, new_filename):
         return False, f"A file named '{new_base}' already exists"
     try:
         os.rename(old_path, new_path)
-        log.info(f"Dev doc renamed: {old_base} → {new_base}")
+        log.info("Dev doc renamed", old=old_base, new=new_base)
         return True, None
     except Exception as e:
         return False, str(e)

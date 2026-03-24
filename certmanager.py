@@ -6,11 +6,12 @@
 import os
 import subprocess
 import logging
+import structlog
 from datetime import datetime
 
 NETWATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 
-log = logging.getLogger("netwatch.certmanager")
+log = structlog.get_logger().bind(service="web")
 
 CERTS_DIR   = os.path.join(NETWATCH_DIR, "certs")
 CA_DIR      = os.path.join(CERTS_DIR, "ca")
@@ -78,7 +79,7 @@ def get_cert_info():
                     info["sans"].extend(ips)
                     info["ip_count"] += len(ips)
         except Exception as e:
-            log.warning(f"Could not read cert info: {e}")
+            log.warning("Could not read cert info", error=str(e))
 
     if info["ca_exists"]:
         try:
@@ -95,7 +96,7 @@ def get_cert_info():
                     except ValueError:
                         info["ca_expires"] = raw
         except Exception as e:
-            log.warning(f"Could not read CA cert info: {e}")
+            log.warning("Could not read CA cert info", error=str(e))
 
     return info
 
@@ -165,10 +166,10 @@ def regenerate_server_cert():
         return True, "Server certificate regenerated. NetWatch is restarting..."
 
     except subprocess.CalledProcessError as e:
-        log.error(f"Certificate regeneration failed: {e.stderr}")
+        log.error("Certificate regeneration failed", stderr=str(e.stderr))
         return False, f"OpenSSL error: {e.stderr.decode() if e.stderr else str(e)}"
     except Exception as e:
-        log.error(f"Certificate regeneration failed: {e}")
+        log.error("Certificate regeneration failed", error=str(e))
         return False, str(e)
 
 

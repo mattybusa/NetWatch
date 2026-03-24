@@ -1,0 +1,165 @@
+NETWATCH EXPANDED SUMMARY — MINOR FIXES SESSION 20
+===================================================
+Name: Minor fixes — Session 20
+Type: Feature (consolidated)
+Date: 2026-03-18
+Session: 20
+Final outcome: All arcs complete
+
+
+ARC: Reset Type Friendly Names (v3.3.45)
+-----------------------------------------
+BACKGROUND: Logs page Reset Events tab displayed raw DB values for reset type:
+  modem_only, router_only, full_reset. User confirmed these had been displayed with
+  friendly names before. Investigation confirmed the friendly names were always
+  in the Reason column (which holds human-readable strings from relay.py), and the
+  Type column had always shown raw values. Regardless, the fix is correct.
+
+WHAT WAS TRIED AND FAILED:
+  First build of v3.3.45 used "full" as the key but relay.py stores "full_reset".
+  Also lacked a generic fallback. Rebuilt before shipping.
+
+WHAT WORKED:
+  In logs.html loadResets(), changed:
+    ${r.reset_type}
+  to:
+    $({'full_reset':'Full Reset','modem_only':'Modem Only','router_only':'Router/AP Only'}
+      [r.reset_type] || r.reset_type.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()))
+
+  The generic fallback matches the established pattern in alert_settings.html
+  friendlyType(). Any unknown future reset type gets automatic title-casing.
+
+FILES CHANGED: templates/logs.html
+SHIPPED: v3.3.45 (confirmed working by user)
+
+
+ARC: Alert History Friendly Names (v3.3.46)
+--------------------------------------------
+BACKGROUND: Logs page Alert History tab displayed raw alert_type values (outage,
+  reset_performed, pkg_update, etc.) in the Type badge. Same issue as reset types.
+
+WHAT WORKED:
+  Added ALERT_FRIENDLY_LABELS dict and friendlyAlertType() function to logs.html,
+  using the same label map as alert_settings.html FRIENDLY_LABELS. Applied to the
+  badge: ${friendlyAlertType(r.alert_type)}.
+
+  Labels: outage→'Network Outage', restored→'Network Restored',
+  reset_performed→'Device Reset', degraded→'Degraded Performance',
+  conservative_mode→'Max Resets Reached', lockout_changed→'Lockout Mode Changed',
+  daily_summary→'Daily Summary', test→'Test Alert', brute_force→'Brute Force Attempt',
+  security_event→'Security Event', email_verification→'Email Verification',
+  password_reset→'Password Reset', pkg_update→'Pi Package Update'.
+
+NOTE: Should have checked the full logs.html for all similar patterns before building
+  v3.3.46 — the reset type and alert type fixes could have shipped together.
+
+FILES CHANGED: templates/logs.html
+SHIPPED: v3.3.46
+
+
+ARC: Alert Badge No-Wrap (v3.3.47)
+-------------------------------------
+BACKGROUND: Two-word friendly labels (Email Verification, Network Restored, Brute
+  Force Attempt) were wrapping inside the badge. User shared screenshot confirming.
+
+WHAT WAS TRIED AND FAILED:
+  v3.3.48 added min-width:140px to the Type <th> — not sufficient alone.
+  v3.3.49 added white-space:nowrap to the <span> badge — never installed.
+  Both discarded after user confirmed v3.3.47 working.
+
+WHAT WORKED:
+  v3.3.47 added white-space:nowrap to both the <td> and the <span>:
+    <td style="white-space:nowrap;"><span style="...white-space:nowrap;">
+
+NOTE: User accidentally installed v3.3.46 twice and skipped v3.3.47 initially.
+  v3.3.47 installed and confirmed working afterward. v3.3.48 and v3.3.49 discarded.
+
+FILES CHANGED: templates/logs.html
+SHIPPED: v3.3.47 (confirmed working)
+
+
+ARC: Security Page Missing Event Types (v3.3.50)
+-------------------------------------------------
+BACKGROUND: Security log page filter checkboxes and EVENT_META were missing several
+  event types that auth.py actually records: password_reset, ACCOUNT_LOCKED,
+  ACCOUNT_DISABLED, user_created, user_deleted, session_expired. Also password_reset,
+  user_created, user_deleted, session_expired were in EVENT_META but not in the
+  filter checkboxes, so they were never fetched from the API.
+
+WHAT WORKED:
+  Added 6 new filter checkboxes (all checked by default):
+    🔄 PW Reset (password_reset), 🔐 Locked (ACCOUNT_LOCKED),
+    🚫 Acct Disabled (ACCOUNT_DISABLED), 👤 User Created (user_created),
+    🗑️ User Deleted (user_deleted), ⏱️ Expired (session_expired)
+
+  Added ACCOUNT_LOCKED and ACCOUNT_DISABLED to EVENT_META:
+    ACCOUNT_LOCKED:   { label:"LOCKED",        color:"var(--warn)" }
+    ACCOUNT_DISABLED: { label:"ACCT DISABLED",  color:"var(--fail)" }
+
+  Note: ACCOUNT_LOCKED and ACCOUNT_DISABLED are stored uppercase in the DB (that is
+  what auth.py passes to seclog.record()). Filter values and EVENT_META keys must
+  match exactly.
+
+  The API fetch builds its query dynamically from checked checkboxes, so adding
+  checkboxes automatically includes the new types in the fetch.
+
+DISTINCTION: login_disabled = login attempt on a disabled account (fires on each
+  attempt). ACCOUNT_DISABLED = system just now auto-disabled an account due to
+  repeated lockouts (fires once when the account is disabled).
+
+FILES CHANGED: templates/security_log.html
+SHIPPED: v3.3.50
+
+
+ARC: Updater Context Doc Backup (v3.3.51/v3.3.52)
+---------------------------------------------------
+BACKGROUND: Backlog item. When NetWatch_AI_Context_latest.txt is uploaded via
+  Deployed Files or Dev Docs, a dated backup should be created before overwriting
+  (same behavior patcher.py already has for this file).
+
+WHAT WAS TRIED AND FAILED:
+  v3.3.51 put the dated backup logic in backup_file() — the Deployed Files upload
+  path. However the context doc is always uploaded via Dev Docs, which uses
+  save_dev_doc(). The fix had no effect. See Gotchas.txt entry:
+  "UPDATER.PY HAS TWO SEPARATE UPLOAD PATHS".
+
+WHAT WORKED:
+  v3.3.52 added the dated backup logic to save_dev_doc():
+    if basename == "NetWatch_AI_Context_latest.txt" and os.path.exists(target):
+        ts = datetime.utcnow().strftime("%Y-%m-%d_%H%M%S")
+        dated_name = f"NetWatch_AI_Context_{ts}.txt"
+        dated_path = os.path.join(DEV_DOCS_DIR, dated_name)
+        shutil.copy2(target, dated_path)
+
+  Both v3.3.51 (backup_file) and v3.3.52 (save_dev_doc) changes remain in updater.py.
+  Belt and suspenders — whichever upload path is used, a dated backup is created.
+
+  Confirmed working by user: uploaded context doc, dated backup appeared in dev_docs.
+
+FILES CHANGED: updater.py
+SHIPPED: v3.3.51 (wrong function), v3.3.52 (correct function, confirmed working)
+
+
+ARC: Patcher Temp File Fix (v3.3.53)
+--------------------------------------
+BACKGROUND: Backlog item from Session 10. patcher.py _syntax_check() compiled Python
+  files to /tmp/__pycache__/ and never cleaned them up. When that directory had wrong
+  ownership/permissions (caused by the netwatch-svc migration), the patcher reported
+  "syntax error in filename.py" when the real error was a permission failure. Files
+  accumulated to 11MB before being manually cleaned in Session 10.
+
+WHAT WORKED:
+  Rewrote _syntax_check() to:
+  1. Use tempfile.mkstemp() to write source to a proper temp file
+  2. Pass explicit cfile=tmp_path+"c" to py_compile.compile() so the .pyc is written
+     alongside the source temp file in /tmp/, NOT to /tmp/__pycache__/
+  3. Clean up both temp files in a finally block regardless of outcome
+  4. Catch PermissionError specifically and report it accurately
+  5. Catch bare Exception with "Syntax check failed: {e}" instead of just str(e)
+
+  Simulated: valid Python passes, syntax errors caught correctly, no temp files left.
+  Verified on Pi: /tmp/__pycache__ confirmed "not present" after clearing old files
+  and installing a package.
+
+FILES CHANGED: patcher.py
+SHIPPED: v3.3.53 (confirmed working)

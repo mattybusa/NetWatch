@@ -53,6 +53,12 @@
     <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="login_disabled" checked> 🔒 Disabled</label>
     <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="logout" checked> 👋 Logouts</label>
     <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="password_change" checked> 🔑 Password</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="password_reset" checked> 🔄 PW Reset</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="ACCOUNT_LOCKED" checked> 🔐 Locked</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="ACCOUNT_DISABLED" checked> 🚫 Acct Disabled</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="user_created" checked> 👤 User Created</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="user_deleted" checked> 🗑️ User Deleted</label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="session_expired" checked> ⏱️ Expired</label>
     <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="relay_trigger" checked> ⚡ Relay</label>
     <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;cursor:pointer;"><input type="checkbox" class="evt-filter" value="config_change" checked> ⚙️ Config</label>
     <select id="limit-select" style="margin-left:auto;background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;padding:4px 8px;color:var(--text-primary);font-size:0.8rem;">
@@ -143,17 +149,19 @@
 
 <script>
 const EVENT_META = {
-  login_ok:        { label:"LOGIN",    color:"var(--ok)" },
-  login_fail:      { label:"FAILED",   color:"var(--fail)" },
-  login_disabled:  { label:"DISABLED", color:"var(--warn)" },
-  logout:          { label:"LOGOUT",   color:"var(--text-muted)" },
-  password_change: { label:"PASSWORD", color:"var(--accent)" },
-  password_reset:  { label:"PW RESET", color:"var(--warn)" },
-  user_created:    { label:"NEW USER", color:"var(--ok)" },
-  user_deleted:    { label:"DEL USER", color:"var(--fail)" },
-  relay_trigger:   { label:"RELAY",    color:"#2980b9" },
-  config_change:   { label:"CONFIG",   color:"var(--accent)" },
-  session_expired: { label:"EXPIRED",  color:"var(--text-muted)" },
+  login_ok:        { label:"LOGIN",        color:"var(--ok)" },
+  login_fail:      { label:"FAILED",       color:"var(--fail)" },
+  login_disabled:  { label:"DISABLED",     color:"var(--warn)" },
+  logout:          { label:"LOGOUT",       color:"var(--text-muted)" },
+  password_change: { label:"PASSWORD",     color:"var(--accent)" },
+  password_reset:  { label:"PW RESET",     color:"var(--warn)" },
+  ACCOUNT_LOCKED:  { label:"LOCKED",       color:"var(--warn)" },
+  ACCOUNT_DISABLED:{ label:"ACCT DISABLED",color:"var(--fail)" },
+  user_created:    { label:"NEW USER",     color:"var(--ok)" },
+  user_deleted:    { label:"DEL USER",     color:"var(--fail)" },
+  relay_trigger:   { label:"RELAY",        color:"#2980b9" },
+  config_change:   { label:"CONFIG",       color:"var(--accent)" },
+  session_expired: { label:"EXPIRED",      color:"var(--text-muted)" },
 };
 
 let allEvents         = [];
@@ -169,7 +177,7 @@ function setPeriod(btn) {
   document.getElementById('label-failures').textContent  = `Failures (${lbl})`;
   document.getElementById('label-unique-ips').innerHTML  = `Unique IPs (${lbl}) <span style="color:var(--accent);font-size:0.65rem;">↗</span>`;
   document.getElementById('label-pw-changes').textContent= `PW Changes (${lbl})`;
-  updateStats(allEvents);
+  loadEvents();  // re-fetch event log for the new period
 }
 
 function getPeriodCutoff() {
@@ -196,6 +204,7 @@ async function loadEvents() {
   const params = new URLSearchParams();
   types.forEach(t => params.append('type', t));
   params.set('limit', limit);
+  params.set('since', getPeriodCutoff());  // filter by active period
   const events = await fetch(`/api/security/events?${params}`).then(r => r.json());
   allEvents = events;
   renderEvents(events);

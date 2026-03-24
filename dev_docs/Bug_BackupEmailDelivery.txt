@@ -1,0 +1,65 @@
+BUG: Backup Email Delivery — Wrong Config Key
+=============================================
+Type: Bug
+Date: 2026-03-20
+Session: 22
+Outcome: Complete — confirmed fixed, emails arriving at correct address
+
+
+BACKGROUND
+----------
+Both backup.sh (full system backup) and backup_db.sh (daily DB backup) send
+email notifications on completion when run with --email flag. After the
+netwatch-svc migration in Session 19, the cron jobs were confirmed running
+correctly and producing backup files — but no emails were arriving at the
+user's personal address. The user had recently set up a new dedicated Gmail
+account (netwatch.prime@gmail.com) for NetWatch to send from, and had verified
+the account and configured it in Config Editor.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Initial theory was heredoc failure (per Gotchas.txt — NEVER USE BASH HEREDOCS).
+Both scripts use python3 - << PYEOF heredocs for the email sending functions.
+However running the script interactively as netwatch-svc produced "Backup email
+sent" output, ruling out heredoc failure on this Pi for this specific pattern.
+
+Root cause investigation: checked what address the scripts were actually sending
+to by reading the config directly.
+
+
+WHAT WORKED
+-----------
+Root cause: both backup.sh and backup_db.sh read the recipient address with:
+
+  ALERT_EMAIL=$(python3 -c "... print(config.ALERT_EMAIL)" 2>/dev/null || echo "$GMAIL_USER")
+
+config.ALERT_EMAIL does not exist in config.py. The correct key is config.ALERT_TO.
+The 2>/dev/null flag suppressed the AttributeError silently. The fallback
+|| echo "$GMAIL_USER" then set ALERT_EMAIL to the sending account address
+(netwatch.prime@gmail.com). Emails were being sent FROM and TO the same account.
+They were sitting in the NetWatch Gmail inbox, not the user's personal inbox.
+
+Confirmed by:
+  python3 -c "import sys; sys.path.insert(0,'/home/mboynton/netwatch');
+              import config; print(config.ALERT_TO)"
+  → AttributeError: module 'config' has no attribute 'ALERT_EMAIL'
+
+Fix: changed config.ALERT_EMAIL to config.ALERT_TO in the ALERT_EMAIL= line
+in both scripts (line 30 in each). One-line fix per file.
+
+Files changed: backup.sh, backup_db.sh
+Package: v3.3.56
+No service restart required (shell scripts).
+
+Verified: ran backup_db.sh --email interactively as netwatch-svc, email received
+at correct personal address (mattybusa@gmail.com) within seconds.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- utcnow() deprecation warning appears in backup_db.sh output:
+  "datetime.datetime.utcnow() is deprecated and scheduled for removal in a
+  future version." Harmless in Python 3.12, deferred to a future cleanup pass.
+
+- Full backup email (backup.sh --email) also confirmed working this session.

@@ -1,0 +1,150 @@
+NETWATCH CHAT SUMMARY — SESSION 27
+====================================
+Date: 2026-03-22
+Starting version: v3.3.82 (context doc authoritative; zip label matched)
+Ending version: v3.3.85
+Summary: GPG key rotation (doc-only), package installer spacing fix, Backup Manager
+  (consolidated card, stored backup list, run-now buttons, retention config keys),
+  and Config Editor new-keys modal.
+
+SCOPE NOTE: Four distinct arcs. No expanded summaries required — all arcs fully
+captured here. Two doc-only items (GPG key rotation discussion, SystemSetup.txt update).
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+GPG KEY ROTATION (no package)
+  User forgot their GPG passphrase. Confirmed the Pi side was fine (backup cron
+  encrypting correctly). Windows-side fix: deleted old key pair in Kleopatra,
+  generated new RSA 4096 key for mattybusa@gmail.com, recorded new passphrase.
+  Exported public key, SCP'd to Pi, replaced key in netwatch-svc keyring via
+  sudo -u netwatch-svc gpg --homedir. Full encrypt/decrypt cycle verified (manual
+  backup run on Pi, SCP + gpg --decrypt on Windows confirmed working).
+  SystemSetup.txt updated with "GPG KEY REPLACEMENT" procedure under Section 1.6.
+
+  Discussion: User questioned whether TLS CA key being on the Pi changed the
+  calculus around GPG private key storage. Clarified that TLS certs and GPG backup
+  encryption are completely separate key pairs — the CA key can't decrypt GPG
+  backups. Original decision (private key stays off Pi) stands.
+
+v3.3.83 — Package installer confirm row spacing
+  The Confirm button row in the package installer preview touched the Package
+  History card below it. Fix: added margin-top:16px and margin-bottom:4px to
+  the confirm-bar div, and margin-bottom:8px to the preview-panel div in
+  patch_manager.html. Web restart only.
+
+v3.3.84 — Backup Manager
+  Replaced two separate cards (Database Backup & Restore, Full System Backup)
+  with a single consolidated Backup Manager card in admin.html.
+
+  New UI:
+  - "Backup DB Now" and "Full Backup Now" buttons (POST endpoints, return
+    filename/size, table refreshes after run)
+  - Stored backups table: lists all netwatch_db_*.db.gpg and
+    netwatch_backup_*.tar.gz.gpg files sorted newest first, with type badge,
+    size, Download and Delete actions per row
+  - Restore section: file upload input with decrypt reminder note explaining
+    that .db.gpg files must be decrypted locally before uploading
+  - Scheduled Backups section: daily DB and weekly full schedule controls
+    (unchanged from old cards)
+  - Scheduled Pi Updates section: weekly apt update schedule (unchanged)
+
+  New routes in webapp.py:
+  - GET  /api/admin/backup_list       — lists both backup types
+  - GET  /api/admin/backup_download   — serves file by validated filename
+  - POST /api/admin/backup_delete     — deletes file by validated filename
+  - POST /api/admin/backup_db_now     — runs backup_db.sh, returns filename/size
+
+  New config keys in config_schema.py:
+  - DB_BACKUP_RETENTION (int, default 14, min 1, max 90)
+  - FULL_BACKUP_RETENTION (int, default 7, min 1, max 30)
+
+  Shell script changes:
+  - backup_db.sh: KEEP_COPIES now reads DB_BACKUP_RETENTION from config.py
+    (fallback: 14)
+  - backup.sh: KEEP_FULL now reads FULL_BACKUP_RETENTION from config.py
+    (fallback: 7)
+
+  User also verified the full restore flow: ran DB backup via new button,
+  downloaded it, decrypted on Windows, uploaded and restored. Confirmed
+  netwatch.db.pre_restore written to ~/netwatch/ (not in ~/backups/).
+
+v3.3.85 — Config Editor new-keys modal
+  Context: after v3.3.84 installed, user noticed the new DB_BACKUP_RETENTION
+  and FULL_BACKUP_RETENTION keys appeared in config.py with defaults but were
+  not highlighted in the Config Editor. Investigation confirmed the badge system
+  only fires for placeholder string values (email, password, secrets) — not
+  integer defaults. The yellow banner at top of every page did fire correctly.
+
+  Discussion: user remembered a modal from earlier sessions. Traced through all
+  templates — no such modal existed. User confirmed they were thinking of the
+  import diff modal (keep/import toggle UI). Agreed the current banner is
+  sufficient for integer defaults, but a modal showing new keys would be better
+  UX when landing on the Config Editor via the banner link.
+
+  Implementation:
+  - webapp.py: config_editor route now passes pending_notifications to template
+  - config_editor.html: new-keys modal added
+    - Fires on page load if pending_notifications is non-empty
+    - Shows each new key with label, description, and an editable input
+      (correct input type per field: int, bool toggle, password, text)
+    - Save button: copies modal values into main form fields, dismisses all
+      notifications via API, calls saveConfig() to write and restart
+    - Dismiss button: dismisses all notifications, closes modal without saving
+    - Does not fire again after dismissal
+
+  Note: the two new retention key notifications had already been dismissed
+  (dismissed=1 in DB) when v3.3.84 was installed. Required manual reset via
+  sudo -u netwatch-svc sqlite3 before the modal could be tested. Modal fired
+  correctly, save worked, modal dismissed.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- Initial str_replace call for config_schema.py failed (path parameter missing
+  in tool call). Worked correctly via Python file manipulation.
+- First attempt to reset config_notifications via sqlite3 failed with "readonly
+  database" — mboynton does not have write access to netwatch.db. Correct
+  command requires sudo -u netwatch-svc.
+
+
+DECISIONS MADE
+--------------
+- GPG private key stays off Pi. TLS CA key on Pi is acceptable and unrelated.
+- DB backups are also GPG encrypted (.db.gpg) — no plain .db files stored.
+  "Restore directly" means download → decrypt → upload, not one-click. Modal
+  in the Backup Manager explains this clearly.
+- Config Editor new-keys modal fires for ALL pending notifications, not just
+  required/placeholder keys. Integer defaults are still useful to surface.
+- Retention config goes in Config Editor (config keys), not in the Backup
+  Manager UI directly.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None this session. The sqlite3 readonly issue is already covered by the
+WEBAPP CRONTAB OPERATIONS RUN AS netwatch-svc gotcha (general pattern:
+always use sudo -u netwatch-svc for DB writes).
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Package installer confirm row spacing (v3.3.83)
+- Backup Manager (v3.3.84)
+- Config Editor new-keys modal (v3.3.85)
+- GPG decrypt + restore flow end-to-end (verified this session, Session 26 item)
+
+Remaining top candidates:
+- MFA (design brief first)
+- Security audit
+- Kiosk display
+- Package storage + distribution story
+
+
+CURRENT STATE
+-------------
+Pi version: v3.3.85
+All services running normally
+Next task: open — see CurrentTask.txt

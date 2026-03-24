@@ -1,0 +1,79 @@
+NETWATCH EXPANDED SUMMARY — FEATURE: GUNICORN ACCESS LOG JSON
+=============================================================
+Name: Gunicorn HTTP access log structured JSON conversion
+Type: Feature
+Date: 2026-03-18
+Session: 20
+Final outcome: Complete
+
+
+BACKGROUND
+----------
+After v3.3.43 converted all Python modules to structlog, gunicorn's own HTTP access
+log remained in plain text: "192.168.17.80 - - [18/Mar/2026:00:03:46 -0400] GET /api/logs..."
+This caused Grafana parse errors on {host="netwatch-pi"} | json queries because Loki
+tried to JSON-parse these lines. The goal was consistent JSON across all log output
+from both services.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Nothing failed. The approach was identified correctly on the first attempt.
+
+The key insight: gunicorn has two separate log streams:
+1. Error log (errorlog = "-") — gunicorn startup/lifecycle messages. These flow through
+   Python's stdlib logging handler configured in wsgi.py, so they already respect the
+   structlog pipeline. However gunicorn formats them with its own timestamp prefix
+   ([2026-03-18 00:19:12 -0400] [91689] [INFO] ...) which is not JSON. These are
+   low-value and not worth converting.
+2. Access log (accesslog = "-") — one line per HTTP request, written by gunicorn's own
+   formatter. Completely bypasses structlog. This is what needed fixing.
+
+
+WHAT WORKED
+-----------
+Custom logger_class in gunicorn.conf.py (v3.3.44).
+
+CLASS: StructlogAccessLogger(gunicorn.glogging.Logger)
+  Overrides the access() method to emit via structlog instead of gunicorn's plain-text
+  formatter. Inherits all other Logger behavior unchanged.
+
+SCHEMA EMITTED PER REQUEST:
+  service, method, path, status, bytes, duration_ms, remote_addr,
+  referer, user_agent, event="http_request", level, timestamp
+
+LOG LEVEL BY STATUS CODE:
+  5xx → log.error()
+  4xx → log.warning()
+  2xx/3xx → log.info()
+
+KEY IMPLEMENTATION DETAILS:
+- duration_ms: computed from request_time.total_seconds() * 1000 (timedelta object)
+- response_bytes: cast from resp.response_length with try/except (can be '-' string)
+- status: resp.status_code (int)
+- full_path: PATH_INFO + '?' + QUERY_STRING if query string present
+- structlog imported at module level in gunicorn.conf.py (available since wsgi.py
+  configures it before gunicorn forks workers, and preload_app=True means the app
+  is loaded in master before forking)
+
+ACTIVATION: logger_class = StructlogAccessLogger at module level in gunicorn.conf.py
+
+VERIFICATION: Journalctl confirmed clean JSON access log lines immediately after
+v3.3.44 install. Old plain-text format visible before restart, JSON after.
+Example output:
+  {"service": "web", "method": "GET", "path": "/admin/patch", "status": 200,
+   "bytes": 55754, "duration_ms": 354.3, "remote_addr": "192.168.17.80",
+   "event": "http_request", "level": "info", "timestamp": "2026-03-18T04:19:14Z"}
+
+FILES CHANGED: gunicorn.conf.py
+SHIPPED: v3.3.44
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Gunicorn lifecycle messages ([INFO] Starting gunicorn, Booting worker, etc.) remain
+  plain text. They come from the error logger (not access logger) and use gunicorn's
+  own format. Not worth overriding — low operational value.
+- Grafana query {host="netwatch-pi"} | json will still show parse errors on the
+  gunicorn lifecycle lines. Use {host="netwatch-pi"} !~ "gunicorn\\[" | json to
+  exclude them, or filter by service field.

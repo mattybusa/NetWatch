@@ -1,0 +1,141 @@
+NETWATCH SESSION SUMMARY
+========================
+Session: 13 | Date: 2026-03-14
+Starting version: v3.3.30 (zip label) / v3.3.30 (context doc) — match confirmed.
+Ending version: v3.3.33
+Summary: Recovery and bug-fix session. Restored dev docs damaged by abandoned Gitea
+  workflow sessions, then found and fixed three pre-existing bugs uncovered during
+  the recovery process: DB export 404, missing web service logging, and snapshot
+  pruning failure.
+
+SCOPE NOTE: This session covered 6 distinct arcs (doc restore + 3 bugs + 2
+infrastructure fixes). Expanded summaries produced for all bugs.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- Session context recovery: Uploaded netwatch_full_20260314_004631.zip and
+  netwatch_v3_3_30.zip (Session 13 seed). Diffed the two context docs to identify
+  exactly what Sessions 12/13 changed. Confirmed Sessions 11-13 were infrastructure-
+  only (no functional code changes). Decision made to abandon Gitea workflow and
+  restore docs to pre-Session-12 state.
+
+- v3.3.30 — Dev docs restored (see Feature_MinorFixesSession_13.txt — "Doc Restore"):
+  NetWatch_AI_Context_latest.txt restored with full backlog list (was replaced by
+  Gitea Issues pointer in Session 12). AI_Session_Process.txt reverted to v1.4
+  (was v1.5 with Gitea fetch workflow). CurrentTask.txt rewritten. No code changes,
+  no restart.
+
+- v3.3.31 — DB export 404 fixed (see Feature_MinorFixesSession_13.txt — "DB Export Fix"):
+  admin_backup_db() was missing its @app.route decorator, auth decorators, and was
+  therefore never registered with Flask. Route existed in code but was unreachable.
+  Also in this package: wsgi.py logging fix — logging.basicConfig() was missing from
+  wsgi.py, causing all web service log output (patcher, webapp, all modules) to be
+  silently dropped since the service account migration.
+
+- v3.3.32 — Snapshot pruning fixed (see Feature_MinorFixesSession_13.txt — "Snapshot Pruning"):
+  patcher.py used getattr(config, ...) without importing config. Failed silently with
+  "name 'config' is not defined" on every package install since deployment. Snapshots
+  had accumulated to 44 (retention set to 10). Fixed by adding import config to
+  patcher.py. Snapshots pruned back to 10 on next install.
+
+- v3.3.33 — Cleanup: removed debug logging from patcher pruning block, kept permanent
+  error logging. Updated dev docs (Gotchas.txt, CurrentTask.txt) included.
+
+- Manual fix (no package): sudoers updated to allow systemctl commands without .service
+  suffix. patcher calls "systemctl restart netwatch-web" but sudoers only had
+  "netwatch-web.service" form. Restarts were silently blocked; packages appeared to
+  install but old code remained running.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- Initial DB export fix (v3.3.31 first attempt): package installed but 404 persisted.
+  Root cause: sudoers mismatch (see above) meant web service never restarted after
+  install. Old webapp.py was still running. Appeared to be a code failure but was
+  actually a deployment failure.
+
+- Snapshot pruning diagnosis — multiple dead ends before finding root cause:
+  Ownership confirmed as netwatch-svc (not the problem). Logic simulation confirmed
+  correct. Interactive test as netwatch-svc confirmed deletions work. No early returns
+  in _take_snapshot. config not imported in patcher was masked by bare
+  "except Exception: pass" — required adding debug logging to wsgi.py first, then
+  rebuilding patcher with explicit error logging, before the real error surfaced in
+  journalctl.
+
+- First attempt to read dev docs from zip: failed to find dev_docs/ folder because
+  the initial extraction did not include it — it was in the zip but missed on first
+  pass. Reextracted correctly on second attempt.
+
+
+DECISIONS MADE
+--------------
+- Gitea workflow abandoned entirely. Sessions 11-13 infrastructure work (Gitea setup,
+  fetch workflow, backlog migration) discarded. Pi rolled back to v3.3.29 codebase,
+  DB backed up and restored to preserve network data. No functional code was lost.
+
+- Gotchas entries from Sessions 12/13 (Gitea-specific) retained in Gotchas.txt even
+  though the workflow was abandoned. Append-only rule holds; entries are harmless and
+  accurately document what happened.
+
+- Debug logging added temporarily to patcher pruning block (v3.3.30-v3.3.32), then
+  removed in v3.3.33 cleanup. Permanent error logging kept — failures will now appear
+  in journalctl instead of being silently swallowed.
+
+- wsgi.py logging fix treated as a permanent improvement, not just debug scaffolding.
+  All web service log output now appears in journalctl, matching monitor service behavior.
+
+- End-of-session context doc updated at v3.3.33 — version bumped, backlog unchanged,
+  Gitea references removed from Current State section.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- Weekly Pi update cron (v3.3.12): still not confirmed fired in the wild.
+  Verify: crontab -l | grep netwatch-pkg-update
+
+- Web service silent-exit after delayed restart: now more diagnosable with wsgi.py
+  logging in place. Watch journalctl on next few package installs to confirm or
+  rule out.
+
+- [UNVERIFIED] DB backup was successfully exported and re-imported after rollback —
+  confirmed by user ("I'm back on 3.3.29 with the db restore completed") but the
+  actual backup file content was not verified independently.
+
+- Orphan test keys (TEST_KEY_WITH_DEFAULT, TEST_KEY_UNCONFIGURED) may remain in
+  config.py on the Pi. Harmless — validator ignores unknown keys.
+
+
+BACKLOG CHANGES
+---------------
+No backlog items completed or added. Three bugs found and fixed this session
+(identified and resolved this session):
+- DB export 404 (admin_backup_db missing route decorator)
+- Web service logging silent (wsgi.py missing basicConfig)
+- Snapshot pruning failure (patcher.py missing import config)
+
+These were pre-existing bugs, not backlog items. Not added to backlog.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_MinorFixesSession_13.txt — covers three arcs: Doc Restore (v3.3.30),
+  DB Export Fix (v3.3.31), and Snapshot Pruning fix (v3.3.32).
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during session (dev session):
+- SUDOERS EXACT MATCH — systemctl COMMANDS MUST MATCH WITH AND WITHOUT .service SUFFIX
+- WEB SERVICE HAS NO LOGGING HANDLER WITHOUT basicConfig IN wsgi.py
+- PATCHER.PY HAS NO IMPLICIT ACCESS TO config — MUST IMPORT EXPLICITLY
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.33
+- All services running normally
+- Snapshot retention working correctly (10 snapshots kept)
+- Web service logging now active — all patcher/webapp output appears in journalctl
+- Next task: SESSION_COOKIE_SECURE = True fix (one-liner, identified in Session 11
+  audit, easy win, no design brief required)

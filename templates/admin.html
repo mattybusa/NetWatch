@@ -147,7 +147,7 @@
     </div>
     <div id="section-export" class="nw-collapse-body">
       <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
-        Download records as CSV files. Health exports cover 30 days; reset exports cover 90 days.
+        Download records as CSV files. Health exports cover {{ keep_health_days }} days; reset exports cover {{ keep_reset_days }} days.
       </p>
       <a href="/api/admin/export_health" class="nw-btn w-100 mb-2" style="display:block;text-align:center;">
         <i class="bi bi-download me-2"></i>Export Health Log (CSV)
@@ -166,21 +166,45 @@
     </div>
   </div>
 
-  <!-- Database Backup & Restore -->
+  <!-- Backup Manager (consolidated) -->
   <div class="nw-card p-4 mb-4">
-    <div class="nw-collapse-header" onclick="toggleSection('db-backup')">
-      <div class="nw-label" style="margin:0;">Database Backup &amp; Restore</div>
-      <i class="bi bi-chevron-down nw-chevron" id="chevron-db-backup"></i>
+    <div class="nw-collapse-header" onclick="toggleSection('backup')">
+      <div class="nw-label" style="margin:0;">Backup Manager</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-backup"></i>
     </div>
-    <div id="section-db-backup" class="nw-collapse-body">
+    <div id="section-backup" class="nw-collapse-body">
       <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
-        Download a complete backup of all historical data (health checks, resets, speedtests).
-        Restore from a previously downloaded backup file. A safety copy is made before any restore.
+        View, download, and delete backup files stored locally on the Pi.
+        All backups are GPG-encrypted — decrypt on your PC before restoring.
+        Retention counts are configurable in the Config Editor
+        (DB_BACKUP_RETENTION, FULL_BACKUP_RETENTION).
       </p>
-      <a href="/api/admin/backup_db" class="nw-btn nw-btn-primary w-100 mb-3" style="display:block;text-align:center;">
-        <i class="bi bi-database-down me-2"></i>Download Database Backup (.db)
-      </a>
-      <div class="nw-label mb-2">Restore from Backup</div>
+
+      <!-- Run backup now buttons -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+        <button class="nw-btn nw-btn-primary" onclick="doBackupNow('db')" id="backup-db-btn">
+          <i class="bi bi-database-down me-1"></i>Backup DB Now
+        </button>
+        <button class="nw-btn nw-btn-primary" onclick="doBackupNow('full')" id="backup-full-btn">
+          <i class="bi bi-archive me-1"></i>Full Backup Now
+        </button>
+      </div>
+      <div id="backup-now-msg" style="display:none;margin-bottom:12px;font-size:0.82rem;"></div>
+
+      <!-- Stored backups table -->
+      <div class="nw-label mb-2">Stored Backups</div>
+      <div id="backup-list-wrap">
+        <div style="font-size:0.82rem;color:var(--text-muted);">Loading...</div>
+      </div>
+
+      <hr class="nw-hr">
+
+      <!-- Restore from upload -->
+      <div class="nw-label mb-2">Restore Database from File</div>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px;">
+        <i class="bi bi-info-circle me-1"></i>
+        Decrypt your <code>.db.gpg</code> backup on your PC first, then upload the plain <code>.db</code> file here.
+      </p>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <input type="file" id="restore-file" accept=".db"
                style="flex:1;background:var(--bg-input);border:1px solid var(--border-color);
@@ -191,31 +215,11 @@
         </button>
       </div>
       <div id="restore-msg" style="display:none;margin-top:10px;font-size:0.82rem;"></div>
-    </div>
-  </div>
-
-  <!-- Full System Backup -->
-  <div class="nw-card p-4 mb-4">
-    <div class="nw-collapse-header" onclick="toggleSection('sys-backup')">
-      <div class="nw-label" style="margin:0;">Full System Backup</div>
-      <i class="bi bi-chevron-down nw-chevron" id="chevron-sys-backup"></i>
-    </div>
-    <div id="section-sys-backup" class="nw-collapse-body">
-      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
-        Download a complete encrypted backup of everything — code, config, certificates, and database.
-        Use this to restore to a new Pi or recover from hardware failure.
-        Backups are encrypted with your GPG public key and can only be decrypted on your PC.
-      </p>
-      <button class="nw-btn nw-btn-primary w-100 mb-2" onclick="doFullBackup()"
-              style="display:block;text-align:center;" id="full-backup-btn">
-        <i class="bi bi-archive me-2"></i>Download Full System Backup (.tar.gz.gpg)
-      </button>
-      <div id="full-backup-msg" style="display:none;margin-bottom:12px;font-size:0.82rem;"></div>
 
       <hr class="nw-hr">
       <div class="nw-label mb-3">Scheduled Backups</div>
 
-      <!-- Daily DB backup -->
+      <!-- Daily DB backup schedule -->
       <div style="background:var(--bg-input);border-radius:8px;padding:14px;margin-bottom:12px;">
         <div style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">
           <i class="bi bi-database me-1"></i> Daily — Database Only
@@ -244,7 +248,7 @@
         </button>
       </div>
 
-      <!-- Weekly full backup -->
+      <!-- Weekly full backup schedule -->
       <div style="background:var(--bg-input);border-radius:8px;padding:14px;margin-bottom:12px;">
         <div style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">
           <i class="bi bi-archive me-1"></i> Weekly — Full System
@@ -437,13 +441,39 @@
   </div>
 
   <!-- System Info -->
-  <div class="nw-card p-4">
+  <div class="nw-card p-4 mb-4">
     <div class="nw-collapse-header" onclick="toggleSection('sysinfo')">
       <div class="nw-label" style="margin:0;">System Information</div>
       <i class="bi bi-chevron-down nw-chevron" id="chevron-sysinfo"></i>
     </div>
     <div id="section-sysinfo" class="nw-collapse-body">
       <div class="log-box" id="sys-info" style="margin-top:12px;">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Pi Package Update Log -->
+  <div class="nw-card p-4">
+    <div class="nw-collapse-header" onclick="toggleSection('pkg-log')">
+      <div class="nw-label" style="margin:0;">Pi Package Update Log</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-pkg-log"></i>
+    </div>
+    <div id="section-pkg-log" class="nw-collapse-body">
+      <div style="display:flex;align-items:center;gap:12px;margin-top:12px;margin-bottom:10px;flex-wrap:wrap;">
+        <span style="font-size:0.82rem;color:var(--text-muted);">Last modified: <span id="pkg-log-mtime">—</span></span>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+          <label style="font-size:0.82rem;color:var(--text-muted);">Lines:</label>
+          <select id="pkg-log-lines" class="f-input" style="width:80px;padding:3px 6px;font-size:0.82rem;" onchange="loadPkgLog()">
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+          </select>
+          <button class="nw-btn nw-btn-sm" onclick="loadPkgLog()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+          </button>
+        </div>
+      </div>
+      <div class="log-box" id="pkg-log-box" style="white-space:pre;font-size:0.78rem;min-height:80px;">Loading...</div>
     </div>
   </div>
 
@@ -633,6 +663,107 @@ async function doFullBackup() {
   btn.innerHTML = '<i class="bi bi-archive me-2"></i>Download Full System Backup (.tar.gz.gpg)';
 }
 
+async function loadBackupList() {
+  const wrap = document.getElementById("backup-list-wrap");
+  if (!wrap) return;
+  try {
+    const data = await fetch("/api/admin/backup_list").then(r => r.json());
+    if (data.status !== "ok") { wrap.innerHTML = '<div style="font-size:0.82rem;color:var(--fail);">Failed to load backup list</div>'; return; }
+
+    const allFiles = [
+      ...data.db_backups.map(f => ({...f, type: "db"})),
+      ...data.full_backups.map(f => ({...f, type: "full"}))
+    ];
+
+    if (allFiles.length === 0) {
+      wrap.innerHTML = '<div style="font-size:0.82rem;color:var(--text-muted);">No backups stored locally yet.</div>';
+      return;
+    }
+
+    const rows = allFiles.map(f => {
+      const badge = f.type === "db"
+        ? '<span style="font-size:0.65rem;padding:1px 6px;border-radius:8px;background:rgba(var(--accent-rgb,33,150,243),0.15);color:var(--accent);font-weight:600;">DB</span>'
+        : '<span style="font-size:0.65rem;padding:1px 6px;border-radius:8px;background:rgba(255,152,0,0.15);color:var(--warn);font-weight:600;">FULL</span>';
+      return `<tr style="border-top:1px solid var(--border-color);">
+        <td style="padding:8px 6px;font-size:0.78rem;font-family:var(--font-mono);color:var(--text-primary);">${f.filename}</td>
+        <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted);white-space:nowrap;">${badge}</td>
+        <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted);white-space:nowrap;">${f.size_mb} MB</td>
+        <td style="padding:8px 6px;white-space:nowrap;">
+          <a href="/api/admin/backup_download?filename=${encodeURIComponent(f.filename)}"
+             class="nw-btn" style="font-size:0.75rem;padding:3px 10px;margin-right:4px;">
+            <i class="bi bi-download me-1"></i>Download
+          </a>
+          <button class="nw-btn" onclick="deleteBackup('${f.filename}')"
+                  style="font-size:0.75rem;padding:3px 10px;border-color:var(--fail);color:var(--fail);">
+            <i class="bi bi-trash me-1"></i>Delete
+          </button>
+        </td>
+      </tr>`;
+    }).join("");
+
+    wrap.innerHTML = `<table style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr>
+          <th style="padding:6px;font-size:0.72rem;color:var(--text-label);text-align:left;font-weight:600;">FILENAME</th>
+          <th style="padding:6px;font-size:0.72rem;color:var(--text-label);text-align:left;font-weight:600;">TYPE</th>
+          <th style="padding:6px;font-size:0.72rem;color:var(--text-label);text-align:left;font-weight:600;">SIZE</th>
+          <th style="padding:6px;font-size:0.72rem;color:var(--text-label);text-align:left;font-weight:600;">ACTIONS</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  } catch(e) {
+    wrap.innerHTML = `<div style="font-size:0.82rem;color:var(--fail);">Error loading backups: ${e.message}</div>`;
+  }
+}
+
+async function doBackupNow(type) {
+  const btn = document.getElementById(type === "db" ? "backup-db-btn" : "backup-full-btn");
+  const msg = document.getElementById("backup-now-msg");
+  btn.disabled = true;
+  const origHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Running...';
+  msg.style.display = "block";
+  msg.style.color = "var(--text-muted)";
+  msg.textContent = type === "db" ? "Running database backup..." : "Creating full system backup — this may take a few seconds...";
+  try {
+    const endpoint = type === "db" ? "/api/admin/backup_db_now" : "/api/admin/backup_full";
+    const res = await fetch(endpoint, { method: "POST" }).then(r => r.json());
+    if (res.status === "ok") {
+      msg.style.color = "var(--ok)";
+      msg.textContent = `Backup complete: ${res.filename} (${res.size_mb}MB)`;
+      loadBackupList();
+    } else {
+      msg.style.color = "var(--fail)";
+      msg.textContent = res.message || "Backup failed";
+    }
+  } catch(e) {
+    msg.style.color = "var(--fail)";
+    msg.textContent = "Backup failed — check logs";
+  }
+  btn.disabled = false;
+  btn.innerHTML = origHtml;
+}
+
+async function deleteBackup(filename) {
+  if (!confirm(`Delete ${filename}?\n\nThis cannot be undone.`)) return;
+  try {
+    const res = await fetch("/api/admin/backup_delete", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ filename })
+    }).then(r => r.json());
+    if (res.status === "ok") {
+      showToast("Backup deleted", "success");
+      loadBackupList();
+    } else {
+      showToast(res.message || "Delete failed", "error");
+    }
+  } catch(e) {
+    showToast("Delete failed — check logs", "error");
+  }
+}
+
 async function loadSchedule() {
   const res = await fetch("/api/admin/backup_schedule").then(r => r.json());
   if (res.status !== "ok") return;
@@ -742,9 +873,51 @@ loadSysInfo();
 loadSchedule();
 loadPkgSchedule();
 loadThemes();
+loadBackupList();
 initSections();
 
-// ── Changelog ─────────────────────────────────────────────────────────────────
+// Auto-load pkg update log on page open if section is not collapsed
+(function() {
+  const body = document.getElementById('section-pkg-log');
+  if (body && body.style.maxHeight !== '0px') loadPkgLog();
+})();
+
+// ── Pi Package Update Log ─────────────────────────────────────────────────────
+async function loadPkgLog() {
+  const box   = document.getElementById('pkg-log-box');
+  const mtime = document.getElementById('pkg-log-mtime');
+  const n     = document.getElementById('pkg-log-lines').value;
+  box.textContent = 'Loading...';
+  try {
+    const res = await fetch(`/api/admin/pkg_update_log?lines=${n}`);
+    const data = await res.json();
+    if (data.status !== 'ok') {
+      box.textContent = 'Error: ' + (data.message || 'unknown error');
+      return;
+    }
+    mtime.textContent = data.last_modified || '—';
+    if (data.lines && data.lines.length > 0) {
+      box.textContent = data.lines.join('\n');
+    } else {
+      box.textContent = data.message || 'No log entries found.';
+    }
+  } catch (e) {
+    box.textContent = 'Failed to load log: ' + e.message;
+  }
+}
+// Load pkg log on page init if section is expanded; reload on each manual expand
+document.querySelector('[onclick="toggleSection(\'pkg-log\')"]')
+  .addEventListener('click', function() {
+    // Reload on every expand (section was just toggled open)
+    const body = document.getElementById('section-pkg-log');
+    // After toggleSection runs the body will be visible; load the log
+    setTimeout(() => {
+      if (body.style.maxHeight !== '0px' && body.style.opacity !== '0') {
+        loadPkgLog();
+      }
+    }, 50);
+  });
+
 
 // ── Theme Manager ─────────────────────────────────────────────────────────────
 async function loadThemes() {

@@ -1,0 +1,130 @@
+NETWATCH SESSION SUMMARY
+========================
+Session: 19 | Date: 2026-03-17
+Starting version: v3.3.38 | Ending version: v3.3.42
+Summary: Grafana troubleshooting (wrong port, confirmed healthy), pkg_update.sh
+  journald logging, discovery and fix of $HOME path bug in all three cron scripts,
+  GPG keyring fix for netwatch-svc, full cron verification end to end.
+
+SCOPE NOTE: No new features this session. Entirely verification, debugging, and
+  fixing pre-existing issues with the cron infrastructure introduced in Session 7
+  (v3.3.12) that had never been verified running as netwatch-svc.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- Grafana verified healthy: user couldn't reach Grafana — root cause was wrong
+  port. Confirmed service active (running since 2026-03-14), is-enabled confirmed,
+  autostart working correctly. No action needed.
+
+- Grafana "NetWatch Logs" dashboard created (manual, via UI):
+  Three panels: pkg_update activity, NetWatch application log, OS & system events.
+  Separate from the existing "NetWatch" dashboard (health metrics).
+
+- v3.3.39 — pkg_update.sh journald logging + $HOME fix:
+  Added logger -t pkg_update calls at four points (started, up-to-date, N packages
+  upgraded, failed). These ship to journald -> Promtail -> Loki -> Grafana.
+  Fixed NETWATCH_DIR from $HOME/netwatch to script-relative path using
+  $(cd "$(dirname "$0")" && pwd) -- required because netwatch-svc has no home dir.
+  Updated sudoers comment in script from mboynton to netwatch-svc.
+  pkg_update.log file writes unchanged -- NetWatch last-run timestamp unaffected.
+  Crontab entry updated manually to use systemd-cat wrapper for full output capture.
+  Smoke tested: logger lines confirmed in journalctl.
+
+- Discovery: all three cron jobs (pkg_update, backup, backup_db) were in
+  netwatch-svc's crontab (correct -- web service writes crontab as netwatch-svc)
+  but had never successfully run because all three scripts used $HOME which
+  resolves to /nonexistent for netwatch-svc. None had ever fired successfully.
+
+- v3.3.40 — backup.sh and backup_db.sh $HOME fix:
+  Same NETWATCH_DIR fix as v3.3.39. BACKUP_DIR changed from $HOME/backups to
+  hardcoded /home/mboynton/backups. No other changes.
+
+- Manual fix: sudo chown netwatch-svc:netwatch-svc /home/mboynton/backups
+  (netwatch-svc needed write permission to create backup files)
+
+- v3.3.41 — GPG keyring fix for backup scripts:
+  GPG refuses to use a keyring owned by a different user. Both backup scripts
+  were calling gpg without --homedir, causing it to look in /nonexistent/.gnupg.
+  Fix: created dedicated GPG keyring for netwatch-svc at
+  /home/mboynton/netwatch/.gnupg, imported the public key into it, updated both
+  scripts to use --homedir /home/mboynton/netwatch/.gnupg.
+  Manual steps: mkdir + chmod 700 + chown + gpg export + gpg import as netwatch-svc.
+  Smoke tested: both backup scripts complete cleanly as netwatch-svc.
+  tar "socket ignored" warnings are harmless (gpg-agent sockets, gunicorn.ctl).
+
+- All three cron jobs fully verified working end to end as netwatch-svc.
+  First time any of them have successfully run since netwatch-svc migration (v3.3.25).
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- v3.3.41 first build pointed --homedir at /home/mboynton/.gnupg (mboynton's keyring).
+  GPG rejected it: "unsafe ownership" -- will not use a keyring owned by a different
+  user regardless of permissions. Required a dedicated keyring for netwatch-svc.
+
+
+DECISIONS MADE
+--------------
+- pkg_update.sh output to journald via both logger (summary lines) and systemd-cat
+  (full output via crontab wrapper). Both approaches used together: logger for
+  structured summary queryable in Loki; systemd-cat for full apt output in journald.
+  pkg_update.log retained for NetWatch UI last-run timestamp.
+
+- GPG keyring location: /home/mboynton/netwatch/.gnupg -- inside the netwatch
+  directory, owned by netwatch-svc. Keeps all netwatch-svc-owned files together.
+
+- BACKUP_DIR hardcoded to /home/mboynton/backups rather than derived from script
+  location. Backups belong to the user's home, not the netwatch directory.
+
+- tar socket warnings: accepted as harmless. Not worth adding exclusion flags for
+  a warning that appears only occasionally and carries no operational risk.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- Weekly Pi update cron: now verified WORKING (smoke tested). Crontab confirmed
+  in netwatch-svc. Will fire next Sunday at 03:00.
+
+- Web service silent-exit after delayed restart: still unconfirmed potential bug.
+  Watch journalctl on future installs.
+
+- All other open items from Session 18 unchanged (API versioning, PENDING
+  DISCUSSION items, Promtail max_age, etc.)
+
+
+BACKLOG CHANGES
+---------------
+- Weekly Pi update cron verification: COMPLETE (was pending since Session 7)
+- No new backlog items added.
+- No existing backlog items changed.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+None. All detail captured in this base summary.
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during session per process:
+
+- WEBAPP CRONTAB OPERATIONS RUN AS netwatch-svc, NOT mboynton -- crontab writes
+  from the web service go to netwatch-svc's crontab; check with
+  sudo crontab -l -u netwatch-svc. Shell scripts run from those crons must not
+  use $HOME.
+
+- GPG KEYRING IS USER-SPECIFIC -- netwatch-svc NEEDS ITS OWN -- GPG refuses
+  to use a keyring owned by a different user even with --homedir. Create a
+  dedicated keyring owned by netwatch-svc and import the public key into it.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.42
+- All services running normally
+- All three cron jobs verified functional as netwatch-svc
+- Next task: open -- top candidates:
+    System log viewer (pkg_update.log tail in Admin page)
+    updater.py context doc backup
+    Kiosk display

@@ -1,0 +1,155 @@
+NETWATCH CHAT SUMMARY — SESSION 14
+====================================
+Date: 2026-03-14
+Starting version: v3.3.33
+Ending version: v3.3.36
+Summary: Two security/bug fixes and a dashboard UX feature. Fixed SESSION_COOKIE_SECURE
+  (one-liner from audit backlog), fixed admin password reset not triggering forced-change
+  on login, restored force-change checkbox to Reset Password dialog, and added segmented
+  time-range controls to the Speedtest and Auto Resets dashboard cards with per-user
+  default preferences in My Account.
+
+SCOPE NOTE: Four distinct arcs across four packages. No expanded summary required for
+  the SESSION_COOKIE_SECURE fix (trivial). Expanded summaries produced for the password
+  reset bug and the dashboard range feature.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+v3.3.34 — SESSION_COOKIE_SECURE = True
+  One-liner identified in Session 11 audit. Added to webapp.py session cookie config
+  block. Cookie now only transmitted over HTTPS. Web-only restart.
+
+v3.3.35 — Admin password reset bug fixes + dashboard range controls
+  (see Bug_AdminPasswordReset.txt and Feature_DashboardRangeControls.txt)
+
+  Bug fix 1 — Force-change checkbox restored (admin_users.html):
+  The Reset Password dialog had hardcoded "force_change: true" in the JS and displayed
+  static explanatory text with no checkbox. The checkbox was gone — a regression from
+  a prior session. Restored as a real checkbox defaulting to checked. openResetPass()
+  now resets the checkbox to checked each time the modal opens.
+
+  Bug fix 2 — must_change_pass not triggering on login after admin reset (auth.py,
+  webapp.py):
+  Root cause: auth.change_password() sets must_change_pass=0 as part of its contract
+  (it is the "user completed their change" function). webapp.py api_reset_user_password()
+  was calling change_password() then update_user(must_change_pass=True) — the flag was
+  correctly written to 1 in the DB. But authenticate() had a second clearing path:
+  on every real-password login it wrote must_change_pass=0 unconditionally, wiping the
+  flag before the login handler could check it.
+  Fix: (1) Added auth.admin_reset_password(user_id, new_password, force_change=True) —
+  sets password_hash and must_change_pass in a single atomic write, bypassing
+  change_password() entirely. (2) Removed the must_change_pass=0 write from the
+  real-password login path in authenticate() — the flag is now only cleared by
+  change_password() when the user actually completes the change. (3) webapp.py
+  api_reset_user_password() now calls admin_reset_password() and reads force_change
+  from the request payload.
+
+  Dashboard range controls (index.html, preferences.html, webapp.py, database.py):
+  Speedtest card: replaced "Last Speedtest" heading with a segmented button row
+  (Latest / 1D / 7D / 30D / All). Latest shows the most recent result. The others
+  call /api/speedtest_avg?days=N and display averages with a test count subtitle.
+  Auto Resets card: replaced "Auto Resets Today" with "Auto Resets" plus a segmented
+  button row (1D / 7D / 30D / All). Each selection calls /api/reset_count?days=N
+  and updates a sublabel ("today", "past 7 days", etc.).
+  Range buttons are styled with .range-btn / .range-btn-active CSS injected at runtime
+  using CSS variables so they respect the active theme.
+  My Account: new Dashboard Preferences card (between Appearance and Danger Zone).
+  Two pref-card selectors — one for speedtest default, one for resets default. Saves
+  to user_prefs keys dashboard_speedtest_range and dashboard_resets_range via
+  POST /api/preferences/dashboard. Loaded at page init via GET /api/preferences/dashboard.
+  Dashboard init sequence: loadDashboardPrefs() awaited before refresh() so range
+  state is set before first data fetch.
+
+v3.3.36 — Dashboard blank data fix (index.html)
+  (see Feature_DashboardRangeControls.txt — revision block)
+  On page load, cards showed correct button selection but blank data. Two causes:
+  (1) refresh() only called updateSpdCard() when spdRange === "latest" — any saved
+  non-Latest preference resulted in the speedtest card never populating. Fixed by
+  removing the guard; updateSpdCard() is now called unconditionally in refresh().
+  (2) The init sequence called refresh() without awaiting loadDashboardPrefs(), so
+  spdRange/rstRange were still at defaults when refresh() ran. Fixed by awaiting
+  refresh() in the async init IIFE. Confirmed working by user.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+Nothing failed this session. The blank-data bug (v3.3.36) was caught in testing
+immediately after v3.3.35 was installed — not a self-introduced regression from a
+wrong approach, just an oversight in the initial implementation.
+
+
+DECISIONS MADE
+--------------
+- admin_reset_password() added as a dedicated function rather than patching
+  change_password() with an optional flag. change_password() has a clear contract
+  (user completing their own change, always clears flag) and should not be
+  overloaded with admin semantics. Separation is cleaner.
+
+- authenticate() must_change_pass clearing removed from real-password login path.
+  The flag is now only cleared by change_password(). This is the correct invariant:
+  the DB value is authoritative; authenticate() should not silently reset state.
+
+- Range buttons do not auto-save — they are live toggles only. To change the default
+  the user goes to My Account. This was the agreed design to keep the dashboard
+  lightweight and avoid surprise pref saves on casual range exploration.
+
+- Segmented control (flat button row) chosen over AVG toggle + popout buttons.
+  Simpler, always-visible state, one fewer interaction.
+
+- CSS for range buttons injected via a dynamically created <style> tag in the scripts
+  block so it inherits CSS variables from the active theme. This avoids adding a
+  separate CSS file or polluting themes.css for a small set of dashboard-specific rules.
+
+- End-of-session context doc updated at v3.3.36.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- Weekly Pi update cron (v3.3.12): still not confirmed fired in the wild.
+  Verify: crontab -l | grep netwatch-pkg-update
+
+- Web service silent-exit after delayed restart: still unconfirmed potential bug.
+  Now more diagnosable with wsgi.py logging in place — watch journalctl on installs.
+
+- Orphan test keys (TEST_KEY_WITH_DEFAULT, TEST_KEY_UNCONFIGURED) may remain in
+  config.py. Harmless — validator ignores unknown keys.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- SESSION_COOKIE_SECURE = True (v3.3.34) — from Session 11 audit backlog
+- Admin Reset Password force-change checkbox restored (v3.3.35)
+- must_change_pass not triggering after admin reset — fixed (v3.3.35)
+- Dashboard Speedtest card time-range selector (v3.3.35/36)
+- Dashboard Auto Resets card time-range selector (v3.3.35/36)
+- My Account Dashboard Preferences (v3.3.35/36)
+
+No new backlog items added.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Bug_AdminPasswordReset.txt — full detail on the must_change_pass bug: root cause,
+  both fix components (authenticate() clearing path, admin_reset_password()),
+  and the force-change checkbox restoration.
+- Feature_DashboardRangeControls.txt — full detail on the segmented controls,
+  new API endpoints, database functions, My Account preferences card, and the
+  blank-data fix shipped in v3.3.36.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None. No new hard-learned lessons this session. The blank-data bug was a straightforward
+oversight (missing await, overly guarded refresh call), not a pattern worth logging.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.36
+- All services running normally
+- Next task: open — top backlog candidates:
+    System log viewer (pkg_update.log tail in Admin page)
+    Host monitoring
+    Fix patcher.py temp file handling (tempfile.mkstemp + cleanup)

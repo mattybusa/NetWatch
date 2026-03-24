@@ -1,0 +1,168 @@
+NETWATCH CHAT SUMMARY — SESSION 28
+=====================================
+Date: 2026-03-22
+Starting version: v3.3.85
+Ending version: v3.3.86
+Summary: GPG decrypt/restore backlog item closed. Full MFA implementation shipped:
+  TOTP primary + email/SMS/backup code fallbacks. Admin/Operator mandatory with
+  7-day grace period. Monitor optional. Extensive bug fixing during test plan execution.
+
+SCOPE NOTE: Single feature arc with significant test-driven bug fixing. No expanded
+summary required — full detail captured here.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+GPG decrypt/restore (no package):
+  User confirmed full encrypt/decrypt/restore cycle completed. Backlog item marked done
+  in context doc.
+
+v3.3.86 — MFA: Two-Factor Authentication
+
+  DESIGN:
+  Option C selected: TOTP primary, email code + SMS code + backup codes as fallbacks.
+  Admin/Operator: mandatory with 7-day grace period before enforcement.
+  Monitor: optional, shown in My Account.
+  Guest: not applicable.
+
+  NEW DEPENDENCIES:
+  pyotp 2.9.0, qrcode 8.2 — installed manually on existing Pi:
+    sudo -u netwatch-svc ~/netwatch/venv/bin/pip install pyotp qrcode
+  Added to install.sh pip block for future installs.
+  MFA_ISSUER config key added to config_schema.py (Security section, default "NetWatch").
+
+  DB CHANGES (auth.py init_auth_db()):
+  - users table: mfa_secret (TEXT NULL), mfa_enabled (INTEGER DEFAULT 0),
+    mfa_grace_deadline (TEXT NULL)
+  - New mfa_backup_codes table: id, user_id, code_hash, used_at
+  - New mfa_challenge_codes table: id, user_id, channel, code_hash, expires_at, used_at
+
+  NEW AUTH.PY FUNCTIONS:
+  get_mfa_status(), setup_mfa(), get_mfa_setup_uri(), get_mfa_setup_uri_from_secret(),
+  confirm_mfa_setup(), verify_totp(), verify_backup_code(), regenerate_backup_codes(),
+  disable_mfa(), admin_reset_mfa(), generate_mfa_challenge_code(),
+  verify_mfa_challenge_code(), set_mfa_grace_deadline()
+  login_required() updated to check mfa_pending session flag.
+  login_user() clears mfa_banner_dismissed on each login.
+  get_user_by_id() updated to JOIN roles (was missing — would have broken session).
+  get_all_users() updated to include mfa_enabled field.
+
+  NEW/UPDATED WEBAPP.PY ROUTES:
+  Login route: MFA pending check, grace period enforcement, mfa_banner_dismissed flag.
+  /mfa — challenge page (TOTP / backup / email / SMS)
+  /mfa/send_code — delivers email or SMS OTP (GET+POST)
+  /account/mfa/setup — setup page (session-based pending secret)
+  /account/mfa/setup/confirm — confirm TOTP code
+  /account/mfa/disable — disable MFA (password required)
+  /account/mfa/backup_codes/regenerate — regenerate backup codes (password required)
+  /api/admin/mfa_reset/<id> — admin reset of another user's MFA
+  /api/mfa/dismiss_banner — sets session flag to suppress grace banner
+  _complete_mfa_login() helper — completes login after challenge passes
+  _mfa_qr_base64() helper — generates SVG QR code (no Pillow dependency)
+  inject_user() context processor: adds mfa_warning dict to all templates
+  preferences route: passes mfa_status and mfa_grace_days_left
+
+  NEW TEMPLATES:
+  mfa_challenge.html — standalone challenge page (TOTP/backup/email/SMS modes)
+  mfa_setup.html — standalone setup page with QR code
+  mfa_setup_complete.html — backup codes display with copy + confirm
+
+  UPDATED TEMPLATES:
+  base.html — MFA grace period banner (amber during grace, red when expired,
+    dismissible during grace via /api/mfa/dismiss_banner, persists across navigation)
+  preferences.html — Two-Factor Authentication card (between Change Password and
+    Alert Subscriptions), regen modal, disable modal
+  admin_users.html — Reset MFA button (visible when user has mfa_enabled=1)
+
+  ALERTS:
+  mfa_code alert type added to ALERT_TYPES (system group, audit-only, never subscribable),
+  SUBJECTS, and SMS_LABELS.
+
+  SYSTEMSETUP.TXT:
+  Updated with pyotp/qrcode manual install note (MANUAL-ONCE, Session 28).
+  GAP-3 marked fixed (structlog/packaging added to install.sh back in v3.3.60).
+
+
+BUGS FOUND AND FIXED DURING TEST PLAN
+--------------------------------------
+
+1. get_user_by_id missing role JOIN — after MFA challenge passed, login_user() received
+   a dict with no role_name, permissions, or session_minutes. Session would have been
+   broken. Fixed by adding JOIN roles to the SELECT.
+
+2. mfa_setup error path regenerated secret — entering wrong TOTP code during setup
+   called setup_mfa() again, generating a new secret and overwriting the one already
+   scanned. Fixed to use get_mfa_setup_uri_from_secret() (read-only).
+
+3. mfa_send_code was GET-only — template forms POST to /mfa/send_code but route only
+   accepted GET. Fixed to accept GET and POST, reading channel from form or args.
+
+4. Missing alerts import in mfa_send_code — NameError: name 'alerts' is not defined.
+   Fixed by adding local import at top of function.
+
+5. Password verification check inverted — both mfa_disable and mfa_regenerate_backup_codes
+   used isinstance(verified, dict) to detect failure, but authenticate() always returns
+   a dict on success. Fixed to not verified.get("id").
+
+6. QR code generation required Pillow — qrcode.make_image() defaults to PIL renderer.
+   Pillow not installed. Fixed by switching to qrcode.image.svg.SvgPathImage (pure
+   Python, ships with qrcode package, no extra install).
+
+7. Stray backslashes in preferences.html section comment headers — pre-existing issue,
+   fixed while editing the file.
+
+8. MFA card in wrong position — was after Dashboard Preferences. Moved to immediately
+   after Change Password card.
+
+9. Banner dismiss not persisting across navigation — client-side only hide didn't
+   survive page loads. Fixed with server-side session flag via /api/mfa/dismiss_banner.
+
+10. Regen modal copy button rendered JS as text — inline onclick with nested quotes
+    broke HTML attribute. Fixed by using named copyRegenCodes() function and module-level
+    _regenCodes array.
+
+11. Regen modal closeable after codes shown — backdrop click dismissed modal before
+    user saved codes. Fixed: modal locked after codes shown, Done button only enabled
+    after copy clicked, cancel button hidden.
+
+12. Literal newline in JS string — _regenCodes.join('\n') written with real newline,
+    causing JS parse error that killed entire script block. Fixed to \\n.
+
+13. Backup count not refreshing after regen — closeRegenModalForce() only hid modal.
+    Fixed to reload page.
+
+14. Re-configure MFA overwrote active secret — GET handler called setup_mfa() which
+    wrote new secret to DB immediately, before confirmation. Cancelling destroyed the
+    working secret. Fixed: setup_mfa() no longer writes to DB. Pending secret stored
+    in session["mfa_setup_secret"] only. confirm_mfa_setup() writes to DB after
+    verification. Cancel clears session secret, DB untouched.
+
+15. confirm_mfa_setup webapp routes not updated — string replacements silently failed
+    in an earlier fix attempt. Routes still called old 2-arg confirm_mfa_setup(). Fixed
+    by rewriting both mfa_setup and mfa_setup_confirm routes cleanly.
+
+
+DECISIONS MADE
+--------------
+- SVG QR codes instead of PNG — no Pillow dependency, sharper rendering, cleaner.
+- Pending MFA secret lives in Flask session only until confirmed — never written to
+  DB on GET. This is the correct pattern for any setup flow where cancelling must
+  be safe.
+- Grace period banner: dismissible during grace (reappears each new login), not
+  dismissible when expired. Implemented server-side via session flag.
+- MFA card position: immediately after Change Password in My Account.
+
+
+NEW GOTCHAS
+-----------
+None added this session — all issues were implementation bugs caught during testing,
+not systemic gotchas worth recording.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.86
+- MFA fully working and tested end-to-end
+- All test plan items passed
+- SystemSetup.txt updated and uploaded directly via Dev Docs

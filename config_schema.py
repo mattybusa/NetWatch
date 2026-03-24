@@ -474,6 +474,34 @@ CONFIG_SCHEMA = [
         "max":         365,
         "ui_hidden":   False,
     },
+    {
+        "key":         "DB_BACKUP_RETENTION",
+        "default":     14,
+        "required":    False,
+        "group":       "retention",
+        "section":     "Data Retention",
+        "label":       "DB Backup Retention (count)",
+        "description": "Number of daily database backup files to keep locally on the Pi. Older ones are pruned automatically. Default: 14 (2 weeks).",
+        "sensitive":   False,
+        "type":        "int",
+        "min":         1,
+        "max":         90,
+        "ui_hidden":   False,
+    },
+    {
+        "key":         "FULL_BACKUP_RETENTION",
+        "default":     7,
+        "required":    False,
+        "group":       "retention",
+        "section":     "Data Retention",
+        "label":       "Full Backup Retention (count)",
+        "description": "Number of full system backup files to keep locally on the Pi. Older ones are pruned automatically. Default: 7.",
+        "sensitive":   False,
+        "type":        "int",
+        "min":         1,
+        "max":         30,
+        "ui_hidden":   False,
+    },
 
     # ── Security ──────────────────────────────────────────────────────────────
     {
@@ -544,6 +572,35 @@ CONFIG_SCHEMA = [
         "type":        "int",
         "min":         2,
         "max":         60,
+        "ui_hidden":   False,
+    },
+
+    {
+        "key":         "MFA_ISSUER",
+        "default":     "NetWatch",
+        "required":    False,
+        "group":       "auth",
+        "section":     "Security",
+        "label":       "MFA Issuer Name",
+        "description": "Name shown in authenticator apps (e.g. Google Authenticator) when users set up MFA. Default: NetWatch.",
+        "sensitive":   False,
+        "type":        "str",
+        "ui_hidden":   False,
+    },
+
+    # ── Logging ───────────────────────────────────────────────────────────────
+    {
+        "key":         "LOG_FORMAT",
+        "default":     "pretty",
+        "required":    False,
+        "group":       "logging",
+        "section":     "Logging",
+        "label":       "Log Format",
+        "description": "pretty = human-readable output for SSH/journalctl. "
+                       "json = structured JSON output for Loki/log aggregation. "
+                       "Requires service restart to take effect.",
+        "sensitive":   False,
+        "type":        "str",
         "ui_hidden":   False,
     },
 

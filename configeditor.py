@@ -13,11 +13,12 @@ import os
 import re
 import shutil
 import logging
+import structlog
 from datetime import datetime
 
 NETWATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 
-log = logging.getLogger("netwatch.configeditor")
+log = structlog.get_logger().bind(service="web")
 
 CONFIG_PATH = os.path.join(NETWATCH_DIR, "config.py")
 BACKUP_PATH = os.path.join(NETWATCH_DIR, "config.py.bak")
@@ -91,9 +92,9 @@ def read_config():
                 values[key] = raw
 
     except FileNotFoundError:
-        log.error(f"config.py not found at {CONFIG_PATH}")
+        log.error("config.py not found", path=CONFIG_PATH)
     except Exception as e:
-        log.error(f"Failed to read config.py: {e}")
+        log.error("Failed to read config.py", error=str(e))
 
     return values
 
@@ -150,9 +151,9 @@ def save_config(new_values, saved_by="web"):
     try:
         if os.path.exists(CONFIG_PATH):
             shutil.copy2(CONFIG_PATH, BACKUP_PATH)
-            log.info(f"Config backed up to {BACKUP_PATH}")
+            log.info("Config backed up", path=BACKUP_PATH)
     except Exception as e:
-        log.warning(f"Could not back up config: {e}")
+        log.warning("Could not back up config", error=str(e))
 
     # ── Read current file content ─────────────────────────────────────────────
     try:
@@ -189,8 +190,14 @@ def save_config(new_values, saved_by="web"):
         new_content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
 
         if new_content == content:
-            # Pattern didn't match — key might not exist or format is unusual
-            log.warning(f"Could not find/replace {key} in config.py")
+            # Check whether the pattern matched at all
+            if re.search(pattern, content, flags=re.MULTILINE):
+                # Pattern matched but replacement produced identical content —
+                # value was already set to the submitted value. Not an error.
+                log.debug("Config key already at submitted value, no change needed", key=key)
+            else:
+                # Pattern didn't match at all — key missing or format unexpected
+                log.warning("Could not find/replace key in config.py", key=key)
         else:
             content = new_content
 
@@ -198,10 +205,10 @@ def save_config(new_values, saved_by="web"):
     try:
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             f.write(content)
-        log.info(f"config.py saved by {saved_by} — {len(validated)} values updated")
+        log.info("config.py saved", saved_by=saved_by, values_updated=len(validated))
         return True, None
     except Exception as e:
-        log.error(f"Failed to write config.py: {e}")
+        log.error("Failed to write config.py", error=str(e))
         return False, f"Failed to write config.py: {e}"
 
 

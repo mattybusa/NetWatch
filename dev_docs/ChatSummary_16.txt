@@ -1,0 +1,229 @@
+NETWATCH CHAT SUMMARY -- SESSION 16
+=====================================
+Date: 2026-03-14
+Starting version: v3.3.36 (NetWatch Pi, unchanged)
+Ending version: v3.3.36 (no NetWatch code changes this session)
+Focus: Observability stack planning, ops-pi hardware migration, full stack
+       installation (Gitea, Prometheus, Loki, Grafana, Node Exporter).
+
+SCOPE NOTE: This session covered two major arcs -- (1) architecture planning
+discussion for the observability stack, and (2) full hands-on infrastructure
+build on the new ops-pi hardware. No NetWatch packages were installed. No
+version bump. One expanded summary produced for the ops-pi infrastructure.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+ARC 1 -- Observability stack architecture discussion
+
+- Clarified the relationship between OpenTelemetry, Prometheus, Loki, Node
+  Exporter, Promtail, and Grafana. Key decisions confirmed:
+  - OTEL is the standard (format/API), not an implementation
+  - Prometheus is a metrics storage/scraping engine (OTEL-compatible backend)
+  - Loki is a log storage/query engine (Grafana Labs)
+  - Node Exporter exposes system metrics for Prometheus to scrape (pull model)
+  - Promtail ships logs from each Pi to Loki (push model)
+  - Grafana is the dashboard layer on top of both
+  - The OTEL Collector was discussed as an optional middleware layer --
+    decided to defer it; Promtail + Node Exporter is the simpler correct path
+    for a two-Pi home LAN setup
+
+- mBase alignment confirmed: the commitment is to the FORMAT (structlog JSON,
+  OTEL-compatible shape) in the app code. The plumbing (Promtail vs OTEL
+  Collector) is infrastructure outside the app and can be swapped later without
+  touching app code. This is consistent with "mBase CONNECTS, doesn't DUPLICATE."
+
+- Correct installation order established:
+  1. Rework NetWatch logging to structlog JSON first (DEFERRED to next session)
+  2. Then install Promtail to ship structured logs to Loki
+  3. NOT the reverse -- installing Promtail before structlog would ingest
+     unstructured text that is hard to query and would need redoing anyway
+
+- DECISION: Host for observability stack -- Pi 4 8GB (previously reserved for
+  future project) reassigned to ops-pi role. Reasoning: Pi 3B+ (1GB RAM) is
+  too tight for Gitea + Prometheus + Loki + Grafana simultaneously.
+
+ARC 2 -- ops-pi hardware migration and stack installation
+(see Feature_OpsPiInfrastructure.txt for full detail)
+
+- Hostname decision: gitea-pi renamed to ops-pi. "gitea-pi" too narrow for a
+  machine that now runs Gitea + full observability stack. ops-pi chosen as
+  broad enough to remain accurate as the role grows.
+
+- Hardware migration: Pi 3B+ retired. Pi 4 8GB with fresh Raspberry Pi OS
+  Lite 64-bit SD card. Samsung 860 EVO 500GB SSD moved over from 3B+.
+  Static IP preserved at 192.168.100.230.
+
+- Gitea restored and confirmed working:
+  - Gitea 1.25.5 installed (matched SSD database migration version 323)
+  - New TLS cert generated for ops-pi.home, signed by LAN CA on NetWatch Pi
+  - app.ini updated with new hostname
+  - All repos confirmed present and accessible at https://ops-pi.home:3000
+  - Windows hosts file and NetWatch Pi /etc/hosts updated to ops-pi.home
+
+- Prometheus 3.5.1 (LTS) installed and running:
+  - Scraping three targets: prometheus (self), ops-pi (localhost:9100),
+    netwatch-pi (192.168.100.10:9100)
+  - 30-day retention configured
+  - All three targets confirmed UP in Prometheus targets UI
+
+- Loki 3.5.1 installed and running:
+  - Filesystem storage, TSDB schema v13, 30-day retention
+  - Required delete_request_store: filesystem for retention to work
+    (Loki 3.x breaking change from older configs -- see Gotchas.txt)
+  - Confirmed connected as Grafana data source
+
+- Grafana installed via APT (official Grafana repo):
+  - Port changed to 3001 (3000 taken by Gitea)
+  - Both data sources connected and verified (Prometheus, Loki)
+  - Node Exporter Full dashboard (ID 1860) imported and confirmed working
+  - Live metrics visible for both Pis
+
+- Node Exporter 1.9.0 installed on both Pis:
+  - ops-pi: running as node_exporter system user on port 9100
+  - NetWatch Pi: same setup, Prometheus scraping confirmed
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- Pi 3B+ SD card swap to Pi 4 considered: decided against. Fresh install
+  safer and cleaner given we were installing a whole new stack anyway.
+  Model-specific firmware in boot partition makes 3B+ -> Pi 4 migration
+  unreliable.
+
+- Gitea 1.22.6 installed initially: crashed immediately with migration error.
+  SSD database was created by Gitea 1.25.5 (migration version 323). 1.22.6
+  only supports up to version 299. Replaced with 1.25.5 which matched.
+
+- Gitea startup failed with permission denied on app.ini: Gitea needs write
+  access to app.ini on first startup to write its internal token. Fixed by
+  setting app.ini ownership to root:gitea with 660 permissions before first
+  start, then locking down to 640 after token written.
+
+- Gitea startup failed with git not found: git package not installed on fresh
+  Pi. Fixed with sudo apt install git -y.
+
+- Loki config missing delete_request_store: Loki 3.5 requires
+  delete_request_store to be set in the compactor block when retention is
+  enabled. Config error on first start. Fixed by adding
+  delete_request_store: filesystem to compactor config.
+
+- Prometheus 3.5.1 tarball did not contain consoles/ or console_libraries/
+  directories: these were removed in Prometheus 3.x. cp commands failed.
+  Not needed for our setup -- binaries and config are sufficient.
+
+
+DECISIONS MADE
+--------------
+- ops-pi is now the canonical name for 192.168.100.230. All future references
+  should use ops-pi.home, not gitea-pi.home.
+
+- Pi 4 8GB is the correct hardware for the ops-pi role. 8GB gives ample
+  headroom for Gitea + Prometheus + Loki + Grafana + future services.
+
+- Promtail deferred until after NetWatch structlog rework. Installing Promtail
+  before structured logging is in place would result in unstructured log
+  ingestion that would need to be redone.
+
+- Grafana on port 3001, Gitea on port 3000. Both on ops-pi.home. No HTTPS
+  on Grafana/Prometheus/Loki yet -- deferred, HTTP on LAN acceptable for now.
+  TLS for these services is a future backlog item.
+
+- OTEL Collector deferred indefinitely for current two-Pi setup. Will revisit
+  when there is a concrete reason to need routing flexibility (e.g. swapping
+  backends or multiple destinations). The structlog JSON format in NetWatch
+  keeps the door open without adding complexity now.
+
+- Node Exporter is the correct tool for system metrics (CPU, memory, disk,
+  network). It predates OTEL but is the de facto standard and is widely
+  supported. Using it does not conflict with the OTEL standards-alignment goal.
+
+- End-of-session context doc updated at v3.3.36 (no version bump -- no
+  NetWatch code changes this session).
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] NetWatch structlog rework: primary task for next session.
+  Steps:
+    1. Add structlog to NetWatch venv (pip install structlog)
+    2. Add LOG_FORMAT config key to config_schema.py
+       (pretty = human-readable default, json = Loki ingestion mode)
+    3. Rework logging calls in main.py, webapp.py, monitor.py, wsgi.py
+       to use structlog with OTEL-compatible JSON output
+    4. Verify JSON logs in journalctl before installing Promtail
+
+- [PENDING] Promtail installation on NetWatch Pi: blocked on structlog rework.
+
+- [PENDING] TLS for Grafana, Prometheus, Loki: currently HTTP only on LAN.
+  Acceptable for home network but worth addressing before any external access.
+
+- [PENDING] ops-pi hosts file update: NetWatch Pi /etc/hosts was updated to
+  ops-pi.home. The ops-pi itself should also have its own hosts file entry
+  for consistency if needed.
+
+- [PENDING] Weekly Pi update cron (v3.3.12): still not confirmed fired in
+  the wild. Verify: crontab -l | grep netwatch-pkg-update
+
+- [PENDING] Web service silent-exit after delayed restart: still unconfirmed
+  potential bug. Watch journalctl on next installs.
+
+- [PENDING] API versioning (/api/v1/) retrofit of NetWatch: decided in
+  Session 15, not yet implemented.
+
+- [PENDING] 9 PENDING DISCUSSION items in Audit_Findings.txt remain open.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- ops-pi hardware migration (Pi 3B+ -> Pi 4 8GB, fresh install)
+- Observability stack installed: Prometheus + Loki + Grafana on ops-pi
+- Node Exporter on both Pis, Prometheus scraping confirmed
+- Grafana data sources connected (Prometheus + Loki)
+- Node Exporter Full dashboard confirmed working in Grafana
+
+Added this session:
+- NetWatch structlog rework (primary next session task)
+  - structlog library, LOG_FORMAT config key, JSON output in all services
+- Promtail on NetWatch Pi (blocked on structlog rework)
+- TLS for Grafana/Prometheus/Loki on ops-pi (future, low priority on LAN)
+
+No items removed from backlog.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_OpsPiInfrastructure.txt -- Full detail on ops-pi hardware migration,
+  all service installations, configs, failed attempts, and current state of
+  each service on the ops-pi.
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during session per process:
+
+- LOKI 3.X REQUIRES delete_request_store WHEN RETENTION ENABLED (new) --
+  Loki 3.x compactor block requires delete_request_store to be set when
+  retention_enabled: true. Config validation error on startup if missing.
+
+- GITEA REQUIRES WRITE ACCESS TO app.ini ON FIRST STARTUP (new) --
+  Gitea writes its internal token to app.ini on first run. Service crashes
+  if app.ini is not writable by the gitea user at that point. Set 660
+  before first start, lock to 640 after.
+
+- GITEA DATABASE MIGRATION VERSION MUST MATCH BINARY VERSION (new) --
+  Gitea refuses to start if the database migration version is newer than
+  the binary supports. The version that created the database must be matched
+  exactly or exceeded. Check migration version in startup logs if Gitea
+  crashes immediately after install.
+
+
+CURRENT STATE
+-------------
+- NetWatch Pi version: v3.3.36 (unchanged)
+- ops-pi services: Gitea 1.25.5, Prometheus 3.5.1, Loki 3.5.1,
+  Grafana (latest via APT), Node Exporter 1.9.0 -- all running
+- Next task: NetWatch structlog rework (Session 17 primary task)
+  See PENDING items above for full step list.

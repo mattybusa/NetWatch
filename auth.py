@@ -20,6 +20,7 @@
 
 import sqlite3
 import logging
+import structlog
 import os
 from datetime import datetime, timedelta
 from functools import wraps
@@ -27,7 +28,7 @@ from flask import session, redirect, url_for, request, flash
 
 NETWATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 
-log = logging.getLogger("netwatch.auth")
+log = structlog.get_logger().bind(service="web")
 
 DB_PATH = os.path.join(NETWATCH_DIR, "netwatch.db")
 
@@ -100,11 +101,43 @@ def init_auth_db():
         ("reset_expires_at",     "NULL"),
         ("first_name",           "NULL"),
         ("last_name",            "NULL"),
+        ("mfa_secret",           "NULL"),
+        ("mfa_grace_deadline",   "NULL"),
     ]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT {default}")
         except Exception:
             pass
+
+    # mfa_enabled is INTEGER — needs separate ALTER TABLE
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN mfa_enabled INTEGER DEFAULT 0")
+    except Exception:
+        pass
+
+    # Backup codes — each row is a single-use code stored as a bcrypt hash
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS mfa_backup_codes (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            code_hash  TEXT NOT NULL,
+            used_at    TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    # MFA challenge codes — short-lived OTPs sent via email or SMS as fallback
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS mfa_challenge_codes (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            channel    TEXT NOT NULL,
+            code_hash  TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at    TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
 
     # Email verification table
     c.execute("""
@@ -174,7 +207,7 @@ def init_auth_db():
             VALUES (?, ?, ?, ?, 1)
         """, ("admin", password_hash, admin_role_id, datetime.now().isoformat()))
         conn.commit()
-        log.info("Default admin account created. Username: admin, Password: netwatch123")
+        log.info("Default admin account created", username="admin")
         log.warning("IMPORTANT: Change the admin password immediately after first login!")
 
     conn.close()
@@ -295,11 +328,14 @@ def authenticate(username, password, ip_address=None):
             WHERE id=?
         """, (datetime.now().isoformat(), user["id"]))
     else:
-        # Logged in with real password — clear everything including must_change_pass
+        # Logged in with real password — clear lock state and tokens.
+        # Do NOT clear must_change_pass here: admin may have set it via admin reset,
+        # which writes a real password_hash (not a token). Clearing it here would
+        # swallow the forced-change flag before the login handler can act on it.
         conn.execute("""
             UPDATE users SET last_login=?, locked_until=NULL, lockout_count=0,
                              lockout_window_start=NULL, reset_token_hash=NULL,
-                             reset_expires_at=NULL, must_change_pass=0
+                             reset_expires_at=NULL
             WHERE id=?
         """, (datetime.now().isoformat(), user["id"]))
     conn.commit()
@@ -378,7 +414,7 @@ def _apply_lock(user_id, username, ip_address, fail_count):
     conn.commit()
     conn.close()
 
-    log.warning(f"Account '{username}' locked until {locked_until} (lockout #{new_count})")
+    log.warning("Account locked", username=username, locked_until=str(locked_until), lockout_count=new_count)
     seclog.record("ACCOUNT_LOCKED", username=username, ip_address=ip_address,
                   detail=f"Locked {lock_minutes}m after {fail_count} failures (lockout #{new_count})",
                   success=0)
@@ -395,7 +431,7 @@ def _apply_lock(user_id, username, ip_address, fail_count):
         conn.execute("UPDATE users SET is_active=0 WHERE id=?", (user_id,))
         conn.commit()
         conn.close()
-        log.warning(f"Account '{username}' AUTO-DISABLED after {new_count} lockouts")
+        log.warning("Account auto-disabled after repeated lockouts", username=username, lockout_count=new_count)
         seclog.record("ACCOUNT_DISABLED", username=username, ip_address=ip_address,
                       detail=f"Auto-disabled after {new_count} lockouts in {window_hours}h",
                       success=0)
@@ -722,6 +758,370 @@ def request_password_reset(username):
     return True, {"email": email, "sms_address": sms_address}, temp_password
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MFA — TOTP SETUP AND VERIFICATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Roles that require MFA (mandatory). Monitor is optional.
+MFA_MANDATORY_ROLES = {"Admin", "Operator"}
+# Grace period for mandatory roles to complete MFA setup (days)
+MFA_GRACE_DAYS = 7
+# Number of backup codes generated per user
+MFA_BACKUP_CODE_COUNT = 8
+# Challenge code expiry (minutes) for email/SMS OTP fallback
+MFA_CHALLENGE_EXPIRY_MINUTES = 10
+
+
+def get_mfa_status(user_id):
+    """
+    Return a dict describing the user's MFA state:
+      enabled        — bool, TOTP is configured and active
+      grace_deadline — ISO string or None (None after setup complete)
+      grace_expired  — bool, deadline passed and MFA not set up
+      backup_count   — int, number of unused backup codes remaining
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT mfa_enabled, mfa_grace_deadline FROM users WHERE id=?", (user_id,)
+    ).fetchone()
+    backup_count = conn.execute(
+        "SELECT COUNT(*) FROM mfa_backup_codes WHERE user_id=? AND used_at IS NULL",
+        (user_id,)
+    ).fetchone()[0]
+    conn.close()
+
+    if not row:
+        return {"enabled": False, "grace_deadline": None, "grace_expired": False, "backup_count": 0}
+
+    enabled   = bool(row["mfa_enabled"])
+    deadline  = row["mfa_grace_deadline"]
+    expired   = False
+    if deadline and not enabled:
+        try:
+            expired = datetime.now() > datetime.fromisoformat(deadline)
+        except Exception:
+            pass
+
+    return {
+        "enabled":        enabled,
+        "grace_deadline": deadline,
+        "grace_expired":  expired,
+        "backup_count":   backup_count,
+    }
+
+
+def setup_mfa(user_id):
+    """
+    Generate a new TOTP secret for the user. Does NOT write to the DB —
+    the secret is returned for storage in the Flask session. Only
+    confirm_mfa_setup() writes to the DB after the user verifies the code.
+    This prevents cancelling setup from destroying an existing working secret.
+    Returns (secret_base32, otpauth_uri) for QR code rendering.
+    """
+    import pyotp
+    import config as _cfg
+    issuer = getattr(_cfg, "MFA_ISSUER", "NetWatch") or "NetWatch"
+
+    conn = sqlite3.connect(DB_PATH)
+    username = conn.execute("SELECT username FROM users WHERE id=?", (user_id,)).fetchone()
+    conn.close()
+    if not username:
+        return None, None
+
+    secret = pyotp.random_base32()
+    totp   = pyotp.TOTP(secret)
+    uri    = totp.provisioning_uri(name=username[0], issuer_name=issuer)
+    return secret, uri
+
+
+def get_mfa_setup_uri(user_id):
+    """
+    Return (secret, otpauth_uri) for the user's current pending MFA secret
+    without generating a new one. Used to re-render the QR code after a
+    failed confirmation attempt. Returns (None, None) if no secret is stored.
+    """
+    import pyotp
+    import config as _cfg
+    issuer = getattr(_cfg, "MFA_ISSUER", "NetWatch") or "NetWatch"
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT username, mfa_secret FROM users WHERE id=?", (user_id,)
+    ).fetchone()
+    conn.close()
+
+    if not row or not row["mfa_secret"]:
+        return None, None
+
+    totp = pyotp.TOTP(row["mfa_secret"])
+    uri  = totp.provisioning_uri(name=row["username"], issuer_name=issuer)
+    return row["mfa_secret"], uri
+
+
+def get_mfa_setup_uri_from_secret(secret, username):
+    """
+    Build an otpauth URI from a given secret string and username.
+    Pure function — no DB access. Used to re-render the QR code
+    from a session-stored pending secret without touching the DB.
+    Returns (secret, uri).
+    """
+    import pyotp
+    import config as _cfg
+    issuer = getattr(_cfg, "MFA_ISSUER", "NetWatch") or "NetWatch"
+    totp = pyotp.TOTP(secret)
+    uri  = totp.provisioning_uri(name=username, issuer_name=issuer)
+    return secret, uri
+
+
+def confirm_mfa_setup(user_id, totp_code, pending_secret):
+    """
+    Verify the TOTP code against the pending secret (passed from session),
+    then write the secret to the DB, enable MFA, and generate backup codes.
+    Returns (True, backup_codes_list) on success, (False, error_message) on failure.
+    backup_codes_list contains plain-text codes — show once, never again.
+    pending_secret: the secret generated by setup_mfa(), stored in Flask session.
+    """
+    import pyotp
+    if not pending_secret:
+        return False, "No MFA secret found — start setup again"
+
+    totp = pyotp.TOTP(pending_secret)
+    if not totp.verify(totp_code, valid_window=1):
+        return False, "Invalid code — check your authenticator app and try again"
+
+    # Generate backup codes
+    plain_codes = _generate_plain_backup_codes(MFA_BACKUP_CODE_COUNT)
+
+    conn = sqlite3.connect(DB_PATH)
+    # Write the verified secret to DB now that it's confirmed working
+    conn.execute("UPDATE users SET mfa_secret=? WHERE id=?", (pending_secret, user_id))
+    # Delete any old backup codes
+    conn.execute("DELETE FROM mfa_backup_codes WHERE user_id=?", (user_id,))
+    # Store hashed backup codes
+    for code in plain_codes:
+        conn.execute(
+            "INSERT INTO mfa_backup_codes (user_id, code_hash) VALUES (?, ?)",
+            (user_id, hash_password(code))
+        )
+    # Enable MFA and clear grace deadline
+    conn.execute(
+        "UPDATE users SET mfa_enabled=1, mfa_grace_deadline=NULL WHERE id=?",
+        (user_id,)
+    )
+    conn.commit()
+    conn.close()
+    log.info("MFA enabled", user_id=user_id)
+    return True, plain_codes
+
+
+def _generate_plain_backup_codes(count):
+    """Generate COUNT plain-text backup codes in XXXX-XXXX format."""
+    import random, string
+    chars = string.ascii_uppercase + string.digits
+    codes = []
+    for _ in range(count):
+        part1 = "".join(random.choices(chars, k=4))
+        part2 = "".join(random.choices(chars, k=4))
+        codes.append(f"{part1}-{part2}")
+    return codes
+
+
+def verify_totp(user_id, totp_code):
+    """
+    Verify a TOTP code for a logged-in MFA challenge.
+    Returns True if valid, False otherwise.
+    Allows a window of ±1 interval (30s) for clock skew.
+    """
+    import pyotp
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT mfa_secret FROM users WHERE id=? AND mfa_enabled=1", (user_id,)
+    ).fetchone()
+    conn.close()
+    if not row or not row[0]:
+        return False
+    totp = pyotp.TOTP(row[0])
+    return totp.verify(totp_code, valid_window=1)
+
+
+def verify_backup_code(user_id, plain_code):
+    """
+    Verify and consume a backup code. Each code can only be used once.
+    Returns True and marks the code used if valid, False otherwise.
+    """
+    plain_code = plain_code.strip().upper()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, code_hash FROM mfa_backup_codes WHERE user_id=? AND used_at IS NULL",
+        (user_id,)
+    ).fetchall()
+    conn.close()
+
+    for row in rows:
+        if verify_password(plain_code, row["code_hash"]):
+            # Consume the code
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "UPDATE mfa_backup_codes SET used_at=? WHERE id=?",
+                (datetime.now().isoformat(), row["id"])
+            )
+            conn.commit()
+            conn.close()
+            log.info("MFA backup code used", user_id=user_id)
+            return True
+    return False
+
+
+def regenerate_backup_codes(user_id):
+    """
+    Replace all existing backup codes with a fresh set.
+    Returns list of new plain-text codes (show once only).
+    """
+    plain_codes = _generate_plain_backup_codes(MFA_BACKUP_CODE_COUNT)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM mfa_backup_codes WHERE user_id=?", (user_id,))
+    for code in plain_codes:
+        conn.execute(
+            "INSERT INTO mfa_backup_codes (user_id, code_hash) VALUES (?, ?)",
+            (user_id, hash_password(code))
+        )
+    conn.commit()
+    conn.close()
+    log.info("MFA backup codes regenerated", user_id=user_id)
+    return plain_codes
+
+
+def disable_mfa(user_id):
+    """
+    Disable MFA for a user. Clears secret, backup codes, and enabled flag.
+    Does NOT set grace deadline — caller should set one if the role requires MFA.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE users SET mfa_enabled=0, mfa_secret=NULL WHERE id=?", (user_id,)
+    )
+    conn.execute("DELETE FROM mfa_backup_codes WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+    log.info("MFA disabled", user_id=user_id)
+
+
+def admin_reset_mfa(user_id):
+    """
+    Admin action: fully reset a user's MFA state (disables MFA, clears secret,
+    backup codes, and challenge codes). Sets a fresh grace deadline if the
+    role requires MFA, so the user can set it up again on next login.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        """SELECT r.name as role_name FROM users u
+           JOIN roles r ON u.role_id = r.id WHERE u.id=?""",
+        (user_id,)
+    ).fetchone()
+    conn.execute(
+        "UPDATE users SET mfa_enabled=0, mfa_secret=NULL, mfa_grace_deadline=NULL WHERE id=?",
+        (user_id,)
+    )
+    conn.execute("DELETE FROM mfa_backup_codes WHERE user_id=?", (user_id,))
+    conn.execute("DELETE FROM mfa_challenge_codes WHERE user_id=?", (user_id,))
+
+    # Set fresh grace deadline if role requires MFA
+    if row and row[0] in MFA_MANDATORY_ROLES:
+        deadline = (datetime.now() + timedelta(days=MFA_GRACE_DAYS)).isoformat()
+        conn.execute(
+            "UPDATE users SET mfa_grace_deadline=? WHERE id=?", (deadline, user_id)
+        )
+    conn.commit()
+    conn.close()
+    log.info("MFA reset by admin", user_id=user_id)
+
+
+def generate_mfa_challenge_code(user_id, channel):
+    """
+    Generate and store a 6-digit OTP for email/SMS fallback MFA.
+    Invalidates any existing unused codes for this user+channel first.
+    Returns (True, plain_code) on success, (False, error) on failure.
+    channel must be 'email' or 'sms'.
+    """
+    import random, string
+    if channel not in ("email", "sms"):
+        return False, "Invalid channel"
+
+    code       = "".join(random.choices(string.digits, k=6))
+    code_hash  = hash_password(code)
+    expires_at = (datetime.now() + timedelta(minutes=MFA_CHALLENGE_EXPIRY_MINUTES)).isoformat()
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        # Invalidate previous unused codes for this user+channel
+        conn.execute(
+            "DELETE FROM mfa_challenge_codes WHERE user_id=? AND channel=? AND used_at IS NULL",
+            (user_id, channel)
+        )
+        conn.execute(
+            "INSERT INTO mfa_challenge_codes (user_id, channel, code_hash, expires_at) VALUES (?,?,?,?)",
+            (user_id, channel, code_hash, expires_at)
+        )
+        conn.commit()
+        conn.close()
+        return True, code
+    except Exception as e:
+        return False, str(e)
+
+
+def verify_mfa_challenge_code(user_id, channel, plain_code):
+    """
+    Verify and consume an email/SMS MFA challenge code.
+    Returns (True, None) on success, (False, reason) on failure.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """SELECT * FROM mfa_challenge_codes
+               WHERE user_id=? AND channel=? AND used_at IS NULL
+               ORDER BY id DESC LIMIT 1""",
+            (user_id, channel)
+        ).fetchone()
+        conn.close()
+
+        if not row:
+            return False, "No pending code found — request a new one"
+        if datetime.now() > datetime.fromisoformat(row["expires_at"]):
+            return False, "Code has expired — request a new one"
+        if not verify_password(plain_code.strip(), row["code_hash"]):
+            return False, "Incorrect code"
+
+        # Consume the code
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "UPDATE mfa_challenge_codes SET used_at=? WHERE id=?",
+            (datetime.now().isoformat(), row["id"])
+        )
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def set_mfa_grace_deadline(user_id):
+    """
+    Set a fresh grace deadline for a user who is required to set up MFA.
+    Called at login time when Admin/Operator has mfa_enabled=0 and no deadline yet.
+    """
+    deadline = (datetime.now() + timedelta(days=MFA_GRACE_DAYS)).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE users SET mfa_grace_deadline=? WHERE id=?", (deadline, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+
 def login_user(user):
     """Store user info in Flask session after successful authentication."""
     session.permanent = True
@@ -741,7 +1141,8 @@ def login_user(user):
     session["layout"]         = user.get("layout") or "comfortable"
     session["nav_style"]      = user.get("nav_style") or "icons-labels"
     session["content_align"]  = user.get("content_align") or "left"
-    log.info(f"User '{user['username']}' logged in — theme:{user.get('theme')} layout:{user.get('layout')} nav:{user.get('nav_style')}")
+    session.pop("mfa_banner_dismissed", None)  # reset on each login so banner reappears
+    log.info("User logged in", username=user['username'], theme=user.get('theme'), layout=user.get('layout'), nav=user.get('nav_style'))
 
 
 def logout_user():
@@ -825,9 +1226,13 @@ def get_current_user():
 # ══════════════════════════════════════════════════════════════════════════════
 
 def login_required(f):
-    """Decorator: redirect to login if not a real authenticated user (guests are redirected)."""
+    """Decorator: redirect to login if not a real authenticated user (guests are redirected).
+    Also redirects to /mfa if MFA challenge has not yet been completed this session."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        # MFA pending — credentials verified but second factor not yet passed
+        if session.get("mfa_pending"):
+            return redirect(url_for("mfa_challenge"))
         user = get_current_user()
         if not user or user.get("is_guest"):
             return redirect(url_for("login", next=request.path))
@@ -859,7 +1264,7 @@ def requires_permission(permission):
             if not user:
                 return redirect(url_for("login", next=request.path))
             if not user.get(permission):
-                log.warning(f"User '{user['username']}' denied access to {request.path} (needs {permission})")
+                log.warning("Access denied", username=user['username'], path=request.path, required_permission=permission)
                 from flask import jsonify
                 # Return JSON error for API routes, redirect for page routes
                 if request.path.startswith("/api/"):
@@ -884,6 +1289,7 @@ def get_all_users():
                u.must_change_pass, u.is_active,
                u.locked_until, u.lockout_count,
                u.first_name, u.last_name,
+               u.mfa_enabled,
                r.name as role_name, r.id as role_id
         FROM users u
         JOIN roles r ON u.role_id = r.id
@@ -911,10 +1317,18 @@ def get_all_users():
 
 
 def get_user_by_id(user_id):
-    """Return a single user dict by ID."""
+    """Return a single user dict by ID, with role fields joined.
+    Returns all fields needed by login_user() including role_name, permissions,
+    and session_minutes."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    row = conn.execute("""
+        SELECT u.*, r.name as role_name, r.view_logs, r.use_controls,
+               r.manage_admin, r.manage_users, r.session_minutes
+        FROM users u
+        JOIN roles r ON u.role_id = r.id
+        WHERE u.id=?
+    """, (user_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -956,7 +1370,7 @@ def create_user(username, password, role_id, must_change_pass=True):
               datetime.now().isoformat(), int(must_change_pass)))
         conn.commit()
         conn.close()
-        log.info(f"User '{username}' created")
+        log.info("User created", username=username)
         return True, None
     except sqlite3.IntegrityError:
         return False, f"Username '{username}' already exists"
@@ -978,7 +1392,7 @@ def update_user(user_id, username=None, role_id=None, is_active=None, must_chang
             conn.execute("UPDATE users SET username=? WHERE id=?", (username, user_id))
             if session.get("user_id") == user_id:
                 session["username"] = username
-            log.info(f"Username changed to '{username}' for user ID {user_id}")
+            log.info("Username changed", username=username, user_id=user_id)
         if role_id is not None:
             conn.execute("UPDATE users SET role_id=? WHERE id=?", (role_id, user_id))
         if is_active is not None:
@@ -1019,10 +1433,29 @@ def change_password(user_id, new_password):
         """, (hash_password(new_password), user_id))
         conn.commit()
         conn.close()
-        log.info(f"Password changed for user ID {user_id}")
+        log.info("Password changed", user_id=user_id)
         # Update session flag if changing own password
         if session.get("user_id") == user_id:
             session["must_change_pass"] = False
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def admin_reset_password(user_id, new_password, force_change=True):
+    """
+    Admin-initiated password reset. Sets the new password hash and optionally
+    sets must_change_pass in a single atomic write so the flag cannot be
+    cleared by authenticate() before the login handler reads it.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""
+            UPDATE users SET password_hash=?, must_change_pass=? WHERE id=?
+        """, (hash_password(new_password), int(force_change), user_id))
+        conn.commit()
+        conn.close()
+        log.info("Admin password reset", user_id=user_id, force_change=force_change)
         return True, None
     except Exception as e:
         return False, str(e)
@@ -1073,7 +1506,7 @@ def delete_user(user_id, delete_subscription=False):
         conn.execute("DELETE FROM users WHERE id=?", (user_id,))
         conn.commit()
         conn.close()
-        log.info(f"User '{user[0] if user else user_id}' deleted (sub_deleted={delete_subscription})")
+        log.info("User deleted", username=(user[0] if user else None), user_id=user_id, sub_deleted=delete_subscription)
         return True, None
     except Exception as e:
         return False, str(e)
@@ -1133,7 +1566,7 @@ def delete_own_account(user_id, password, delete_subscription=False):
         conn.commit()
         conn.close()
         logout_user()
-        log.info(f"User '{user['username']}' deleted their own account (sub_deleted={delete_subscription})")
+        log.info("User deleted own account", username=user['username'], sub_deleted=delete_subscription)
         return True, None
     except Exception as e:
         return False, str(e)
@@ -1174,7 +1607,7 @@ def create_role(name, description, view_logs, use_controls, manage_admin,
               int(manage_admin), int(manage_users), int(session_minutes)))
         conn.commit()
         conn.close()
-        log.info(f"Role '{name}' created")
+        log.info("Role created", role=name)
         return True, None
     except sqlite3.IntegrityError:
         return False, f"Role '{name}' already exists"
@@ -1195,7 +1628,7 @@ def update_role(role_id, name, description, view_logs, use_controls,
               int(manage_admin), int(manage_users), int(session_minutes), role_id))
         conn.commit()
         conn.close()
-        log.info(f"Role ID {role_id} updated")
+        log.info("Role updated", role_id=role_id)
         return True, None
     except sqlite3.IntegrityError:
         return False, f"Role name '{name}' already exists"
@@ -1241,7 +1674,7 @@ def delete_role(role_id):
     except Exception:
         pass
 
-    log.info(f"Role '{role['name']}' deleted")
+    log.info("Role deleted", role=role['name'])
     return True, None
 
 
@@ -1294,7 +1727,7 @@ def delete_role_with_reassignment(role_id, user_role_map):
     except Exception:
         pass
 
-    log.info(f"Role '{role['name']}' deleted after user reassignment")
+    log.info("Role deleted after user reassignment", role=role['name'])
     return True, None
 
 
@@ -1318,5 +1751,5 @@ def save_preferences(user_id, theme=None, layout=None, nav_style=None, content_a
         if content_align: session["content_align"] = content_align
         return True
     except Exception as e:
-        log.error(f"Failed to save preferences: {e}")
+        log.error("Failed to save preferences", error=str(e))
         return False

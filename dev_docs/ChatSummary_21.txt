@@ -1,0 +1,119 @@
+NETWATCH SESSION SUMMARY
+========================
+Session: 21 | Date: 2026-03-19
+Starting version: v3.3.53 | Ending version: v3.3.55
+Summary: System log JSON formatter (v3.3.54), event/level filter bar for system log
+  (v3.3.55), and Promtail max_age bump from 1h to 24h (manual config change on
+  NetWatch Pi, no package).
+
+SCOPE NOTE: Three distinct arcs. No expanded summary required for the Promtail change
+  (one-line config edit). Expanded summary produced for the log formatter + filter bar
+  as a single arc (tightly coupled — filter bar is meaningless without the formatter).
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+v3.3.54 — System log JSON formatter (see Feature_SystemLogFormatter.txt)
+  The System Log card in logs.html was displaying raw JSON blobs since the structlog
+  rework (v3.3.37). New formatLogLine() function parses each line as JSON and renders
+  it in compact human-readable format:
+    HH:MM:SS · LEVEL · service › event  field=value ...
+  Boolean fields (lan, wan, wifi, dns, healthy) render as ✓/✗. latency_ms renders
+  as Xms, packet_loss as X%, error values in red. Non-JSON lines (gunicorn startup
+  messages) fall back to raw display with legacy level coloring. Filter input works
+  against the full formatted text string. New CSS classes added to themes.css:
+  log-ts, log-sep, log-svc, log-evt, log-fields, log-fok, log-ffail, log-fwarn,
+  log-raw.
+  Files changed: templates/logs.html, static/themes.css. Web restart only.
+  Confirmed working by user — formatter active, http_request entries visible and noisy.
+
+v3.3.55 — System log event/level filter bar (see Feature_SystemLogFormatter.txt)
+  Added a filter bar above the log-box with:
+  - Level radio buttons: All / Warn+ / Errors only
+  - Event group checkboxes: Health, Network, Resets, Speedtest, System,
+    Web Requests (unchecked by default), Other
+  All formatted lines cached in allFormatted[]. Filter changes apply client-side
+  without re-fetching. Free-text filter works alongside group/level filters — all
+  three stack. Auto-refresh re-fetches and re-applies current filters.
+  loadLog() now populates allFormatted[] then calls applyFilters(). applyFilters()
+  is the single render path (called by loadLog, checkbox changes, radio changes,
+  and text input).
+  EVT_GROUP map classifies events to groups; unknown events fall to "other".
+  Files changed: templates/logs.html only. Web restart only.
+
+Promtail max_age: 1h → 24h (manual, no package)
+  Edited /etc/promtail/config.yaml on the NetWatch Pi. Changed max_age: 1h to
+  max_age: 24h. Restarted Promtail service. Confirmed clean start in journalctl
+  with no HTTP 400 rejection errors.
+  Background: max_age was conservatively set to 1h in Session 17 after a first
+  attempt at 12h caused Loki 400 rejections on the initial backlog catchup run.
+  Before changing, verified Loki's reject_old_samples_max_age was not explicitly
+  set in /etc/loki/loki.yml — confirmed Loki is at default (1 week), so 24h is
+  safely within the acceptance window.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- v3.3.54 first install: formatter was working but user reported "it didn't work."
+  Investigation via screenshot revealed the formatter was in fact working correctly
+  on health_check lines. The perceived problem was http_request entries from the
+  gunicorn access logger dominating the view — many fields including user_agent and
+  referer wrapping badly. Led directly to the filter bar feature (v3.3.55).
+
+
+DECISIONS MADE
+--------------
+- Option A (compact single-line) chosen over Option C (card-per-entry) for the
+  log formatter. Density suits a log viewer; cards were visually rich but too tall
+  for 100+ line views.
+- Web Requests (http_request) unchecked by default — high frequency, low signal
+  for normal monitoring use. Available when needed.
+- Filters are fully client-side — no additional API calls on filter change.
+  allFormatted[] cache makes this fast and clean.
+- Promtail max_age set to 24h rather than 12h — Loki window is 1 week (default),
+  so 24h is the practical useful ceiling for catchup after a reboot.
+
+
+OPEN QUESTIONS
+--------------
+None.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- System log JSON formatter (v3.3.54/v3.3.55)
+- Promtail max_age increase (manual config change, confirmed working)
+
+Still open:
+- System log viewer: pkg_update.log tail in Admin page (separate from Logs page work)
+- Kiosk display
+- Package storage + push
+- TLS for Grafana/Prometheus/Loki on ops-pi
+- Alloy migration (Promtail EOL)
+- SSD migration (NetWatch Pi)
+- 9 PENDING DISCUSSION items in Audit_Findings.txt
+- Git strategy, publishing, session workflow: three open discussions
+- API versioning /api/v1/ retrofit of NetWatch
+- Blueprint refactor and module system design briefs
+- mBase directory/repo setup
+- Documentation (User PDF, Admin guide, Developer reference, Changelog PDF, brochure)
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Feature_SystemLogFormatter.txt — JSON formatter and event/level filter bar
+  for the System Log card in logs.html (v3.3.54–v3.3.55).
+
+
+NEW GOTCHAS ADDED
+-----------------
+None this session.
+
+
+CURRENT STATE
+-------------
+- Pi version at end of session: v3.3.55
+- Promtail max_age: 24h (manual edit, confirmed working)
+- Next task: top candidates are System log viewer (pkg_update.log in Admin),
+  Kiosk display, or mBase/architecture discussion items.

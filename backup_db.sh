@@ -16,16 +16,18 @@
 set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-NETWATCH_DIR="$HOME/netwatch"
-BACKUP_DIR="$HOME/backups"
+# Derive NETWATCH_DIR from script location -- do not use $HOME (resolves to
+# /nonexistent for netwatch-svc which has no home directory).
+NETWATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
+BACKUP_DIR="/home/mboynton/backups"
 GPG_RECIPIENT="mattybusa@gmail.com"
 MAX_EMAIL_SIZE_MB=20
-KEEP_COPIES=14  # Keep 2 weeks of daily backups locally
+KEEP_COPIES=$(python3 -c "import sys; sys.path.insert(0,'$NETWATCH_DIR'); import config; print(getattr(config, 'DB_BACKUP_RETENTION', 14))" 2>/dev/null || echo 14)
 
 # Load email settings from config.py
 GMAIL_USER=$(python3 -c "import sys; sys.path.insert(0,'$NETWATCH_DIR'); import config; print(config.GMAIL_USER)" 2>/dev/null || echo "")
 GMAIL_PASS=$(python3 -c "import sys; sys.path.insert(0,'$NETWATCH_DIR'); import config; print(config.GMAIL_APP_PASSWORD)" 2>/dev/null || echo "")
-ALERT_EMAIL=$(python3 -c "import sys; sys.path.insert(0,'$NETWATCH_DIR'); import config; print(config.ALERT_EMAIL)" 2>/dev/null || echo "$GMAIL_USER")
+ALERT_EMAIL=$(python3 -c "import sys; sys.path.insert(0,'$NETWATCH_DIR'); import config; print(config.ALERT_TO)" 2>/dev/null || echo "$GMAIL_USER")
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 DO_EMAIL=false
@@ -134,6 +136,7 @@ PYEOF
 log "Encrypting..."
 ENCRYPTED_FILE="$BACKUP_DIR/netwatch_db_${TIMESTAMP}.db.gpg"
 gpg --batch --yes --trust-model always \
+    --homedir /home/mboynton/netwatch/.gnupg \
     --recipient "$GPG_RECIPIENT" \
     --output "$ENCRYPTED_FILE" \
     --encrypt "$STAGING_DIR/netwatch.db"
@@ -167,6 +170,11 @@ This alert will repeat on every scheduled run until resolved."
     fi
     log "Emailing database backup..."
     send_backup_email "$ENCRYPTED_FILE" "$FINAL_SIZE"
+    if [[ $? -eq 0 ]]; then
+        "$NETWATCH_DIR/venv/bin/python3" "$NETWATCH_DIR/backup_notify.py" OK db "$(basename $ENCRYPTED_FILE)" "$ALERT_EMAIL"
+    else
+        "$NETWATCH_DIR/venv/bin/python3" "$NETWATCH_DIR/backup_notify.py" FAIL db "$(basename $ENCRYPTED_FILE)" "$ALERT_EMAIL" "Email send failed"
+    fi
 fi
 
 log "Database backup complete: $(basename $ENCRYPTED_FILE)"

@@ -1,70 +1,30 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-14 | Session 12 complete | v3.3.30
+Updated: 2026-03-23 | Session 29 closed | v3.3.89
 
-STATUS: Session 12 complete. Gitea fetch workflow confirmed working.
-Backlog migrated to Gitea Issues. Ready for normal feature work next session.
+STATUS: Session 29 complete and closed out.
 
-LAST COMPLETED (Session 12)
-----------------------------
-- Fixed NetWatch_AI_Context_latest.txt session-header filter issue:
-  "session" keyword on its own line was being blocked by the Claude in Chrome
-  JS filter during Gitea file fetches. Fixed by intentional misspelling ("sesion")
-  with an explanatory NOTE comment. Do not correct the misspelling.
-
-- Confirmed Gitea fetch workflow fully working via Claude in Chrome:
-  All session-start files fetch cleanly from Gitea. No zip upload needed.
-
-- Created second Gitea API token (claude-issue-access) with issue read+write scope.
-
-- Migrated backlog from context doc flat list to Gitea Issues:
-  17 issues created with labels (security, ui, feature, infrastructure,
-  testing, documentation). Backlog section removed from context doc.
-
-- Updated Gotchas.txt with 3 new entries (session filter, JWT filename block,
-  Claude in Chrome session privilege model).
-
-- Updated AI_Session_Process.txt to explicitly list ChatSummary_1.1/1.2/1.3
-  by name to work around JWT token filter on dotted filenames.
-
-- Deployed v3.3.30 package (doc-only, no restart).
+SESSION 29 SUMMARY
+------------------
+- v3.3.88: MFA verification codes redacted from alert history. _redact_sensitive()
+  in database.py now strips both email-format and SMS-format codes at write time.
+- v3.3.89: Role-based alert permissions. New Alerts tab in Users & Roles with
+  Available/Email/SMS controls per alert type per role. Standalone subscriber
+  defaults via sentinel role_id=0. My Account now data-driven instead of hardcoded
+  ALLOWED_GROUPS. Grid compressed vertically.
 
 NEXT SESSION
 ------------
-Recommended first task: Issue #1 -- SESSION_COOKIE_SECURE = True fix
-  One-liner identified in Session 11 audit. Easy win, low risk.
-  No design brief required (trivial change, no meaningful alternatives).
+Open candidates:
+  1. Security audit (attack surface review -- package installer, auth/session hardening)
+  2. Kiosk display (operational quick-glance status view, scope narrowed)
+  3. Package storage + distribution story (design together with distributable
+     installer, update package installer, git strategy -- cohesive design unit)
 
-After that: pick from Gitea Issues by label/priority.
-  https://gitea-pi.home:3000/mboynton/netwatch/issues
+See NetWatch_AI_Context_latest.txt backlog section for full list.
 
-GITEA TOKENS (REFERENCE)
---------------------------
-claude-session-access:  37a74c245b4f74a508c78107595ff03413880c96  (repository: read)
-claude-write-access:    01608e1c4a070006af71cf44a292c615d48948a8  (repository: read+write)
-claude-issue-access:    50704f541f5c1e99522eb36faac25ff0ff78a0fc  (issue: rw, repository: read)
-
-Use session-access token for all file fetches at session start.
-Use issue-access token for reading/writing the issue tracker.
-
-SESSION START FORMAT
----------------------
-"NetWatch session. Repo: https://gitea-pi.home:3000/mboynton/netwatch
- Session token: 37a74c245b4f74a508c78107595ff03413880c96
- Issue token:   50704f541f5c1e99522eb36faac25ff0ff78a0fc"
-
-Claude in Chrome will fetch all required session files directly from Gitea.
-No zip upload required.
-
-PENDING VERIFICATION
---------------------
-- Weekly Pi update cron (v3.3.12): not yet confirmed fired in the wild.
-  Verify: crontab -l | grep netwatch-pkg-update
-- Web service silent-exit after delayed restart: unconfirmed potential bug.
-
-OPEN ITEMS
-----------
-- Orphan test keys (TEST_KEY_WITH_DEFAULT, TEST_KEY_UNCONFIGURED) may remain
-  in config.py. Harmless -- validator ignores unknown keys.
-- mBase audit decisions: see Audit_Findings.txt PENDING DISCUSSION section
-- All other items now tracked in Gitea Issues
+POST-INSTALL NOTE
+-----------------
+After installing v3.3.89, all role_alert_defaults rows will have available=1 (the
+migration default). Configure the Alerts tab to restrict types per role as desired --
+nothing changes for existing users until you explicitly save.

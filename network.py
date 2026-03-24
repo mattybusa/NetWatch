@@ -15,13 +15,14 @@
 import subprocess
 import socket
 import logging
+import structlog
 import threading
 from datetime import datetime
 
 import config
 import database
 
-log = logging.getLogger("netwatch.network")
+log = structlog.get_logger().bind(service="monitor")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -61,7 +62,7 @@ def get_interface_ip(iface):
                     return parts[1].split("/")[0]   # Strip CIDR prefix
         return None   # Interface exists but has no IPv4
     except Exception as e:
-        log.debug(f"get_interface_ip({iface}) error: {e}")
+        log.debug("get_interface_ip error", iface=iface, error=str(e))
         return None
 
 
@@ -122,10 +123,10 @@ def ping(host, count=3, timeout=4, interface=None):
             return False, None, 100.0
 
     except subprocess.TimeoutExpired:
-        log.debug(f"Ping timeout: {host}" + (f" via {interface}" if interface else ""))
+        log.debug("Ping timeout", host=host, interface=interface)
         return False, None, 100.0
     except Exception as e:
-        log.debug(f"Ping error ({host})" + (f" via {interface}" if interface else "") + f": {e}")
+        log.debug("Ping error", host=host, interface=interface, error=str(e))
         return False, None, 100.0
 
 
@@ -144,7 +145,7 @@ def check_dns():
     except socket.gaierror:
         return False
     except Exception as e:
-        log.debug(f"DNS check error: {e}")
+        log.debug("DNS check error", error=str(e))
         return False
 
 
@@ -171,12 +172,10 @@ def _bound_ping(host, iface, count, label):
     """
     ip = get_interface_ip(iface)
     if ip is None:
-        log.warning(
-            f"{label} interface {iface} has no IP address — marking {label} down"
-        )
+        log.warning("Interface has no IP address, marking down", label=label, iface=iface)
         return False, None, 100.0
 
-    log.debug(f"{label} ping via {iface} ({ip}) → {host}")
+    log.debug("Bound ping", label=label, iface=iface, ip=ip, host=host)
     return ping(host, count=count, interface=iface)
 
 
@@ -208,7 +207,7 @@ def check_network():
         dict with keys: timestamp, lan_ok, wan_ok, wifi_ok, dns_ok,
                         latency_ms, packet_loss, healthy, degraded
     """
-    log.debug("Running network health check...")
+    log.debug("Running network health check")
 
     lan_iface  = getattr(config, "LAN_INTERFACE",  "").strip()
     wifi_iface = getattr(config, "WIFI_INTERFACE", "").strip()
@@ -293,7 +292,7 @@ def run_speedtest():
 
     Returns: (ping_ms, download_mbps, upload_mbps) or (None, None, None) on failure
     """
-    log.info("Starting speedtest (running in background)...")
+    log.info("Speedtest started")
     try:
         import speedtest as st
 
@@ -310,17 +309,14 @@ def run_speedtest():
 
         database.log_speedtest(ping_ms, dl_mbps, ul_mbps, server)
 
-        log.info(
-            f"Speedtest complete: ↓{dl_mbps:.1f} Mbps  ↑{ul_mbps:.1f} Mbps  "
-            f"ping {ping_ms:.0f}ms  ({server})"
-        )
+        log.info("Speedtest complete", dl_mbps=round(dl_mbps, 1), ul_mbps=round(ul_mbps, 1), ping_ms=round(ping_ms, 0), server=server)
         return ping_ms, dl_mbps, ul_mbps
 
     except ImportError:
-        log.error("speedtest-cli not installed. Run: pip install speedtest-cli")
+        log.error("speedtest-cli not installed")
         return None, None, None
     except Exception as e:
-        log.error(f"Speedtest failed: {e}")
+        log.error("Speedtest failed", error=str(e))
         return None, None, None
 
 

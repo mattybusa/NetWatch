@@ -1,0 +1,141 @@
+NETWATCH CHAT SUMMARY — SESSION 22
+====================================
+Date: 2026-03-20
+Starting version: v3.3.55 (context doc authoritative; zip label matched)
+Ending version: v3.3.59
+Summary: Backlog review and additions, backup email delivery fix, session idle
+  timeout fix (three compounding bugs across four packages).
+
+SCOPE NOTE: This session covered 7 distinct arcs (backlog review, backup email
+bug, and session timeout bug with three separate root causes). Expanded summaries
+produced for both bugs.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+Backlog review: User reviewed notes and added 8 new items to the backlog —
+  MFA, security audit, dashboard system health card, backup manager, package
+  storage/distribution story (4 related items noted as cohesive), GPG local
+  decrypt verification, session timeout bug, and backup email bug. See BACKLOG
+  CHANGES for full list.
+
+v3.3.56 — Backup email delivery fix (see Bug_BackupEmailDelivery.txt):
+  Both backup.sh and backup_db.sh read config.ALERT_EMAIL which does not exist.
+  The correct key is config.ALERT_TO. The 2>/dev/null suppressed the
+  AttributeError silently; scripts fell back to GMAIL_USER, sending emails to
+  the NetWatch account itself. One-line fix in each script.
+
+v3.3.57–v3.3.59 — Session idle timeout not enforcing logout
+  (see Bug_SessionIdleTimeout.txt): Three compounding bugs fixed across three
+  packages. Final confirmed working by user after logging out and back in to
+  get a clean session cookie.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- v3.3.57 (part 1 of timeout fix): Removed @auth.login_required from
+  /api/session/status and /api/session/ping so they return JSON instead of
+  redirecting on expiry. Correct fix but not sufficient alone — timeout still
+  not enforcing.
+
+- v3.3.58 (part 2 of timeout fix): Added /api/session/status and
+  /api/session/ping to _POLLING_PATHS so before_request wouldn't reset
+  last_activity on the 30-second status check. Still not sufficient — every
+  other auto-refreshing page was also resetting last_activity.
+
+- v3.3.59 (part 3, working fix): Removed update_last_activity() from
+  before_request entirely. The blocklist approach was fundamentally fragile —
+  any polling endpoint not in the list resets the idle clock. last_activity is
+  now updated only by /api/session/ping (real user events). Confirmed working.
+
+- First test of v3.3.59 appeared to fail — user returned after 40 minutes still
+  logged in. Root cause: old session cookie from before the fix was still active.
+  Logging out and back in gave a clean session and the timeout worked correctly.
+
+
+DECISIONS MADE
+--------------
+- Backup email fix: both updater.py upload paths (backup_file and save_dev_doc)
+  already create dated backups per v3.3.51/52. No additional changes needed.
+
+- Session idle timeout: last_activity updated ONLY via /api/session/ping (real
+  user events: mousedown, keydown, touchstart, scroll, wheel). The before_request
+  approach is permanently abandoned — any new polling endpoint would silently
+  break idle timeout without a corresponding _POLLING_PATHS update.
+
+- PERMANENT_SESSION_LIFETIME set to 2 days as a hard ceiling on browser cookie
+  lifetime. Idle timeout logic handles the normal case; this prevents cookies
+  persisting for Flask's 31-day default.
+
+- After installing a session timeout fix, users must log out and back in to get
+  a clean session. Old cookies carry stale last_activity timestamps.
+
+- Decrypt-on-Pi rejected for backup restore: private key must not live on the Pi.
+  Restore flow is: decrypt locally on Windows → upload decrypted file → restore
+  via UI. Backlog item updated accordingly.
+
+- Package storage + push and three related items (distributable installer, update
+  package installer, git strategy) noted as a cohesive distribution story — design
+  together, not independently.
+
+- utcnow() deprecation warning in backup scripts: harmless, noted, deferred.
+
+- End-of-session context doc updated in closeout package.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] Session timeout: user must log out and back in after install to get
+  clean session. No further verification needed beyond what was confirmed.
+
+- [PENDING] utcnow() deprecation warning in backup.sh and backup_db.sh: harmless
+  Python 3.12 warning, can be cleaned up in a future package.
+
+- Weekly Pi update cron: confirmed working Session 19, no further action needed.
+
+- Web service silent-exit after delayed restart: still unconfirmed potential bug,
+  watch on future installs.
+
+
+BACKLOG CHANGES
+---------------
+Added this session:
+- MFA: optional Monitor/Guest, mandatory Admin/Operator, TOTP preferred
+- Security audit: package installer attack surface, auth/session hardening
+- Dashboard system health card: monitor heartbeat, last DB write, disk space
+- Backup Manager: browse/restore from local archive, configurable retention
+- Verify GPG decrypt locally on Windows + full restore flow end-to-end
+- Note added: package storage + push, distributable installer, update package
+  installer, and git strategy are a cohesive distribution story — design together
+
+Completed this session:
+- Backup email delivery bug (v3.3.56) — config.ALERT_EMAIL → config.ALERT_TO
+- Session idle timeout not enforcing logout (v3.3.57–v3.3.59)
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Bug_BackupEmailDelivery.txt — backup.sh and backup_db.sh reading wrong config
+  key (ALERT_EMAIL vs ALERT_TO), silent fallback to sending account, fix.
+- Bug_SessionIdleTimeout.txt — three compounding bugs: login_required on session
+  routes, missing from POLLING_PATHS, before_request resetting clock on all polls.
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during this dev session per process:
+- SESSION IDLE TIMEOUT — THREE COMPOUNDING BUGS (new) — documents all three root
+  causes and the correct architecture (ping-only last_activity updates). Also
+  notes that users must log out and back in after installing the fix.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.59
+- All services running normally
+- Session idle timeout confirmed working (user verified)
+- Backup emails confirmed arriving at correct address (user verified)
+- Next task: open — top candidates per backlog:
+    System log viewer (pkg_update.log tail in Admin page)
+    Dashboard system health card
+    Backup Manager

@@ -1,0 +1,150 @@
+FEATURE: Promtail Install on NetWatch Pi
+=========================================
+Type: Infrastructure / Feature
+Date: 2026-03-15
+Session: 17
+Outcome: Complete -- Promtail 3.5.1 running as systemd service, confirmed shipping
+  journal logs to Loki on ops-pi
+
+
+BACKGROUND
+----------
+With structlog rework complete and NetWatch emitting structured JSON logs to journald,
+the next step was to install a log shipping agent on the NetWatch Pi to forward those
+logs (and all other journal entries) to Loki on ops-pi (192.168.100.230:3100). This
+completes the observability pipeline planned in Sessions 15/16:
+
+  NetWatch Pi --> structlog JSON --> journald --> Promtail --> Loki --> Grafana
+
+The scope was broadened from "ship NetWatch logs only" to "ship all journal logs"
+after discussion confirmed the Pi produces other valuable log sources (systemd events,
+SSH logins, apt activity, kernel messages) that would be useful in Loki alongside
+NetWatch logs.
+
+Promtail was chosen over Grafana Alloy (its replacement) to match the Loki 3.5.1
+version on ops-pi and avoid unnecessary complexity. Promtail is EOL as of March 2026
+but remains functional. Alloy migration is viable on this hardware (ARM64) when needed.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+WRONG ARCHITECTURE BINARY (linux-arm vs linux-arm64):
+Downloaded promtail-linux-arm.zip (v3.5.1) initially, assuming the Pi 3B+ was a
+32-bit device. The binary extracted successfully but failed to execute:
+  "cannot execute: required file not found"
+file(1) confirmed: "ELF 32-bit LSB executable, ARM, EABI5... interpreter
+/lib/ld-linux-armhf.so.3" -- a 32-bit armhf binary. The interpreter is not present
+on the 64-bit OS. The Pi 3B+ has a Cortex-A53 (ARMv8, 64-bit capable) running
+Raspberry Pi OS Lite 64-bit. The arm64 binary is the correct choice. This was
+confirmed by the node_exporter install in Session 16 having used linux-arm64.
+
+ALLOY INVESTIGATION DEAD END:
+Prompted by discovering Promtail was EOL, briefly investigated Grafana Alloy as the
+replacement. Alloy's supported platforms page confirmed: Linux AMD64 and ARM64 only.
+A GitHub issue confirmed Grafana has been reluctant to add armhf support. Once the
+Pi was confirmed to be ARM64 (not armhf), Alloy was technically viable -- but we
+stayed with Promtail to match the Loki version and keep things simple.
+
+INITIAL max_age TOO LARGE:
+First test run with max_age: 12h caused Loki 400 rejections:
+  "entry too far behind, entry timestamp is: 2026-03-14T20:10:38Z,
+   oldest acceptable timestamp is: 2026-03-15T05:37:19Z"
+Loki was rejecting entries older than its acceptance window. Fixed by reducing
+max_age to 1h in the config.
+
+PERMISSIONS FAILURE ON SERVICE STARTUP:
+First service start failed immediately:
+  "open /var/lib/promtail/positions.yaml: permission denied"
+Root cause: during the manual test run, promtail was run as mboynton, which created
+positions.yaml owned by mboynton. The service runs as the promtail user. Fix:
+  sudo chown -R promtail:promtail /var/lib/promtail
+See NEW GOTCHA: CREATE SERVICE USER BEFORE RUNNING MANUALLY.
+
+
+WHAT WORKED
+-----------
+
+BINARY INSTALL:
+  cd /tmp
+  wget https://github.com/grafana/loki/releases/download/v3.5.1/promtail-linux-arm64.zip
+  unzip promtail-linux-arm64.zip
+  sudo mv promtail-linux-arm64 /usr/local/bin/promtail
+  sudo chmod +x /usr/local/bin/promtail
+  promtail --version
+  --> promtail, version 3.5.1 ... platform: linux/arm64
+      tags: promtail_journal_enabled  <-- confirms journal support compiled in
+
+DIRECTORIES:
+  sudo mkdir -p /etc/promtail
+  sudo mkdir -p /var/lib/promtail
+
+CONFIG (/etc/promtail/config.yaml):
+  server:
+    http_listen_port: 9080
+    grpc_listen_port: 0
+  positions:
+    filename: /var/lib/promtail/positions.yaml
+  clients:
+    - url: http://192.168.100.230:3100/loki/api/v1/push
+  scrape_configs:
+    - job_name: journal
+      journal:
+        max_age: 1h
+        labels:
+          job: netwatch-pi
+          host: netwatch-pi
+      relabel_configs:
+        - source_labels: [__journal__systemd_unit]
+          target_label: unit
+        - source_labels: [__journal__hostname]
+          target_label: hostname
+
+SERVICE USER:
+  sudo useradd --system --no-create-home --shell /bin/false promtail
+  sudo usermod -a -G systemd-journal promtail
+  sudo chown promtail:promtail /var/lib/promtail
+
+SYSTEMD SERVICE (/etc/systemd/system/promtail.service):
+  [Unit]
+  Description=Promtail log shipping agent
+  After=network-online.target
+  Wants=network-online.target
+
+  [Service]
+  User=promtail
+  Group=promtail
+  ExecStart=/usr/local/bin/promtail -config.file=/etc/promtail/config.yaml
+  Restart=always
+  RestartSec=5
+
+  [Install]
+  WantedBy=multi-user.target
+
+ENABLE AND START:
+  sudo systemctl daemon-reload
+  sudo systemctl enable promtail
+  sudo systemctl start promtail
+
+VERIFICATION:
+  sudo journalctl -u promtail -n 10 --no-pager
+  --> service running, no errors after chown fix
+  Grafana Explore --> Loki data source --> {host="netwatch-pi"} --> logs visible
+  User confirmed: "looks like its working"
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- max_age is currently 1h. This means after a Pi reboot or Promtail restart, only the
+  last hour of journal entries will be shipped. Consider increasing to 12h or 24h once
+  the pipeline has been stable for a few days and the Loki retention window is confirmed.
+
+- No Grafana dashboard for NetWatch logs has been built yet. The data is in Loki but
+  there is no organized view. Next session should build a dashboard with panels for
+  health_check events (latency trend), reset events, and error counts.
+
+- Promtail is EOL as of March 2026. It will continue working but will not receive new
+  features. Alloy migration is the long-term path -- viable on this ARM64 hardware.
+  Not urgent.
+
+- Loki is currently HTTP only (no TLS). This is acceptable on the LAN but should be
+  addressed before any external access is enabled. Tracked in backlog.

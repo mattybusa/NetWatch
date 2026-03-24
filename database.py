@@ -6,6 +6,7 @@
 
 import sqlite3
 import logging
+import structlog
 import os
 from datetime import datetime
 
@@ -13,7 +14,7 @@ import config
 
 NETWATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 
-log = logging.getLogger("netwatch.database")
+log = structlog.get_logger().bind(service="monitor")
 
 # Database file lives in the netwatch project directory
 DB_PATH = os.path.join(NETWATCH_DIR, "netwatch.db")
@@ -93,7 +94,7 @@ def init_db():
 
     conn.commit()
     conn.close()
-    log.info(f"Database initialized at {DB_PATH}")
+    log.info("Database initialized", path=DB_PATH)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -117,7 +118,7 @@ def log_health(lan_ok, wan_ok, wifi_ok, dns_ok, latency_ms, packet_loss):
         conn.commit()
         conn.close()
     except Exception as e:
-        log.error(f"Failed to log health record: {e}")
+        log.error("Failed to log health record", error=str(e))
 
 
 def log_reset(reset_type, reason, triggered_by="auto", success=True):
@@ -131,7 +132,7 @@ def log_reset(reset_type, reason, triggered_by="auto", success=True):
         conn.commit()
         conn.close()
     except Exception as e:
-        log.error(f"Failed to log reset event: {e}")
+        log.error("Failed to log reset event", error=str(e))
 
 
 def log_speedtest(ping_ms, download_mbps, upload_mbps, server):
@@ -145,7 +146,7 @@ def log_speedtest(ping_ms, download_mbps, upload_mbps, server):
         conn.commit()
         conn.close()
     except Exception as e:
-        log.error(f"Failed to log speedtest result: {e}")
+        log.error("Failed to log speedtest result", error=str(e))
 
 
 def _redact_sensitive(message):
@@ -153,6 +154,10 @@ def _redact_sensitive(message):
     import re as _re
     # Redact temporary passwords from password reset alerts
     message = _re.sub(r'(Your temporary password is:\s*)\S+', r'\1[REDACTED]', message)
+    # Redact MFA/verification codes — email format
+    message = _re.sub(r'(Your NetWatch login verification code is:\s*)\S+', r'\1[REDACTED]', message)
+    # Redact MFA/verification codes — SMS format
+    message = _re.sub(r'(Your login code:\s*)\S+', r'\1[REDACTED]', message)
     return message
 
 
@@ -170,7 +175,7 @@ def log_alert(alert_type, message, sent=False):
         conn.close()
         return alert_id
     except Exception as e:
-        log.error(f"Failed to log alert: {e}")
+        log.error("Failed to log alert", error=str(e))
         return None
 
 
@@ -182,7 +187,7 @@ def mark_alert_sent(alert_id):
         conn.commit()
         conn.close()
     except Exception as e:
-        log.error(f"Failed to mark alert sent: {e}")
+        log.error("Failed to mark alert sent", error=str(e))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -200,7 +205,7 @@ def get_latest_health():
         conn.close()
         return dict(row) if row else None
     except Exception as e:
-        log.error(f"Failed to get latest health: {e}")
+        log.error("Failed to get latest health", error=str(e))
         return None
 
 
@@ -224,7 +229,7 @@ def get_health_history(hours=24, start=None, end=None):
         conn.close()
         return [dict(r) for r in rows]
     except Exception as e:
-        log.error(f"Failed to get health history: {e}")
+        log.error("Failed to get health history", error=str(e))
         return []
 
 
@@ -241,7 +246,7 @@ def get_reset_history(days=30):
         conn.close()
         return [dict(r) for r in rows]
     except Exception as e:
-        log.error(f"Failed to get reset history: {e}")
+        log.error("Failed to get reset history", error=str(e))
         return []
 
 
@@ -266,7 +271,7 @@ def get_speedtest_history(days=7, hours=None, start=None, end=None):
         conn.close()
         return [dict(r) for r in rows]
     except Exception as e:
-        log.error(f"Failed to get speedtest history: {e}")
+        log.error("Failed to get speedtest history", error=str(e))
         return []
 
 
@@ -281,7 +286,7 @@ def get_alert_history(limit=50):
         conn.close()
         return [{**dict(r), "message": _redact_sensitive(r["message"] or "")} for r in rows]
     except Exception as e:
-        log.error(f"Failed to get alert history: {e}")
+        log.error("Failed to get alert history", error=str(e))
         return []
 
 
@@ -306,7 +311,7 @@ def get_uptime_stats():
             results[label] = round((healthy / total * 100) if total > 0 else 0, 2)
         conn.close()
     except Exception as e:
-        log.error(f"Failed to get uptime stats: {e}")
+        log.error("Failed to get uptime stats", error=str(e))
     return results
 
 
@@ -322,7 +327,7 @@ def get_reset_count_today():
         conn.close()
         return row[0] if row else 0
     except Exception as e:
-        log.error(f"Failed to get reset count: {e}")
+        log.error("Failed to get reset count", error=str(e))
         return 0
 
 
@@ -337,7 +342,7 @@ def get_last_reset():
         conn.close()
         return dict(row) if row else None
     except Exception as e:
-        log.error(f"Failed to get last reset: {e}")
+        log.error("Failed to get last reset", error=str(e))
         return None
 
 
@@ -352,8 +357,66 @@ def get_last_speedtest():
         conn.close()
         return dict(row) if row else None
     except Exception as e:
-        log.error(f"Failed to get last speedtest: {e}")
+        log.error("Failed to get last speedtest", error=str(e))
         return None
+
+
+def get_speedtest_avg(days=None):
+    """
+    Return average download_mbps, upload_mbps, and ping_ms over the last N days.
+    Pass days=None for all-time averages.
+    Returns a dict with keys: download_mbps, upload_mbps, ping_ms, count.
+    All values are None if no records exist in the window.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        if days is None:
+            row = conn.execute("""
+                SELECT AVG(download_mbps), AVG(upload_mbps), AVG(ping_ms), COUNT(*)
+                FROM speedtest_results
+            """).fetchone()
+        else:
+            row = conn.execute("""
+                SELECT AVG(download_mbps), AVG(upload_mbps), AVG(ping_ms), COUNT(*)
+                FROM speedtest_results
+                WHERE timestamp >= datetime('now', ?)
+            """, (f"-{days} days",)).fetchone()
+        conn.close()
+        if not row or row[3] == 0:
+            return {"download_mbps": None, "upload_mbps": None, "ping_ms": None, "count": 0}
+        return {
+            "download_mbps": round(row[0], 1) if row[0] is not None else None,
+            "upload_mbps":   round(row[1], 1) if row[1] is not None else None,
+            "ping_ms":       round(row[2], 0) if row[2] is not None else None,
+            "count":         row[3],
+        }
+    except Exception as e:
+        log.error("Failed to get speedtest avg", error=str(e))
+        return {"download_mbps": None, "upload_mbps": None, "ping_ms": None, "count": 0}
+
+
+def get_reset_count(days=None):
+    """
+    Return the count of auto resets over the last N days.
+    Pass days=None for all-time count.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        if days is None:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM reset_events WHERE triggered_by='auto'"
+            ).fetchone()
+        else:
+            row = conn.execute("""
+                SELECT COUNT(*) FROM reset_events
+                WHERE triggered_by='auto'
+                AND timestamp >= datetime('now', ?)
+            """, (f"-{days} days",)).fetchone()
+        conn.close()
+        return row[0] if row else 0
+    except Exception as e:
+        log.error("Failed to get reset count", error=str(e))
+        return 0
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -383,7 +446,7 @@ def prune_old_records():
         conn.close()
         log.debug("Old database records pruned")
     except Exception as e:
-        log.error(f"Failed to prune old records: {e}")
+        log.error("Failed to prune old records", error=str(e))
 
 
 def get_db_stats():
@@ -396,8 +459,52 @@ def get_db_stats():
             stats[table] = row[0]
         conn.close()
     except Exception as e:
-        log.error(f"Failed to get DB stats: {e}")
+        log.error("Failed to get DB stats", error=str(e))
     stats["db_size_kb"] = round(os.path.getsize(DB_PATH) / 1024, 1) if os.path.exists(DB_PATH) else 0
+    return stats
+
+
+def get_system_health_stats():
+    """Return monitor heartbeat age and disk space for the system health card.
+
+    Returns a dict with:
+      last_record_ts  -- ISO timestamp of most recent network_health row, or None
+      age_seconds     -- seconds since last record (float), or None if no records
+      expected_interval -- config.CHECK_INTERVAL (seconds)
+      overdue         -- True if age > 2.5× expected interval, False otherwise
+      disk_free_gb    -- free disk space in GB on the netwatch partition
+      disk_free_pct   -- free disk space as a percentage of total
+    """
+    import shutil
+    stats = {
+        "last_record_ts":   None,
+        "age_seconds":      None,
+        "expected_interval": getattr(config, "CHECK_INTERVAL", 30),
+        "overdue":          False,
+        "disk_free_gb":     None,
+        "disk_free_pct":    None,
+    }
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row  = conn.execute(
+            "SELECT timestamp FROM network_health ORDER BY timestamp DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        if row:
+            stats["last_record_ts"] = row[0]
+            # Parse stored UTC timestamp (space-separated, no 'T')
+            last_dt = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S.%f")
+            age = (datetime.utcnow() - last_dt).total_seconds()
+            stats["age_seconds"] = round(age, 1)
+            stats["overdue"] = age > 2.5 * stats["expected_interval"]
+    except Exception as e:
+        log.error("Failed to get monitor heartbeat", error=str(e))
+    try:
+        usage = shutil.disk_usage(NETWATCH_DIR)
+        stats["disk_free_gb"]  = round(usage.free  / (1024 ** 3), 1)
+        stats["disk_free_pct"] = round(usage.free  / usage.total * 100, 0)
+    except Exception as e:
+        log.error("Failed to get disk usage", error=str(e))
     return stats
 
 
@@ -411,9 +518,9 @@ def clear_health_records(older_than_days):
         )
         conn.commit()
         conn.close()
-        log.info(f"Cleared health records older than {older_than_days} days")
+        log.info("Cleared health records", older_than_days=older_than_days)
     except Exception as e:
-        log.error(f"Failed to clear health records: {e}")
+        log.error("Failed to clear health records", error=str(e))
 
 def get_user_pref(user_id, key):
     """Return the stored value for a user preference key, or None."""
@@ -426,7 +533,7 @@ def get_user_pref(user_id, key):
         conn.close()
         return row[0] if row else None
     except Exception as e:
-        log.error(f"get_user_pref failed: {e}")
+        log.error("get_user_pref failed", error=str(e))
         return None
 
 
@@ -449,4 +556,4 @@ def set_user_pref(user_id, key, value):
         conn.commit()
         conn.close()
     except Exception as e:
-        log.error(f"set_user_pref failed: {e}")
+        log.error("set_user_pref failed", error=str(e))

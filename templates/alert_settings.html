@@ -270,6 +270,8 @@ const FRIENDLY_LABELS = {
   email_verification:'Email Verification',
   password_reset:    'Password Reset',
   pkg_update:        'Pi Package Update',
+  backup_db:         'Daily DB Backup',
+  backup_full:       'Full System Backup',
 };
 function friendlyType(raw) {
   return FRIENDLY_LABELS[raw] || raw.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());

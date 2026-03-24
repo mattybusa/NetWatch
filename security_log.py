@@ -6,11 +6,12 @@
 import os
 import sqlite3
 import logging
+import structlog
 from datetime import datetime, timedelta
 
 NETWATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 
-log = logging.getLogger("netwatch.security")
+log = structlog.get_logger().bind(service="web")
 
 DB_PATH = os.path.join(NETWATCH_DIR, "netwatch.db")
 
@@ -66,9 +67,9 @@ def record(event_type, username=None, ip_address=None, detail=None, success=None
         """, (ts, event_type, username, ip_address, detail, success))
         conn.commit()
         conn.close()
-        log.info(f"Security: [{event_type}] user={username} ip={ip_address} {detail or ''}")
+        log.info("Security event", event_type=event_type, username=username, ip_address=ip_address, detail=detail)
     except Exception as e:
-        log.error(f"security_log.record failed: {e}")
+        log.error("security_log.record failed", error=str(e))
 
 
 def check_brute_force(username, ip_address):
@@ -91,25 +92,35 @@ def check_brute_force(username, ip_address):
         conn.close()
         return count >= BRUTE_FORCE_THRESHOLD, count
     except Exception as e:
-        log.error(f"check_brute_force failed: {e}")
+        log.error("check_brute_force failed", error=str(e))
         return False, 0
 
 
-def get_events(limit=100, event_types=None):
-    """Return recent security events, newest first."""
+def get_events(limit=100, event_types=None, since=None):
+    """Return recent security events, newest first.
+    since: optional ISO timestamp string — only return events at or after this time.
+    """
     conn = _connect()
+    conditions = []
+    params = []
+
     if event_types:
         placeholders = ",".join("?" * len(event_types))
-        rows = conn.execute(f"""
-            SELECT * FROM security_events
-            WHERE event_type IN ({placeholders})
-            ORDER BY timestamp DESC LIMIT ?
-        """, (*event_types, limit)).fetchall()
-    else:
-        rows = conn.execute("""
-            SELECT * FROM security_events
-            ORDER BY timestamp DESC LIMIT ?
-        """, (limit,)).fetchall()
+        conditions.append(f"event_type IN ({placeholders})")
+        params.extend(event_types)
+
+    if since:
+        conditions.append("timestamp >= ?")
+        params.append(since)
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit)
+
+    rows = conn.execute(f"""
+        SELECT * FROM security_events
+        {where}
+        ORDER BY timestamp DESC LIMIT ?
+    """, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

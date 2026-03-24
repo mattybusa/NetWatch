@@ -1,0 +1,190 @@
+NETWATCH EXPANDED SUMMARY — MINOR FIXES SESSION 13
+===================================================
+Name: Doc Restore, DB Export Fix, Snapshot Pruning Fix, Web Service Logging Fix
+Type: Bug fixes + infrastructure
+Date: 2026-03-14
+Session: 13
+Final outcome: Complete
+
+
+================================================================================
+ARC: Doc Restore (v3.3.30)
+================================================================================
+
+BACKGROUND
+----------
+Sessions 12 and 13 were spent attempting to set up a Gitea-based session workflow
+(fetch docs directly from Gitea instead of zip upload). That work was abandoned after
+false-positive policy flags caused session shutdowns. The context doc backlog section
+had been replaced with a Gitea Issues pointer, AI_Session_Process.txt had been updated
+to v1.5 with Gitea fetch instructions, and CurrentTask.txt was entirely Gitea-focused.
+No functional code had changed in Sessions 12 or 13.
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+None — restoration was straightforward once the two context docs were diffed.
+
+WHAT WORKED
+-----------
+Diffed netwatch_v3_3_30.zip (Session 13 seed, pre-Session-12 context doc) against
+netwatch_full_20260314_004631.zip (full v3.3.30 export with Session 12 changes).
+Identified exactly three changes: version bump, Gitea tokens added to Current State,
+and backlog section replaced with Gitea pointer.
+
+User also uploaded AI_Session_Process.txt v1.4 for comparison. Diffed against v1.5
+on Pi. Identified additions: GITEA REPOSITORY section, Gitea fetch SESSION START
+instructions, JWT dotted-filename workaround, and replacement of "GETTING SUMMARY
+FILES ONTO THE PI" section with git commit/push instructions.
+
+Package v3.3.30 deployed with:
+- NetWatch_AI_Context_latest.txt: backlog list restored, Gitea tokens removed,
+  version set to v3.3.33 (updated at final package)
+- AI_Session_Process.txt: v1.4 restored verbatim
+- CurrentTask.txt: rewritten to reflect session 13 state
+- Gotchas.txt: updated with new entries from this session
+No code files, no restart required.
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Gitea repos (mboynton/netwatch, mboynton/mbase) still exist on the Gitea Pi.
+  Not removed — Pi is functional, just not part of the active workflow.
+- Three Gitea-specific Gotchas entries remain in Gotchas.txt (append-only rule).
+  Harmless.
+
+
+================================================================================
+ARC: DB Export Fix (v3.3.31)
+================================================================================
+
+BACKGROUND
+----------
+DB backup button in Admin UI was returning 404. Feature had presumably worked at some
+point but was broken, likely since the gunicorn migration or service account work.
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+First package (v3.3.31) installed but 404 persisted. This appeared to be a code
+failure but was actually a deployment failure — the web service never restarted after
+install due to the sudoers mismatch bug (see below). Old webapp.py was still running.
+Took checking journalctl to discover the restart was blocked.
+
+WHAT WORKED
+-----------
+Root cause: admin_backup_db() in webapp.py had no @app.route decorator, no
+@auth.login_required, and no @auth.requires_permission decorator. The function existed
+and contained correct implementation logic, but was never registered as a Flask route.
+Flask silently ignored it; any request to /api/admin/backup_db got a 404.
+
+Fix: added three lines above the function definition:
+  @app.route("/api/admin/backup_db")
+  @auth.login_required
+  @auth.requires_permission("manage_admin")
+
+Confirmed correct URL by searching admin.html in the zip:
+  <a href="/api/admin/backup_db" ...>Download Database Backup (.db)</a>
+
+Shipped in webapp.py in v3.3.31 package (combined with wsgi.py logging fix).
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+None.
+
+
+================================================================================
+ARC: Web Service Logging Fix (v3.3.31)
+================================================================================
+
+BACKGROUND
+----------
+Discovered while diagnosing the snapshot pruning issue. Added debug logging to
+patcher.py but saw no output in journalctl. Investigation revealed wsgi.py had no
+logging.basicConfig() call — all log output from the web service was silently dropped.
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+None — once identified the fix was obvious.
+
+WHAT WORKED
+-----------
+Root cause: wsgi.py (gunicorn entry point) had no logging configuration. main.py
+(monitor entry point) had logging.basicConfig() with FileHandler + StreamHandler.
+wsgi.py had neither. All log.info(), log.error() etc. from patcher.py, webapp.py,
+and every other module imported by the web service were silently dropped since
+the gunicorn migration.
+
+Fix: added logging.basicConfig() to wsgi.py matching main.py pattern exactly:
+  - level=logging.INFO
+  - format: "%(asctime)s [%(levelname)s] %(name)s — %(message)s"
+  - handlers: FileHandler(LOG_PATH) + StreamHandler(sys.stdout)
+  - LOG_PATH: same logs/netwatch.log file as monitor service
+
+Both services now write to the same log file and both appear in journalctl.
+Shipped in wsgi.py in v3.3.31 package.
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+None.
+
+
+================================================================================
+ARC: Snapshot Pruning Fix (v3.3.32)
+================================================================================
+
+BACKGROUND
+----------
+User noticed 44 snapshots in ~/netwatch/snapshots/ with SNAPSHOT_RETENTION=10.
+Pruning had never worked — snapshots had been accumulating since v3.3.0 (March 10).
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Multiple dead ends before finding root cause:
+
+1. Suspected ownership mismatch — confirmed all snapshots owned by netwatch-svc.
+   Not the problem.
+
+2. Suspected permissions on snapshots/ directory — confirmed drwxrwx--- owned by
+   netwatch-svc. netwatch-svc has full write access. Not the problem.
+
+3. Simulated pruning logic in Python — confirmed the algorithm is correct.
+   Not the problem.
+
+4. Tested interactive deletion as mboynton — failed with Permission denied.
+   Expected (snapshots/ has no group write for mboynton). Not a bug.
+
+5. Tested interactive deletion as netwatch-svc — succeeded. Not the problem.
+
+6. Checked for early returns in _take_snapshot before pruning block — none found.
+
+7. Added debug logging to patcher pruning block — no output in journalctl.
+   Led to discovery of wsgi.py logging bug (fixed first in v3.3.31).
+
+8. After wsgi.py fix, reran package install — pruning log lines appeared.
+   Revealed: "name 'config' is not defined" — the actual root cause.
+
+WHAT WORKED
+-----------
+Root cause: patcher.py used getattr(config, "SNAPSHOT_RETENTION", 10) in the pruning
+block without importing config at the module level. When patcher is imported by
+webapp.py, config happens to be in the shared namespace and the call works
+incidentally. But this reliance is not guaranteed and had been failing silently since
+deployment — masked by the original bare "except Exception: pass".
+
+Fix: added "import config" to patcher.py imports section alongside other imports.
+
+Debug logging added in v3.3.30-v3.3.32 was cleaned up in v3.3.33. Final pruning
+block retains permanent error logging (failures now visible in journalctl) but
+removes the verbose info lines used for diagnosis.
+
+On first install after fix, pruning ran and deleted 34 old snapshots, leaving 10.
+Confirmed by user.
+
+Files changed:
+- patcher.py: added "import config" to imports; replaced bare except+pass with
+  logged error handling in pruning block.
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- rollback.sh does not prune snapshots after restoring. Pruning only runs when
+  patcher takes a new snapshot. If many rollbacks are performed without package
+  installs, snapshots can accumulate. This is a known gap, not currently a backlog
+  item — low priority since rollbacks are rare.

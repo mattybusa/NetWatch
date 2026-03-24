@@ -8,12 +8,13 @@
 import os
 import re
 import logging
+import structlog
 import sqlite3
 from datetime import datetime
 
 NETWATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 
-log = logging.getLogger("netwatch.config_validator")
+log = structlog.get_logger().bind(service="web")
 
 DB_PATH     = os.path.join(NETWATCH_DIR, "netwatch.db")
 CONFIG_PATH = os.path.join(NETWATCH_DIR, "config.py")
@@ -55,7 +56,7 @@ def _append_key_to_config(key, default, description):
         f.write(f"\n\n# {description}\n# Added automatically by config validator\n")
         f.write(f"{key} = {value_str}\n")
 
-    log.info(f"Config validator: added missing key {key} = {value_str}")
+    log.info("Config validator: added missing key", key=key, value=value_str)
 
 
 def _record_notification(conn, key, message):
@@ -83,7 +84,7 @@ def validate():
         conn.row_factory = sqlite3.Row
         _init_notifications_table(conn)
     except Exception as e:
-        log.error(f"Config validator: cannot connect to DB: {e}")
+        log.error("Config validator: cannot connect to DB", error=str(e))
         return []
 
     existing_keys = _get_config_keys()
@@ -102,7 +103,7 @@ def validate():
             msg = f"New setting added: {label} ({key}). Default value applied — review in Config Editor."
             _record_notification(conn, key, msg)
             notifications.append(msg)
-            log.info(f"Config validator: added missing key {key}")
+            log.info("Config validator: added missing key", key=key)
             continue
 
         # Key exists — no further action needed here.
@@ -125,7 +126,7 @@ def get_pending_notifications():
         conn.close()
         return [dict(r) for r in rows]
     except Exception as e:
-        log.error(f"Config validator: get_pending_notifications failed: {e}")
+        log.error("Config validator: get_pending_notifications failed", error=str(e))
         return []
 
 
@@ -193,7 +194,7 @@ def remove_legacy_email_keys():
     if removed:
         with open(CONFIG_PATH, "w") as f:
             f.writelines(new_lines)
-        log.info(f"Removed legacy email keys from config.py: {set(removed)}")
+        log.info("Removed legacy email keys from config.py", keys=list(removed))
 
 
 def migrate_email_keys():
@@ -233,7 +234,7 @@ def migrate_email_keys():
     if smtp_user and smtp_user not in PLACEHOLDER and gmail_user in PLACEHOLDER:
         cfg = set_val(cfg, "GMAIL_USER", smtp_user)
         changed = True
-        log.info(f"Migrated SMTP_USER → GMAIL_USER: {smtp_user}")
+        log.info("Migrated SMTP_USER to GMAIL_USER", smtp_user=smtp_user)
 
     # Migrate SMTP_PASSWORD → GMAIL_APP_PASSWORD
     smtp_pass  = get_val("SMTP_PASSWORD")
@@ -241,7 +242,7 @@ def migrate_email_keys():
     if smtp_pass and smtp_pass not in PLACEHOLDER and gmail_pass in PLACEHOLDER:
         cfg = set_val(cfg, "GMAIL_APP_PASSWORD", smtp_pass)
         changed = True
-        log.info("Migrated SMTP_PASSWORD → GMAIL_APP_PASSWORD")
+        log.info("Migrated SMTP_PASSWORD to GMAIL_APP_PASSWORD")
 
     # Migrate ALERT_EMAIL → ALERT_TO
     alert_email = get_val("ALERT_EMAIL")
@@ -249,7 +250,7 @@ def migrate_email_keys():
     if alert_email and alert_email not in PLACEHOLDER and alert_to in PLACEHOLDER:
         cfg = set_val(cfg, "ALERT_TO", alert_email)
         changed = True
-        log.info(f"Migrated ALERT_EMAIL → ALERT_TO: {alert_email}")
+        log.info("Migrated ALERT_EMAIL to ALERT_TO", alert_email=alert_email)
 
     # Migrate ALERT_FROM → GMAIL_USER if still needed
     alert_from = get_val("ALERT_FROM")
@@ -257,7 +258,7 @@ def migrate_email_keys():
     if alert_from and alert_from not in PLACEHOLDER and gmail_user2 in PLACEHOLDER:
         cfg = set_val(cfg, "GMAIL_USER", alert_from)
         changed = True
-        log.info(f"Migrated ALERT_FROM → GMAIL_USER: {alert_from}")
+        log.info("Migrated ALERT_FROM to GMAIL_USER", alert_from=alert_from)
 
     if changed:
         with open(CONFIG_PATH, "w") as f:
@@ -274,7 +275,7 @@ def cleanup_false_positives():
         conn.commit()
         conn.close()
     except Exception as e:
-        log.error(f"cleanup_false_positives failed: {e}")
+        log.error("cleanup_false_positives failed", error=str(e))
 
 
 def get_unconfigured_keys():
@@ -305,5 +306,5 @@ def get_unconfigured_keys():
             if key in editor_keys and value in UNCONFIGURED_VALUES:
                 unconfigured.add(key)
     except Exception as e:
-        log.error(f"get_unconfigured_keys failed: {e}")
+        log.error("get_unconfigured_keys failed", error=str(e))
     return unconfigured

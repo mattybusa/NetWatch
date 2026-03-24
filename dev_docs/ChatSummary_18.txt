@@ -1,0 +1,165 @@
+NETWATCH CHAT SUMMARY
+=====================
+Session: 18
+Date: 2026-03-15
+Starting version: v3.3.38 (context doc authoritative; zip label matched)
+Ending version: v3.3.38 (no NetWatch code changes this session)
+Focus: Grafana dashboard for NetWatch logs — design brief, panel build, layout.
+
+SCOPE NOTE: Single focused arc. No NetWatch packages installed. All work was
+in Grafana on ops-pi. One expanded summary produced.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- Session start note: Session 17 closeout was delivered as individual files
+  rather than a patcher package, so the context doc timestamped backup did not
+  occur (patcher creates the backup; updater/drag-and-drop does not). The
+  updater.py context doc backup item was already in the backlog — confirmed
+  still open. Session 18 closeout built as a proper patcher package.
+
+- Grafana dashboard for NetWatch logs — COMPLETE
+  (see Feature_GrafanaDashboard.txt)
+
+  Design brief produced first. Field names verified via Grafana Explore before
+  building any panels. Confirmed schema from a live health_check log line:
+    service, event, level, timestamp, lan, wan, wifi, dns,
+    latency_ms, packet_loss, healthy
+  Reset event fields confirmed from monitor.py code read:
+    event="reset_performed", reset_type, reason
+    event="initiating_reset", reset_type, trigger
+
+  Six panels built:
+
+  Panel 1 — Health Check Latency (Time series)
+    avg(avg_over_time({host="netwatch-pi"} | json | event="health_check"
+      | unwrap latency_ms | __error__="" [1m]))
+    Unit: milliseconds (ms). Single averaged line. Confirmed working (~20ms).
+
+  Panel 2 — Packet Loss (Time series)
+    avg(avg_over_time({host="netwatch-pi"} | json | event="health_check"
+      | unwrap packet_loss | __error__="" [1m]))
+    Unit: Percent (0-100). Flat at 0 on healthy system.
+
+  Panel 3 — Reset Events (Logs panel)
+    {host="netwatch-pi"} | json | event="reset_performed"
+    Shows raw structured log lines. No data currently (no resets — correct).
+
+  Panel 4 — Errors & Warnings (Time series)
+    sum(count_over_time({host="netwatch-pi"} | json
+      | level=~"error|warning" [5m]))
+    No value set to 0. No data currently (clean system — correct).
+
+  Panel 5 — Monitor Service - Last Seen (Stat)
+    {host="netwatch-pi"} | json | service="monitor"
+    Show: Last, Fields: Time. Confirmed showing 2026-03-15 02:37:19.
+
+  Panel 6 — Web Service - Last Seen (Stat)
+    {host="netwatch-pi"} | json | service="web"
+    Show: Last, Fields: Time. Confirmed showing 2026-03-15 02:37:22.
+
+  Panel 7 — Unhealthy Check Rate (Stat)
+    sum(count_over_time({host="netwatch-pi"} | json | event="health_check"
+      | healthy="false" [6h]))
+    / sum(count_over_time({host="netwatch-pi"} | json
+      | event="health_check" [6h])) * 100
+    Unit: Percent (0-100). Confirmed showing 0% on healthy system.
+
+  Layout: Two rows.
+    Row 1: Health Check Latency + Packet Loss (side by side, full width)
+    Row 2: Reset Events (widest) + Errors & Warnings + Unhealthy Check Rate
+           + Monitor Last Seen + Web Last Seen
+
+  Dashboard saved as "NetWatch" in Grafana on ops-pi.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- Initial latency query without aggregation wrapper returned No data. Root
+  cause: unwrap requires a range aggregation function (avg_over_time) for
+  Loki to produce a metric series that Grafana can plot. Fixed by wrapping
+  in avg_over_time([1m]) then collapsing multiple series with outer avg().
+
+- Initial latency query produced dozens of legend entries labeled "Latency"
+  instead of one. Root cause: Loki returns one series per unique label set.
+  Fixed by wrapping in avg() to collapse all series into a single line.
+
+
+DECISIONS MADE
+--------------
+- Design brief first: field names verified via Explore before building any
+  panels. Correct approach — the unwrap field names must match exactly.
+
+- avg(avg_over_time([1m])) pattern for metric panels: inner function buckets
+  by 1-minute window, outer avg collapses multiple Loki streams into one line.
+  This is the correct pattern for NetWatch metric panels going forward.
+
+- Logs panel type for Reset Events: raw structured lines are more useful than
+  a chart for reset events — timestamp and reset_type visible at a glance.
+
+- No value = 0 for Errors & Warnings: displays 0 instead of "No data" on a
+  clean system, which is more informative for a health metric.
+
+- Dashboard-level time range selector is the primary interaction model. Per-
+  panel time overrides are static design-time settings, not dynamic user
+  controls. Dashboard selector is sufficient for operational use.
+
+- Panel count ended at 7 (not 6 as originally planned) — Monitor Last Seen
+  and Web Last Seen are two separate stat panels.
+
+- End-of-session context doc updated at v3.3.38 (no version bump — no
+  NetWatch code changes this session).
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] Promtail max_age: currently 1h. Increase to 12h or 24h once
+  pipeline confirmed stable over several days.
+
+- [PENDING] Weekly Pi update cron (v3.3.12): still not confirmed fired in
+  the wild. Verify: crontab -l | grep netwatch-pkg-update
+
+- [PENDING] Web service silent-exit after delayed restart: still unconfirmed
+  potential bug. Watch journalctl on future installs.
+
+- [PENDING] API versioning (/api/v1/) retrofit: decided Session 15, not built.
+
+- [PENDING] 9 PENDING DISCUSSION items in Audit_Findings.txt remain open.
+
+- [UNVERIFIED] Dashboard appearance on wider time ranges not tested — panels
+  were built and verified on Last 6 hours. Behavior on 7D/30D not confirmed.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Grafana dashboard for NetWatch logs (7 panels, confirmed working)
+
+No new items added.
+No items removed.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_GrafanaDashboard.txt — Full detail on all 7 panels: queries, panel
+  types, settings, failed approaches, and layout.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None. No new hard-learned lessons this session. The unwrap/aggregation
+pattern is documented in the expanded summary but is not a project-wide
+gotcha — it's Grafana/Loki-specific and the expanded summary is the right
+home for it.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.38 (unchanged)
+- All NetWatch services running normally
+- Grafana dashboard: operational, saved as "NetWatch" on ops-pi
+- Next task: open — top candidates per backlog:
+    System log viewer (pkg_update.log tail in Admin page)
+    updater.py context doc backup
+    Promtail max_age increase (once pipeline stable)
+    Kiosk display

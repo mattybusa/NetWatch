@@ -1,0 +1,180 @@
+NETWATCH CHAT SUMMARY — SESSION 26
+====================================
+Date: 2026-03-21
+Starting version: v3.3.77 (context doc authoritative; zip label matched)
+Ending version: v3.3.81
+Summary: Bug fix and feature session addressing eight reported issues across the
+  logs page, admin page, config editor, security page, alert subscriptions, and
+  backup infrastructure. Four packages shipped plus two direct dev doc uploads.
+
+SCOPE NOTE: This session covered 10 distinct arcs. Expanded summaries produced for
+  all major items. Minor UI fixes grouped in Feature_MinorFixesSession_26.txt.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+v3.3.78 — System log line count and alert history fixes
+  (see Feature_MinorFixesSession_26.txt — "System Log Line Count")
+  Root cause of ~5 visible log lines identified: http_request entries from the
+  5-second auto-refresh dominated the raw buffer; Web Requests unchecked by default
+  left only ~5 non-web lines visible. Fix: always fetch 2000 raw lines; 100/300/500
+  selector now controls post-filter line count via slice(-currentLines). Active button
+  highlight added to line count buttons. Alert History count selector (10/20/50/100)
+  added, replacing hardcoded "last 50" heading. Admin page System Info card gap fixed
+  (missing mb-4). Pi Package Update Log now auto-loads on page open if section is
+  expanded (was load-on-first-click-only).
+
+v3.3.79 — System log scroll anchor
+  (see Feature_MinorFixesSession_26.txt — "Scroll Anchor")
+  applyFilters() was unconditionally scrolling to bottom on every auto-refresh, making
+  it impossible to scroll up and read the log. Fix: check scroll position before
+  re-rendering; only auto-scroll if within 40px of bottom.
+
+v3.3.80 — Config editor, security period filter, role-based alerts, daily summary
+  (see Feature_MinorFixesSession_26.txt — "Config Editor Warning",
+   "Export Data Dynamic Text", "Security Period Filter",
+   "Role-Based Alert Filtering", "Daily Summary Implementation")
+  Five separate fixes in one package:
+  1. Config editor false-positive warnings: "Could not find/replace key" fired for
+     every unchanged field on form submit. Fix: distinguish regex-matched-but-unchanged
+     (debug level) from regex-no-match (still a warning).
+  2. Export Data card: "Health exports cover 30 days; reset exports cover 90 days" was
+     hardcoded. webapp.py admin() now passes keep_health_days/keep_reset_days to template.
+  3. Security page period filter: setPeriod() only updated stat cards, not the event log.
+     Fix: setPeriod() calls loadEvents(); loadEvents() passes since= to API; get_events()
+     in security_log.py accepts and applies since= parameter.
+  4. Role-based alert type filtering: Monitor and Guest now see only network group in
+     My Account alert subscriptions. Admin and Operator see all groups. Filtered via
+     Jinja current_user.role_name at render time.
+  5. send_daily_summary() implemented: function was called in main.py daily at 8am but
+     never defined in alerts.py -- silent AttributeError crash every day. Now sends
+     24h/7d uptime, today's reset count, current latency and packet loss via send_alert().
+
+v3.3.81 — Backup email delivery logging
+  (see Feature_BackupDeliveryLogging.txt)
+  New backup_notify.py logs backup email sends to alert_deliveries table. Both
+  backup.sh and backup_db.sh call it after send_backup_email with success/failure
+  status. backup_db and backup_full added to ALERT_TYPES as "system" group
+  (audit-only, not subscribable). Friendly labels added to Delivery History.
+  pkg_update.sh also fixed to use venv Python for pkg_update_alert.py (same latent bug).
+
+Direct dev doc uploads (no package):
+  SystemSetup.txt: added Session 26 note to GPG section — keyring ownership can drift,
+  recovery commands documented.
+  AI_Session_Process.txt: added explicit rule to keep SystemSetup.txt current during
+  sessions — any manual Pi step must be documented that session without being asked.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- v3.3.81 first install: backup_notify.py failed with ModuleNotFoundError on structlog.
+  Cause: shell scripts were using bare python3 instead of the venv Python. backup_notify.py
+  imports alert_subscribers which imports structlog (venv-only). Fix: changed all three
+  scripts (backup.sh, backup_db.sh, pkg_update.sh) to use
+  "$NETWATCH_DIR/venv/bin/python3" for calls to Python helpers that import NetWatch
+  modules. v3.3.81 was rebuilt and reinstalled. Confirmed working on second run.
+
+- GPG keyring permissions had drifted on the Pi: backup_db.sh reported "unsafe ownership"
+  and "Permission denied" on /home/mboynton/netwatch/.gnupg. Root cause: ownership had
+  changed from the Session 19 setup. Manual fix: sudo chown -R netwatch-svc:netwatch-svc
+  /home/mboynton/netwatch/.gnupg. Unrelated to v3.3.81 code; would have been failing
+  before this session.
+
+- Initial diagnosis of the config editor warning was incorrect: concluded it was a
+  value-unchanged false positive (new_content == content). This was correct for the
+  mechanism but the full log showed ALL keys warning simultaneously, which means every
+  field submitted was treated as unchanged. Re-analysis confirmed: the form submits all
+  fields in the section; every field already at its correct value triggers the warning;
+  KEEP_HEALTH_DAYS (the one actually changed) was NOT in the warning list, confirming
+  it succeeded. Diagnosis was ultimately correct; initial framing was just incomplete.
+
+
+DECISIONS MADE
+--------------
+- Backup delivery logging: Approach A chosen (shell script calls Python helper to log
+  to DB; email send stays in shell). backup_db and backup_full use group "system" --
+  not in any role's ALLOWED_GROUPS, so never appear in subscription preferences.
+  Audit-only, not subscribable. This matches the design intent: backup emails are
+  operational, not user-configurable alerts.
+
+- Venv Python required for any helper that imports NetWatch modules: bare python3 is
+  acceptable for one-liners that only import config (stdlib-compatible), but anything
+  that imports alert_subscribers, alerts, database, etc. must use venv/bin/python3.
+  Rule added to Gotchas.txt.
+
+- SystemSetup.txt maintenance: established as a during-session responsibility, not an
+  end-of-session one. Added explicitly to AI_Session_Process.txt "During a Session"
+  rules. Any manual Pi step must be documented that session without waiting to be asked.
+
+- send_daily_summary() scope: sends 24h uptime, 7d uptime, today's reset count,
+  current latency, and packet loss. Uses existing database functions get_uptime_stats()
+  and get_latest_health(). Sends via normal send_alert() path to daily_summary
+  subscribers only.
+
+- Security period filter: passes since= timestamp computed client-side from
+  activePeriodHours. server-side get_events() appends a WHERE timestamp >= ? clause
+  when since is provided. limit parameter still applies within the period window.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [UNVERIFIED] daily_summary will fire tomorrow at 8am. First live run not yet
+  confirmed. Will know next day whether the send completes and appears in Delivery
+  History.
+
+- [UNVERIFIED] pkg_update alert delivery: the venv fix means pkg_update_alert.py now
+  has access to structlog and alert_subscribers. Previous cron runs with bare python3
+  may have been silently failing to log deliveries. Will be confirmed on next scheduled
+  run (Sunday 03:00).
+
+- utcnow() deprecation warning in backup scripts (Python 3.12): appears in backup email
+  send heredoc. Harmless, deferred. Not a new issue from this session.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session (all identified and resolved within session):
+- System log line count selector fixed -- post-filter count, active highlight (v3.3.78)
+- System log scroll anchor -- preserves position when scrolled up (v3.3.79)
+- Alert History count selector -- 10/20/50/100 (v3.3.78)
+- Admin page System Info gap fixed -- missing mb-4 (v3.3.78)
+- Pi Package Update Log auto-loads on page open (v3.3.78)
+- Config editor false-positive "could not find/replace" warnings suppressed (v3.3.80)
+- Export Data card days now dynamic from config (v3.3.80)
+- Security page period buttons filter event log table (v3.3.80)
+- Alert subscriptions in My Account filtered by role (v3.3.80)
+- send_daily_summary() implemented -- was silently crashing daily (v3.3.80)
+- Backup email delivery logged to Delivery History (v3.3.81)
+- pkg_update.sh venv fix -- was also silently failing to log deliveries (v3.3.81)
+
+No new backlog items added.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_MinorFixesSession_26.txt — Covers six arcs: System Log Line Count (v3.3.78),
+  Scroll Anchor (v3.3.79), Config Editor Warning (v3.3.80), Export Data Dynamic Text
+  (v3.3.80), Security Period Filter (v3.3.80), Role-Based Alert Filtering (v3.3.80),
+  Daily Summary Implementation (v3.3.80).
+Feature_BackupDeliveryLogging.txt — Full detail on backup_notify.py, ALERT_TYPES
+  additions, shell script changes, venv fix, and GPG keyring recovery (v3.3.81).
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during this dev session per process:
+- SHELL SCRIPTS CALLING PYTHON HELPERS THAT IMPORT NETWATCH MODULES MUST USE VENV
+  (new) -- bare python3 fails with ModuleNotFoundError on structlog and other
+  venv-only packages. Use "$NETWATCH_DIR/venv/bin/python3" for any helper that imports
+  beyond stdlib + config.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.81
+- All services running normally
+- Backup email delivery confirmed working (manual test run confirmed)
+- Next task: open -- top candidates per backlog:
+    Package installer confirm row spacing (Confirm step touches box below)
+    Backup Manager (browse/restore local archive, configurable retention)
+    MFA (design brief first -- TOTP preferred, SMS/email fallback)

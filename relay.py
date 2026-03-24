@@ -11,11 +11,12 @@
 
 import time
 import logging
+import structlog
 
 import config
 import database
 
-log = logging.getLogger("netwatch.relay")
+log = structlog.get_logger().bind(service="monitor")
 
 # Try to import GPIO. If unavailable (e.g. not on a Pi), run in simulation mode.
 try:
@@ -23,7 +24,7 @@ try:
     GPIO_AVAILABLE = True
 except ImportError:
     GPIO_AVAILABLE = False
-    log.warning("RPi.GPIO not available — relay module running in SIMULATION mode")
+    log.warning("RPi.GPIO not available: relay running in simulation mode")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -37,7 +38,7 @@ def init():
     Called once at program start from main.py.
     """
     if not GPIO_AVAILABLE:
-        log.info("[SIM] GPIO init skipped")
+        log.info("GPIO init skipped (simulation)")
         return
 
     GPIO.setmode(GPIO.BCM)
@@ -49,7 +50,7 @@ def init():
     GPIO.setup(config.RELAY_MODEM,  GPIO.OUT, initial=off_state)
     GPIO.setup(config.RELAY_ROUTER, GPIO.OUT, initial=off_state)
 
-    log.info(f"Relay GPIO initialized — Modem: GPIO{config.RELAY_MODEM}, Router: GPIO{config.RELAY_ROUTER}")
+    log.info("Relay GPIO initialized", modem_gpio=config.RELAY_MODEM, router_gpio=config.RELAY_ROUTER)
 
 
 def cleanup():
@@ -71,7 +72,7 @@ def _relay_on(pin):
     if GPIO_AVAILABLE:
         state = GPIO.LOW if config.RELAY_ACTIVE_LOW else GPIO.HIGH
         GPIO.output(pin, state)
-    log.debug(f"Relay energized: GPIO {pin} (device power CUT)")
+    log.debug("Relay energized: device power cut", gpio=pin)
 
 
 def _relay_off(pin):
@@ -81,7 +82,7 @@ def _relay_off(pin):
     if GPIO_AVAILABLE:
         state = GPIO.HIGH if config.RELAY_ACTIVE_LOW else GPIO.LOW
         GPIO.output(pin, state)
-    log.debug(f"Relay de-energized: GPIO {pin} (device power RESTORED)")
+    log.debug("Relay de-energized: device power restored", gpio=pin)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -99,13 +100,13 @@ def cycle_modem(triggered_by="auto"):
       3. Restore modem power
       4. Wait MODEM_BOOT_DELAY for modem to authenticate with ISP
     """
-    log.info(f"=== MODEM RESET (triggered by: {triggered_by}) ===")
+    log.info("Modem reset started", triggered_by=triggered_by)
 
     _relay_on(config.RELAY_MODEM)
     time.sleep(config.POWER_CYCLE_OFF_TIME)
     _relay_off(config.RELAY_MODEM)
 
-    log.info(f"Modem power restored. Waiting {config.MODEM_BOOT_DELAY}s for ISP authentication...")
+    log.info("Modem power restored, waiting for ISP auth", delay_s=config.MODEM_BOOT_DELAY)
     time.sleep(config.MODEM_BOOT_DELAY)
 
     database.log_reset("modem_only", "Modem power cycle", triggered_by, success=True)
@@ -124,13 +125,13 @@ def cycle_router(triggered_by="auto"):
       3. Restore router power
       4. Wait ROUTER_BOOT_DELAY for router and AP to come back up
     """
-    log.info(f"=== ROUTER/AP RESET (triggered by: {triggered_by}) ===")
+    log.info("Router/AP reset started", triggered_by=triggered_by)
 
     _relay_on(config.RELAY_ROUTER)
     time.sleep(config.POWER_CYCLE_OFF_TIME)
     _relay_off(config.RELAY_ROUTER)
 
-    log.info(f"Router power restored. Waiting {config.ROUTER_BOOT_DELAY}s for router and AP to boot...")
+    log.info("Router power restored, waiting for boot", delay_s=config.ROUTER_BOOT_DELAY)
     time.sleep(config.ROUTER_BOOT_DELAY)
 
     database.log_reset("router_only", "Router/AP power cycle", triggered_by, success=True)
@@ -152,7 +153,7 @@ def cycle_full(triggered_by="auto", reason="Network down"):
       6. Restore router power
       7. Wait ROUTER_BOOT_DELAY for router and AP to come back up
     """
-    log.info(f"=== FULL RESET (triggered by: {triggered_by}) — Reason: {reason} ===")
+    log.info("Full reset started", triggered_by=triggered_by, reason=reason)
 
     # Cut modem first, then router
     _relay_on(config.RELAY_MODEM)
@@ -162,12 +163,12 @@ def cycle_full(triggered_by="auto", reason="Network down"):
 
     # Restore modem first — must be online before router tries to use it
     _relay_off(config.RELAY_MODEM)
-    log.info(f"Modem power restored. Waiting {config.MODEM_BOOT_DELAY}s for ISP authentication...")
+    log.info("Modem power restored, waiting for ISP auth", delay_s=config.MODEM_BOOT_DELAY)
     time.sleep(config.MODEM_BOOT_DELAY)
 
     # Then restore router
     _relay_off(config.RELAY_ROUTER)
-    log.info(f"Router power restored. Waiting {config.ROUTER_BOOT_DELAY}s for full boot...")
+    log.info("Router power restored, waiting for full boot", delay_s=config.ROUTER_BOOT_DELAY)
     time.sleep(config.ROUTER_BOOT_DELAY)
 
     database.log_reset("full_reset", reason, triggered_by, success=True)

@@ -1,0 +1,132 @@
+NETWATCH CHAT SUMMARY — SESSION 25
+====================================
+Date: 2026-03-21
+Starting version: v3.3.69
+Ending version: v3.3.77
+Summary: Three dashboard fixes — equalized Last Reset and System Health card widths,
+  fixed appearance popover layout one-click bug, and fixed row 2->3 gap to match
+  row 1->2. The gap fix required 8 packages and browser-level measurement to resolve.
+
+SCOPE NOTE: Small session. Two minor UI adjustments, one bug fix, and one extended
+  debugging arc on the row gap. No expanded summaries required.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+v3.3.70 — Three changes (index.html + base.html, web restart):
+
+  1. Last Reset Event and System Health card equalization:
+     Last Reset was flex:5, System Health was flex:4. Both changed to flex:4.
+     Auto Resets remains flex:3. Cards now render at equal width.
+
+  2. Appearance popover layout bug fix (base.html):
+     When a custom layout was active, clicking a system layout option required two
+     clicks — first click appeared to do nothing, second click applied the layout.
+     Root cause: setLayout() saved the system layout pref but did not clear the
+     active custom_layout pref. On reload, the server still saw active_custom_layout
+     set and injected the custom layout CSS, overriding the system layout.
+     Fix: setLayout() now calls /api/preferences/custom_layout with name:"" before
+     saving the system layout — same pattern setColorScheme() already used for colors.
+     Confirmed working by user.
+
+  3. Row 2->3 gap initial attempt: margin-top:0 on flex div (overcorrected — zero gap).
+
+v3.3.71 through v3.3.75 — Row gap iteration arc (5 more packages, all incorrect):
+  v3.3.71: margin-top:1.5rem — doubled the gap (mb-4=20px + 1.5rem=24px).
+  v3.3.72: removed mb-4 from uptime row — gap disappeared.
+  v3.3.73: restored mb-4, no margin-top — still zero (mb-4 overridden by .row rule).
+  v3.3.74: margin-top:calc(var(--gap)*-0.5) — still zero.
+  v3.3.75: margin-top:-8px — still zero.
+
+v3.3.76 — Row gap fix confirmed working (index.html, web restart):
+  Root cause confirmed by measuring actual rendered card positions via browser JS
+  (getBoundingClientRect() on .nw-card elements):
+    Row 1->2 gap: 8px (from col-md-6 padding: 8px bottom on row 1's column wrappers)
+    Row 2->3 gap: 0px (flex children have no column wrapper, no padding)
+  Fix: padding-top:8px on the flex container. Confirmed working by user in comfortable
+  and dashboard-first layouts.
+
+v3.3.77 — Compact layout fix (index.html, web restart):
+  User reported the gap was too large in compact layout. Root cause: compact layout
+  sets --gap:10px, so .row>* col padding is 5px (calc(10px*0.5)), but padding-top was
+  hardcoded at 8px — too large for compact.
+  Fix: changed padding-top:8px to padding-top:calc(var(--gap,16px)*0.5), matching the
+  exact formula used by .row>* in base.html. Correct in all layouts:
+    Comfortable/Dashboard-first/Sidebar: 16px * 0.5 = 8px
+    Compact: 10px * 0.5 = 5px
+  Confirmed working by user.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+Six consecutive wrong packages (v3.3.70 through v3.3.75) trying to fix row gap:
+
+The core misunderstanding: multiple theories about what was creating row 1->2 gap were
+wrong. The real cause was never the .row margin-bottom or mb-4 class — it was the
+padding on the .row>* column wrappers (8px on all sides). The flex div's children have
+no col wrappers, so they have zero padding on top. Browser measurement was the only
+way to confirm this.
+
+Key wrong theories tried:
+- margin-top:0 removed all gap (zero, not equal)
+- margin-top:1.5rem doubled the gap (mb-4 was also adding spacing — except it wasn't,
+  because .row rule overrides mb-4 in source order)
+- removing mb-4 from uptime row eliminated gap entirely
+- margin-top:-8px and calc variants had no effect because the row's negative margin
+  was already accounted for differently than expected
+
+Root cause of the confusion: in base.html's inline <style> block, .row is defined
+AFTER .mb-4 (line 59 vs line 49). CSS source order means .row's margin shorthand
+(-8px all sides) overrides mb-4's margin-bottom:20px on any element with both classes.
+So mb-4 has never worked on .row elements. The apparent row 1->2 gap was never from
+mb-4 — it was always from col wrapper padding.
+
+
+DECISIONS MADE
+--------------
+- padding-top:calc(var(--gap,16px)*0.5) is the correct and permanent formula for the
+  flex row container. It mirrors .row>* exactly and auto-adjusts per layout. Do not
+  change to a hardcoded value or margin-based approach.
+
+- Browser measurement (getBoundingClientRect) via Claude in Chrome is the right tool
+  when CSS spacing behavior is ambiguous. Don't ship theories — measure first.
+
+- New backlog item added: package installer confirm row spacing (the "Confirm" step row
+  in the install progress UI touches the box below it).
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+None from this session.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Dashboard: Last Reset and System Health card width equalized (v3.3.70)
+- Dashboard: Appearance popover one-click layout selection bug fixed (v3.3.70)
+- Dashboard: Row 2->3 gap matched to row 1->2 (v3.3.76/v3.3.77)
+
+Added this session:
+- Package installer confirm row spacing — "Confirm" step row touches box below it
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+None. All detail captured in this base summary.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None. The mb-4/.row source order override is documented in this summary and
+CurrentTask.txt. The pattern (measure before theorizing) is already in Gotchas.txt
+under DO NOT DIAGNOSE FROM SURFACE CODE READS.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.77
+- All services running normally
+- Dashboard confirmed correct in all layouts (user verified)
+- Next task: package installer confirm row spacing, or Backup Manager, or MFA

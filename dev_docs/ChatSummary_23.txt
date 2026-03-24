@@ -1,0 +1,181 @@
+NETWATCH CHAT SUMMARY — SESSION 23
+====================================
+Date: 2026-03-20
+Starting version: v3.3.59 (context doc); zip label matched
+Ending version: v3.3.61
+Summary: Log/Loki audit, SystemSetup.txt, gunicorn lifecycle JSON fix (two packages),
+  install.sh gap fixes, Pi Package Update Log viewer in Admin, session number in
+  package installer release notes.
+
+SCOPE NOTE: This session was heavier on investigation and discussion than code.
+  Multiple questions about log formats, what's on the Pi, and distributable readiness
+  drove a comprehensive audit before any code was written. Two packages shipped
+  (v3.3.60, v3.3.61) plus a doc-only SystemSetup.txt upload.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+DISCUSSION — Complete log/Loki audit:
+  Full inventory of every log source on the NetWatch Pi, what format it arrives
+  in Loki, and why. Established the rule: only log sources controlled by NetWatch
+  code are expected to emit JSON. Third-party system services (SSH, systemd, OS,
+  Node Exporter, Promtail) emit plain text — this is normal and acceptable.
+  The only controllable gap identified was gunicorn lifecycle messages.
+
+  Also identified that LOG_FORMAT defaults to "pretty" in code but user confirmed
+  the Pi is set to "json" in config.py. Grafana dashboard queries confirmed working.
+
+SystemSetup.txt (new dev_docs file, uploaded directly — no package):
+  Complete reference for every manual configuration step ever performed on the
+  NetWatch Pi outside a patcher package. Sections cover:
+  - Base system: OS, networking, directory permissions, service account, sudoers,
+    Python venv, systemd services, GPG encryption, HTTPS/TLS, Pi package update cron
+  - Observability: Promtail full install procedure, Node Exporter install
+  - ops-pi service reference (Gitea, Prometheus, Loki, Grafana, Node Exporter)
+  - Known gaps in install.sh (GAP-1 through GAP-7) with session references
+  - Log format reference table
+  - First-run wizard future requirements
+  Purpose: authoritative reference for distributable readiness and for future
+  Claude sessions that need to understand full Pi state.
+
+v3.3.60 — Four changes in one package (web restart only):
+  1. gunicorn.conf.py: StructlogAccessLogger now overrides error logger methods
+     (debug/info/warning/error/critical/exception) in addition to access(). Intent:
+     route gunicorn lifecycle messages through structlog as JSON. SHIPPED but did not
+     work — structlog is unconfigured when gunicorn.conf.py loads (before wsgi.py
+     runs _configure_structlog()). Lifecycle messages were silently dropped.
+     Fixed in v3.3.61.
+
+  2. install.sh gaps fixed:
+     GAP-1: chmod 751 /home/<user> added after sudoers block — service traversal fix
+       now automatic on fresh installs.
+     GAP-2: Sudoers without .service suffix added — both "netwatch-web.service" and
+       "netwatch-web" forms now written. Prevents patcher restarts being silently
+       blocked on a fresh install.
+     GAP-3: structlog and packaging added to pip install block.
+     GAP-5: chown netwatch-svc:netwatch-svc ~/backups added after mkdir.
+
+  3. webapp.py: New /api/admin/pkg_update_log route. Reads last N lines of
+     pkg_update.log (default 50, max 500). Returns {status, lines, last_modified}.
+     Handles missing file gracefully with explanatory message.
+     admin.html: New "Pi Package Update Log" collapsible section at bottom of Admin
+     page. Shows last-modified timestamp, line count selector (50/100/200/500),
+     Refresh button, pre-formatted log-box. Loads on first expand only.
+     Confirmed working by user — March 18 run content visible.
+
+  4. patcher.py: "session" field support in manifest.json and release notes.
+     - _ensure_patch_log_table(): session TEXT column added to patch_log schema
+       and to ALTER TABLE migration block (safe for existing installs).
+     - _log_patch(): session parameter added, read from manifest.get("session").
+     - apply_package(): passes str(manifest["session"]) if present.
+     - generate_release_notes_html(): session_badge rendered in h1 header as
+       "Session N" in small muted text alongside the version number.
+     - generate_combined_changelog_html(): session_html rendered per-entry in
+       the entry header alongside the version badge.
+     NOTE: v3.3.60 itself shows no session number — the old in-memory patcher
+     ran the install (preload_app=True). Expected. v3.3.61 onward shows correctly.
+     All future manifests should include "session": N.
+
+v3.3.61 — Gunicorn lifecycle JSON fix (web restart only):
+  Root cause of v3.3.60 gunicorn logging failure: _emit() called
+  structlog.get_logger() but structlog wasn't configured yet at startup time.
+  gunicorn.conf.py loads before wsgi.py runs _configure_structlog().
+  Fix: _emit() now writes a JSON line directly to stdout using print(flush=True)
+  instead of using structlog. stdout is always captured by journalctl regardless
+  of logging configuration. JSON schema matches structlog output exactly:
+  {service, event, message, level, timestamp}.
+  The debug() override also captures gunicorn's internal request debug logs
+  (separate from the access() HTTP log entries) — slightly noisy but harmless.
+  Confirmed working: all lifecycle messages (shutdown, worker exits, startup,
+  Listening at, Booting worker) visible as JSON in journalctl.
+  Session 23 badge confirmed in v3.3.61 release notes. ✅
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- v3.3.60 gunicorn lifecycle logging: used structlog.get_logger() in _emit().
+  Structlog unconfigured at gunicorn startup → messages silently dropped.
+  No journalctl output for the startup window after v3.3.60 install confirmed this.
+  Fixed in v3.3.61 by switching to direct stdout print.
+
+- Session number in v3.3.60 release notes: the old in-memory patcher (preload_app=True)
+  ran the install, so _log_patch() was the old version without the session parameter.
+  Row was written with session=NULL. Expected behavior, not a bug.
+  Confirmed via: sqlite3 netwatch.db "SELECT package_version, session FROM patch_log
+  ORDER BY timestamp DESC LIMIT 5;" → 3.3.60 row had empty session.
+
+
+DECISIONS MADE
+--------------
+- Third-party system services (SSH, systemd, OS, Node Exporter, Promtail) sending
+  plain text to Loki is acceptable and expected. Only NetWatch-controlled code is
+  expected to emit JSON. No OTEL Collector or pipeline stages needed for these.
+
+- gunicorn lifecycle messages: use direct stdout print rather than structlog, because
+  gunicorn.conf.py loads before wsgi.py configures structlog. This is a permanent
+  architectural constraint, not a workaround.
+
+- debug() override left in place: captures gunicorn's internal request debug logs.
+  Slightly noisy but acceptable. Could add a level guard if desired in future.
+
+- System log viewer scoped to pkg_update.log only (Approach A). All other logs are
+  already covered by the Logs tab or Grafana. pkg_update.log was the only gap.
+
+- Session field in manifest: optional, string-coerced. Convention going forward:
+  always include "session": N in every manifest.json. Not enforced by patcher.
+
+- SystemSetup.txt is append-and-update (not append-only like Gotchas.txt). Updated
+  whenever manual steps are performed or gaps are closed.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] install.sh GAP-4: netwatch-svc GPG keyring setup not yet automated.
+  Wizard candidate — requires prompting for recipient email and creating keyring.
+
+- [PENDING] install.sh GAP-6/7: Promtail and Node Exporter not in install.sh.
+  Both are fully manual installs. Installer candidate for future distributable work.
+
+- [MINOR] gunicorn debug-level entries include internal request logs alongside
+  lifecycle messages. Harmless but adds noise. Could add level guard to _emit()
+  to suppress debug entirely if desired.
+
+- [MINOR] utcnow() deprecation warning in _emit() (Python 3.12). Used same pattern
+  as rest of codebase. Deferred.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- System log viewer — pkg_update.log in Admin page (v3.3.60)
+- Gunicorn lifecycle JSON logging (v3.3.60 attempt, v3.3.61 fix)
+- install.sh GAP-1/2/3/5 fixed (v3.3.60)
+- Session number in package installer release notes (v3.3.60/61)
+- SystemSetup.txt created (dev_docs upload, no package)
+
+No new backlog items added.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+None. All detail captured in this base summary.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None. The structlog-not-configured-at-gunicorn-startup issue is documented in
+this summary and in the gunicorn.conf.py code comment. Not a recurring pattern
+worth a Gotchas entry — it's specific to this one file's load order.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.61
+- All services running normally
+- All four test points confirmed: gunicorn JSON ✅, install.sh gaps ✅,
+  pkg_update log viewer ✅, session number in release notes ✅
+- Next task: open — top candidates:
+    Dashboard system health card (monitor heartbeat, last DB write, disk space)
+    Backup Manager (browse/restore from local archive, configurable retention)
+    MFA (design brief first)

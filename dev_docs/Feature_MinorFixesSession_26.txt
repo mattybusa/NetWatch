@@ -1,0 +1,240 @@
+FEATURE: Minor Fixes — Session 26
+TYPE: Bug fixes
+DATE: 2026-03-21
+SESSION: 26
+OUTCOME: Complete
+
+This file covers seven arcs from Session 26. Each arc is a self-contained fix.
+
+==============================================================================
+ARC: System Log Line Count (v3.3.78)
+==============================================================================
+
+BACKGROUND
+----------
+User reported the system log card showed only ~5 events, line count buttons
+(100/300/500) did not stay highlighted after clicking, and the count appeared
+to "shrink back" after a few seconds.
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Initial hypothesis was a CSS height issue (max-height:480px on .log-box). User
+corrected this -- the height was auto-adjusting to content and there was no
+scrollbar, confirming the content itself had only ~5 lines, not that more were
+hidden.
+
+WHAT WORKED
+-----------
+Root cause: http_request entries from the 5-second dashboard auto-refresh dominated
+the raw log buffer. The Web Requests group is unchecked by default in the filter bar.
+Fetching 100 raw lines left only ~5 non-web lines visible. The "shrink back" was the
+auto-refresh interval re-rendering the same filtered count each tick -- not an actual
+shrink.
+
+Fix (logs.html):
+- LOG_FETCH_BUFFER = 2000: loadLog() always fetches 2000 raw lines regardless of the
+  selector value.
+- 100/300/500 selector now controls how many post-filter lines are shown via
+  .slice(-currentLines) in applyFilters(). "100" reliably means 100 visible lines
+  after group/level filters.
+- Buttons given IDs (log-btn-100, log-btn-300, log-btn-500). loadLog() toggles
+  .active class on the clicked button. First button (100) has active class in HTML
+  to match the default.
+- Auto-refresh calls loadLog() with no argument (preserves currentLines without
+  re-triggering button highlight logic).
+
+Files changed: templates/logs.html
+
+==============================================================================
+ARC: Scroll Anchor (v3.3.79)
+==============================================================================
+
+BACKGROUND
+----------
+After v3.3.78, user noted that scrolling up to read older log entries was impossible --
+every auto-refresh snapped the view back to the bottom.
+
+WHAT WORKED
+-----------
+applyFilters() was unconditionally setting box.scrollTop = box.scrollHeight after
+every render. Fix: capture scroll position before re-rendering; only auto-scroll if
+the user is within 40px of the bottom (atBottom check). If scrolled up, position is
+preserved across refreshes.
+
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  // ... re-render ...
+  if (atBottom) box.scrollTop = box.scrollHeight;
+
+40px threshold chosen as "clearly following the log" but loose enough that normal
+scrolling variation doesn't trigger it.
+
+Files changed: templates/logs.html
+
+==============================================================================
+ARC: Alert History Count Selector (v3.3.78)
+==============================================================================
+
+BACKGROUND
+----------
+Alert History card on logs page had a hardcoded "last 50" heading and no way to
+show more or fewer entries.
+
+WHAT WORKED
+-----------
+Replaced static heading with a button row matching the system log pattern:
+10 / 20 / 50 / 100 with active highlight. currentAlertLimit variable tracks the
+selected count. loadAlerts(limit) accepts an optional limit, updates the variable,
+and highlights the button. Auto-refresh calls loadAlerts() with no argument to
+preserve the current selection.
+
+Files changed: templates/logs.html
+
+==============================================================================
+ARC: Admin Page Gaps and Pkg Log Auto-Load (v3.3.78)
+==============================================================================
+
+BACKGROUND
+----------
+Two admin page issues: no gap between System Information card and Pi Package Update
+Log card; Pi Package Update Log showed "Loading..." until Refresh was clicked manually.
+
+WHAT WORKED
+-----------
+Gap: System Info card was `class="nw-card p-4"` (no mb-4). All other cards above it
+had mb-4. One word added: mb-4.
+
+Auto-load: The load-on-expand listener only fired on click of the collapse header.
+initSections() restores expanded state from localStorage before the click listener
+fires, so sections already expanded on page load never triggered loadPkgLog().
+
+Fix: Added an IIFE after initSections() that checks if section-pkg-log is not
+collapsed (maxHeight !== '0px') and calls loadPkgLog() immediately. Also replaced
+the old "load on first open only" listener with one that reloads on every expand.
+
+Files changed: templates/admin.html
+
+==============================================================================
+ARC: Config Editor Warning (v3.3.80)
+==============================================================================
+
+BACKGROUND
+----------
+User saw a wall of "Could not find/replace key in config.py" warnings in the system
+log when saving the config editor. Investigation showed KEEP_HEALTH_DAYS was NOT in
+the warning list -- it had changed successfully from 30 to 90. Every other key warned
+because the form submits all fields, and for unchanged fields new_content == content
+triggers the warning.
+
+WHAT WORKED
+-----------
+The configeditor.py regex is correct and does match all standard config.py line formats.
+The issue is purely the warning logic: it couldn't distinguish "regex matched but value
+was already the same" from "regex didn't match at all."
+
+Fix (configeditor.py): After new_content == content, run re.search() on the original
+content to check if the pattern matched at all:
+- If matched: log.debug("already at submitted value") -- no warning, invisible in normal
+  operation.
+- If not matched: log.warning("Could not find/replace key") -- genuine problem, still warns.
+
+Files changed: configeditor.py
+
+==============================================================================
+ARC: Export Data Dynamic Text (v3.3.80)
+==============================================================================
+
+BACKGROUND
+----------
+The Export Data card in admin page read: "Health exports cover 30 days; reset exports
+cover 90 days." These were hardcoded strings that didn't reflect KEEP_HEALTH_DAYS and
+KEEP_RESET_DAYS from config.
+
+WHAT WORKED
+-----------
+webapp.py admin() route now passes keep_health_days and keep_reset_days to the template:
+  return render_template("admin.html",
+      keep_health_days=getattr(config, "KEEP_HEALTH_DAYS", 30),
+      keep_reset_days=getattr(config, "KEEP_RESET_DAYS", 90),
+  )
+admin.html uses {{ keep_health_days }} and {{ keep_reset_days }} in the description.
+
+Files changed: webapp.py, templates/admin.html
+
+==============================================================================
+ARC: Security Period Filter (v3.3.80)
+==============================================================================
+
+BACKGROUND
+----------
+The 24H / 7D / 30D period buttons on the security page updated the four stat cards
+at the top (Logins, Failures, Unique IPs, PW Changes) but had no effect on the event
+log table below. The event log always showed the full history up to the limit selector.
+
+WHAT WORKED
+-----------
+Three-part fix:
+
+1. security_log.html setPeriod(): added loadEvents() call at the end. Previously only
+   called updateStats(allEvents).
+
+2. security_log.html loadEvents(): added params.set('since', getPeriodCutoff()) to the
+   API request. getPeriodCutoff() already existed and computes the ISO timestamp for
+   the active period.
+
+3. security_log.py get_events(): refactored to build WHERE clause dynamically. Now
+   accepts since=None parameter. When provided, appends "timestamp >= ?" to conditions.
+   Both event_type filter and since filter can be active simultaneously.
+
+4. webapp.py api_security_events(): reads since = request.args.get("since") and passes
+   to get_events(since=since).
+
+Files changed: templates/security_log.html, security_log.py, webapp.py
+
+==============================================================================
+ARC: Role-Based Alert Filtering (v3.3.80)
+==============================================================================
+
+BACKGROUND
+----------
+All alert types (network, security, maintenance groups) were shown to all roles in
+My Account alert subscriptions. Security alerts (brute_force, lockout_changed,
+security_event) and maintenance alerts (daily_summary, pkg_update) are not appropriate
+for Monitor or Guest accounts.
+
+WHAT WORKED
+-----------
+preferences.html buildAlertTypeGrids(): added USER_ROLE constant rendered at page load
+via Jinja ({{ current_user.role_name }}). ALLOWED_GROUPS computed from role:
+- Admin / Operator: Set(['network', 'security', 'maintenance'])
+- Monitor / Guest: Set(['network'])
+
+When iterating ALERT_TYPES to populate groups, types whose group is not in ALLOWED_GROUPS
+are skipped. renderAll() also guards section headers with ALLOWED_GROUPS.has() checks.
+
+Files changed: templates/preferences.html
+
+==============================================================================
+ARC: Daily Summary Implementation (v3.3.80)
+==============================================================================
+
+BACKGROUND
+----------
+main.py called alerts.send_daily_summary() every day at 8am. The function did not
+exist in alerts.py. The monitor loop's try/except silently swallowed the AttributeError.
+The daily_summary alert type, subject, color, and SMS label were all defined in alerts.py;
+the subscription checkbox existed in preferences.html. Only the function was missing.
+
+WHAT WORKED
+-----------
+Added send_daily_summary() to alerts.py. Uses:
+- database.get_uptime_stats() -- returns 24h and 7d uptime percentages
+- database.get_reset_count_today() -- today's auto-reset count
+- database.get_latest_health() -- most recent health check for latency/packet_loss
+
+Builds an HTML message with 24h uptime (color-coded green/orange/red), 7d uptime,
+reset count, current latency, and packet loss. Calls send_alert("daily_summary", message)
+which handles subscriber lookup and delivery through the normal path.
+
+Guards on config.ALERTS_ENABLED -- returns early if alerts are disabled.
+
+Files changed: alerts.py

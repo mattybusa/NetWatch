@@ -71,12 +71,20 @@ log "Added $INSTALL_USER to $SVC_USER group"
 section "Configuring sudoers for netwatch-svc"
 sudo tee /etc/sudoers.d/netwatch-svc > /dev/null << 'SUDOEOF'
 # NetWatch service account -- minimum required privileges only
+# Both .service suffix and suffix-less forms required -- patcher.py calls
+# "systemctl restart netwatch-web" (no suffix); sudoers does exact string matching.
 netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-web.service
 netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-monitor.service
 netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop netwatch-web.service
 netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop netwatch-monitor.service
 netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl start netwatch-web.service
 netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl start netwatch-monitor.service
+netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-web
+netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-monitor
+netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop netwatch-web
+netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop netwatch-monitor
+netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl start netwatch-web
+netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl start netwatch-monitor
 netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/apt-get update
 netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/apt-get upgrade -y
 netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/apt-get upgrade --dry-run
@@ -84,10 +92,17 @@ SUDOEOF
 sudo chmod 440 /etc/sudoers.d/netwatch-svc
 log "Sudoers written to /etc/sudoers.d/netwatch-svc"
 
+# netwatch-svc needs execute permission on the parent home directory to traverse
+# into WorkingDirectory=/home/<user>/netwatch. Default 700 blocks it.
+sudo chmod 751 "$HOME"
+log "Home directory set to 751 for service account traversal"
+
 # = NetWatch directory ==================
 section "Setting up directories"
 mkdir -p "$NETWATCH_DIR"/{logs,data,certs,static,templates,scripts}
 mkdir -p "$HOME/backups"
+# Backup scripts run as netwatch-svc -- give it write access to the backup dir
+sudo chown "$SVC_USER:$SVC_USER" "$HOME/backups"
 log "Directories created"
 
 # = Python virtual environment ================
@@ -103,7 +118,9 @@ fi
 "$NETWATCH_DIR/venv/bin/pip" install \
     flask flask-session bcrypt \
     speedtest-cli RPi.GPIO lgpio \
-    requests cryptography gunicorn -q
+    requests cryptography gunicorn \
+    structlog packaging \
+    pyotp qrcode -q
 
 log "Python packages installed"
 

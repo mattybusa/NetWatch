@@ -52,14 +52,16 @@ import sqlite3
 import difflib
 import logging
 import tempfile
+import structlog
 import subprocess
 import py_compile
 from datetime import datetime
 from packaging import version as pkg_version
+import config
 
 NETWATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 
-log = logging.getLogger("netwatch.patcher")
+log = structlog.get_logger().bind(service="web")
 
 NETWATCH_DIR = NETWATCH_DIR
 DB_PATH      = os.path.join(NETWATCH_DIR, "netwatch.db")
@@ -363,11 +365,14 @@ def _take_snapshot(version_label):
         ])
         while len(snaps) > keep:
             old = os.path.join(snap_base, snaps.pop(0))
-            shutil.rmtree(old, ignore_errors=True)
-    except Exception:
-        pass
+            try:
+                shutil.rmtree(old)
+            except Exception as prune_err:
+                log.error("Pruning: failed to delete snapshot", path=old, error=str(prune_err))
+    except Exception as e:
+        log.error("Pruning failed", error=str(e))
 
-    log.info(f"[patcher] Snapshot taken: {snap_dir} ({copied} files, {len(errors)} errors)")
+    log.info("Snapshot taken", path=snap_dir, files=copied, errors=len(errors))
     return snap_dir
 
 
@@ -403,7 +408,7 @@ def apply_package(zip_bytes, applied_by="web"):
     # ── Take pre-install snapshot before touching anything ────────────────────
     current_version = get_installed_version() or "unknown"
     snapshot_dir = _take_snapshot(current_version)
-    log.info(f"[patcher] Pre-install snapshot: {snapshot_dir}")
+    log.info("Pre-install snapshot taken", path=snapshot_dir)
 
     for i, action in enumerate(actions):
         if had_error:
@@ -432,7 +437,7 @@ def apply_package(zip_bytes, applied_by="web"):
 
                 result["message"] = f"Replaced {fname}"
                 _queue_restart(fname, restart_queue)
-                log.info(f"[patcher] Replaced {target}")
+                log.info("File replaced", path=target)
 
             # ── unified diff patch ────────────────────────────────────────────
             elif act == "patch":
@@ -488,7 +493,7 @@ def apply_package(zip_bytes, applied_by="web"):
                 else:
                     os.makedirs(full, exist_ok=True)
                     result["message"] = f"Created directory: {path}"
-                    log.info(f"[patcher] Created directory {full}")
+                    log.info("Directory created", path=full)
 
             # ── run_sql ───────────────────────────────────────────────────────
             elif act == "run_sql":
@@ -514,7 +519,7 @@ def apply_package(zip_bytes, applied_by="web"):
             result["status"]  = "error"
             result["message"] = str(e)
             had_error         = True
-            log.error(f"[patcher] Step {i} ({act}) failed: {e}")
+            log.error("Install step failed", step=i, action=act, error=str(e))
 
         results.append(result)
 
@@ -543,7 +548,8 @@ def apply_package(zip_bytes, applied_by="web"):
         success=not had_error,
         steps_total=len(actions),
         steps_ok=sum(1 for r in results if r["status"] == "ok"),
-        step_results=results + restart_results
+        step_results=results + restart_results,
+        session=str(manifest["session"]) if "session" in manifest else None
     )
 
     return {
@@ -574,7 +580,7 @@ def get_patch_history(limit=20):
         conn.close()
         return [dict(r) for r in rows]
     except Exception as e:
-        log.error(f"Failed to read patch history: {e}")
+        log.error("Failed to read patch history", error=str(e))
         return []
 
 
@@ -732,7 +738,7 @@ def _apply_json_patch(content, ops):
             lines.append(insert + "\n")
 
         else:
-            log.warning(f"[patcher] Unknown JSON patch op: {operation}")
+            log.warning("Unknown JSON patch op", op=operation)
 
     return "".join(lines)
 
@@ -784,23 +790,45 @@ def _check_path_safety(filename, errors, index):
 
 
 def _syntax_check(content_bytes):
-    """Syntax-check Python source. Returns (True, None) or (False, error)."""
+    """
+    Syntax-check Python source. Returns (True, None) or (False, error).
+
+    Uses an explicit cfile path so py_compile writes the .pyc alongside the
+    source temp file in /tmp/ rather than to /tmp/__pycache__/, which avoids
+    permission failures when that directory is owned by a different user.
+    Both the source temp file and the .pyc are cleaned up after the check.
+    """
+    tmp_path  = None
+    pyc_path  = None
     try:
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as tmp:
-            tmp.write(content_bytes)
-            tmp_path = tmp.name
-        py_compile.compile(tmp_path, doraise=True)
-        os.unlink(tmp_path)
+        # Write source to a temp file
+        fd, tmp_path = tempfile.mkstemp(suffix=".py")
+        os.close(fd)
+        with open(tmp_path, "wb") as f:
+            f.write(content_bytes)
+
+        # Compile with explicit output path — avoids /tmp/__pycache__/ entirely
+        pyc_path = tmp_path + "c"
+        py_compile.compile(tmp_path, cfile=pyc_path, doraise=True)
         return True, None
+
     except py_compile.PyCompileError as e:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
-        return False, str(e).replace(tmp_path, "<file>")
+        return False, str(e).replace(tmp_path or "", "<file>")
+
+    except PermissionError as e:
+        return False, f"Permission error during syntax check (check /tmp ownership): {e}"
+
     except Exception as e:
-        return False, str(e)
+        return False, f"Syntax check failed: {e}"
+
+    finally:
+        # Always clean up both temp files
+        for path in (tmp_path, pyc_path):
+            if path:
+                try:
+                    os.unlink(path)
+                except Exception:
+                    pass
 
 
 def _backup(path):
@@ -829,7 +857,7 @@ def _backup(path):
         shutil.copy2(path, backup)
         return backup
     except Exception as e:
-        log.warning(f"[patcher] Backup failed for {path}: {e}")
+        log.warning("Backup failed", path=path, error=str(e))
         return None
 
 
@@ -872,7 +900,7 @@ def _run_sql(sql):
     except sqlite3.OperationalError as e:
         # Swallow "duplicate column" errors from re-applied migrations
         if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
-            log.info(f"[patcher] SQL already applied (skipping): {e}")
+            log.info("SQL already applied (skipping)", detail=str(e))
         else:
             raise
     finally:
@@ -880,7 +908,7 @@ def _run_sql(sql):
 
 
 def _log_patch(package_version, description, applied_by, success,
-               steps_total, steps_ok, step_results=None):
+               steps_total, steps_ok, step_results=None, session=None):
     """Write a record to the patch history log, including full step detail."""
     try:
         _ensure_patch_log_table()
@@ -888,15 +916,16 @@ def _log_patch(package_version, description, applied_by, success,
         conn.execute("""
             INSERT INTO patch_log
                 (timestamp, package_version, description, applied_by,
-                 success, steps_total, steps_ok, step_results_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 success, steps_total, steps_ok, step_results_json, session)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (datetime.now().isoformat(), package_version, description,
               applied_by, int(success), steps_total, steps_ok,
-              json.dumps(step_results) if step_results else None))
+              json.dumps(step_results) if step_results else None,
+              session))
         conn.commit()
         conn.close()
     except Exception as e:
-        log.error(f"[patcher] Failed to log patch: {e}")
+        log.error("Failed to log patch", error=str(e))
 
 
 def _ensure_patch_log_table():
@@ -912,10 +941,12 @@ def _ensure_patch_log_table():
             steps_total       INTEGER DEFAULT 0,
             steps_ok          INTEGER DEFAULT 0,
             admin_notes       TEXT DEFAULT NULL,
-            step_results_json TEXT DEFAULT NULL
+            step_results_json TEXT DEFAULT NULL,
+            session           TEXT DEFAULT NULL
         )
     """)
-    for col, defval in [("admin_notes", "NULL"), ("step_results_json", "NULL")]:
+    for col, defval in [("admin_notes", "NULL"), ("step_results_json", "NULL"),
+                        ("session", "NULL")]:
         try:
             conn.execute(f"ALTER TABLE patch_log ADD COLUMN {col} TEXT DEFAULT {defval}")
         except Exception:
@@ -936,7 +967,7 @@ def get_changelog(limit=200):
         conn.close()
         return [dict(r) for r in rows]
     except Exception as e:
-        log.error(f"Failed to read changelog: {e}")
+        log.error("Failed to read changelog", error=str(e))
         return []
 
 
@@ -950,11 +981,11 @@ def update_changelog_notes(entry_id, notes):
         conn.close()
         return True
     except Exception as e:
-        log.error(f"Failed to update changelog notes: {e}")
+        log.error("Failed to update changelog notes", error=str(e))
         return False
 
 
-def generate_release_notes_html(entry, site_name="NetWatch", theme="dark-blue"):
+def generate_release_notes_html(entry, site_name="NetWatch", theme="dark-blue", custom_palette=None):
     """
     Generate a rich printable HTML release notes page matching the user's NetWatch theme.
     Zero external dependencies.
@@ -1038,6 +1069,9 @@ def generate_release_notes_html(entry, site_name="NetWatch", theme="dark-blue"):
         },
     }
     t = THEMES.get(theme, THEMES["dark-blue"])
+    if custom_palette:
+        t = dict(t)
+        t.update(custom_palette)
 
     version   = _html.escape(entry.get("package_version") or "—")
     ts        = (entry.get("timestamp") or "")[:19].replace("T", " ")
@@ -1048,6 +1082,10 @@ def generate_release_notes_html(entry, site_name="NetWatch", theme="dark-blue"):
     steps_ok  = entry.get("steps_ok", 0)
     steps_tot = entry.get("steps_total", 0)
     status    = "Applied Successfully" if ok else "Installation Failed"
+    session   = entry.get("session")
+    session_badge = (f' &nbsp;<span style="font-size:0.75em;opacity:0.7;'
+                     f'font-weight:normal;">Session {_html.escape(str(session))}</span>'
+                     if session else "")
 
     step_results = []
     raw = entry.get("step_results_json")
@@ -1198,7 +1236,7 @@ def generate_release_notes_html(entry, site_name="NetWatch", theme="dark-blue"):
   <div class="page">
     <div class="header">
       <div class="site">{site_name}</div>
-      <h1>v{version} <span class="status-badge">{"✓" if ok else "✗"} {status}</span></h1>
+      <h1>v{version}{session_badge} <span class="status-badge">{"✓" if ok else "✗"} {status}</span></h1>
       <div class="meta">Release Notes &nbsp;·&nbsp; Installed {ts} &nbsp;·&nbsp; by {by} &nbsp;·&nbsp; {steps_ok}/{steps_tot} steps</div>
     </div>
     <div class="body">
@@ -1221,7 +1259,7 @@ def generate_release_notes_html(entry, site_name="NetWatch", theme="dark-blue"):
 </html>"""
 
 
-def generate_combined_changelog_html(entries, site_name="NetWatch", theme="dark-blue"):
+def generate_combined_changelog_html(entries, site_name="NetWatch", theme="dark-blue", custom_palette=None):
     """
     Generate a single printable HTML page listing all changelog entries oldest-first.
     Reuses the same theme palettes and helper functions as generate_release_notes_html.
@@ -1236,6 +1274,9 @@ def generate_combined_changelog_html(entries, site_name="NetWatch", theme="dark-
         "high-contrast":{"bg_page":"#000000","bg_card":"#0a0a0a","border":"#555555","accent":"#ffff00","text_primary":"#ffffff","text_muted":"#aaaaaa","text_label":"#888888","ok":"#00ff00","fail":"#ff0000","warn":"#ff8800","title_text":"#1a1a1a","font":"'Inter',Arial,sans-serif","font_mono":"'IBM Plex Mono',monospace"},
     }
     t = THEMES.get(theme, THEMES["dark-blue"])
+    if custom_palette:
+        t = dict(t)
+        t.update(custom_palette)
 
     # Oldest first for a chronological changelog
     ordered = list(reversed(entries))
@@ -1326,6 +1367,10 @@ def generate_combined_changelog_html(entries, site_name="NetWatch", theme="dark-
         status    = "Applied Successfully" if ok else "Installation Failed"
         ok_color  = "#4caf50" if ok else "#f44336"
         ok_bg     = "rgba(76,175,80,0.12)" if ok else "rgba(244,67,54,0.12)"
+        session   = entry.get("session")
+        session_html = (f'<span style="font-size:11px;color:#888;margin-left:4px;">'
+                        f'Session {_html.escape(str(session))}</span>'
+                        if session else "")
 
         step_results = []
         raw = entry.get("step_results_json")
@@ -1347,6 +1392,7 @@ def generate_combined_changelog_html(entries, site_name="NetWatch", theme="dark-
           <div class="entry-header">
             <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
               <span class="entry-version">v{version}</span>
+              {session_html}
               <span style="display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;
                            border-radius:20px;background:{ok_bg};color:{ok_color};
                            border:1px solid {ok_color};">{"✓" if ok else "✗"} {status}</span>
@@ -1455,5 +1501,5 @@ def get_changelog_entry(entry_id):
         conn.close()
         return dict(row) if row else None
     except Exception as e:
-        log.error(f"Failed to read changelog entry: {e}")
+        log.error("Failed to read changelog entry", error=str(e))
         return None

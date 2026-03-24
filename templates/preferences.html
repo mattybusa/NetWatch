@@ -9,7 +9,7 @@
 
   <!-- ══════════════════════════════════════════════════════════════════════
        CONTACT & IDENTITY
-  ═══════════════════════════════════════════════════════════════════════ -->\
+  ═══════════════════════════════════════════════════════════════════════ -->
   <div class="nw-card p-4 mb-4">
     <div class="nw-label mb-3">Contact &amp; Identity</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:500px;">
@@ -37,7 +37,7 @@
 
   <!-- ══════════════════════════════════════════════════════════════════════
        CHANGE PASSWORD
-  ═══════════════════════════════════════════════════════════════════════ -->\
+  ═══════════════════════════════════════════════════════════════════════ -->
   <div class="nw-card p-4 mb-4">
     <div class="nw-label mb-3">Change Password</div>
     <div style="max-width:380px;">
@@ -64,8 +64,110 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════════════
+       TWO-FACTOR AUTHENTICATION
+  ═══════════════════════════════════════════════════════════════════════ -->
+  {% set mfa = mfa_status %}
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-3"><i class="bi bi-shield-lock"></i> Two-Factor Authentication</div>
+
+    {% if mfa.grace_expired %}
+    <div style="padding:10px 14px;border-radius:6px;background:var(--fail-glow);border:1px solid var(--fail);color:var(--text-primary);font-size:0.82rem;margin-bottom:14px;">
+      <i class="bi bi-exclamation-triangle"></i>
+      <strong>MFA setup required.</strong> Your grace period has expired. Please set up two-factor authentication to continue using your account.
+    </div>
+    {% elif mfa.grace_deadline and not mfa.enabled %}
+    {% set days_left = mfa_grace_days_left %}
+    <div style="padding:10px 14px;border-radius:6px;background:var(--warn-glow,var(--bg-input));border:1px solid var(--warn,var(--border-color));color:var(--text-primary);font-size:0.82rem;margin-bottom:14px;">
+      <i class="bi bi-clock"></i>
+      <strong>MFA required for your role.</strong>
+      Please set up two-factor authentication within {{ days_left }} day{% if days_left != 1 %}s{% endif %}.
+    </div>
+    {% endif %}
+
+    {% if mfa.enabled %}
+    <!-- MFA is active -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:10px 14px;border-radius:6px;background:var(--ok-glow);border:1px solid var(--ok);">
+      <i class="bi bi-shield-check-fill" style="color:var(--ok);font-size:1.3rem;flex-shrink:0;"></i>
+      <span style="font-size:0.85rem;color:var(--ok);font-weight:700;">Two-factor authentication is active</span>
+    </div>
+
+    <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px;">
+      Backup codes remaining: <strong style="color:var(--text-primary);">{{ mfa.backup_count }}</strong>
+      {% if mfa.backup_count <= 2 %}
+      <span style="color:var(--warn,var(--fail));margin-left:6px;"><i class="bi bi-exclamation-circle"></i> Low — consider regenerating</span>
+      {% endif %}
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+      <a href="/account/mfa/setup?new=1" class="nw-btn" style="font-size:0.82rem;">
+        <i class="bi bi-qr-code"></i> Re-configure MFA
+      </a>
+      <button class="nw-btn" style="font-size:0.82rem;" onclick="showRegenModal()">
+        <i class="bi bi-key"></i> Regenerate Backup Codes
+      </button>
+      <button class="nw-btn" style="font-size:0.82rem;border-color:var(--fail);color:var(--fail);" onclick="showDisableMfaModal()">
+        <i class="bi bi-shield-x"></i> Disable MFA
+      </button>
+    </div>
+
+    {% else %}
+    <!-- MFA not set up -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+      <span style="color:var(--text-muted);font-size:1.1rem;"><i class="bi bi-shield"></i></span>
+      <span style="font-size:0.85rem;color:var(--text-muted);">MFA is not enabled</span>
+    </div>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:14px;">
+      Add an extra layer of security to your account. You'll need an authenticator app like
+      Google Authenticator or Authy.
+    </p>
+    <a href="/account/mfa/setup" class="nw-btn" style="font-size:0.82rem;display:inline-block;">
+      <i class="bi bi-shield-plus"></i> Set Up Two-Factor Authentication
+    </a>
+    {% endif %}
+  </div>
+
+  <!-- Regenerate backup codes modal -->
+  <div id="regen-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;">
+    <div class="nw-card p-4" style="width:100%;max-width:400px;margin:24px;">
+      <div class="nw-label mb-3">Regenerate Backup Codes</div>
+      <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:14px;">
+        This will invalidate all existing backup codes and generate a new set.
+        Enter your password to confirm.
+      </p>
+      <label style="display:block;font-size:0.7rem;color:var(--text-label);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;">Password</label>
+      <input type="password" id="regen-password" class="nw-input" style="width:100%;box-sizing:border-box;" autocomplete="current-password">
+      <div id="regen-error" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;background:var(--fail-glow);border:1px solid var(--fail);font-size:0.82rem;"></div>
+      <div id="regen-codes" style="display:none;margin-top:14px;"></div>
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <button class="nw-btn" onclick="doRegen()" id="regen-confirm-btn">Regenerate</button>
+        <button class="nw-btn" id="regen-cancel-btn" onclick="closeRegenModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Disable MFA modal -->
+  <div id="disable-mfa-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;">
+    <div class="nw-card p-4" style="width:100%;max-width:400px;margin:24px;">
+      <div class="nw-label mb-3" style="color:var(--fail);">Disable Two-Factor Authentication</div>
+      <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:14px;">
+        This will remove MFA from your account. Enter your password to confirm.
+        {% if current_user.role_name in ('Admin', 'Operator') %}
+        <br><br><strong style="color:var(--warn,var(--fail));">Your role requires MFA. You will have a grace period to re-enable it.</strong>
+        {% endif %}
+      </p>
+      <label style="display:block;font-size:0.7rem;color:var(--text-label);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;">Password</label>
+      <input type="password" id="disable-mfa-password" class="nw-input" style="width:100%;box-sizing:border-box;" autocomplete="current-password">
+      <div id="disable-mfa-error" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;background:var(--fail-glow);border:1px solid var(--fail);font-size:0.82rem;"></div>
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <button class="nw-btn" style="border-color:var(--fail);color:var(--fail);" onclick="doDisableMfa()">Disable MFA</button>
+        <button class="nw-btn" onclick="document.getElementById('disable-mfa-modal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
        ALERT SUBSCRIPTIONS
-  ═══════════════════════════════════════════════════════════════════════ -->\
+  ═══════════════════════════════════════════════════════════════════════ -->
   <div class="nw-card p-4 mb-4">
     <div class="nw-label mb-1">Alert Subscriptions</div>
     <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px;">
@@ -190,7 +292,7 @@
 
   <!-- ══════════════════════════════════════════════════════════════════════
        APPEARANCE
-  ═══════════════════════════════════════════════════════════════════════ -->\
+  ═══════════════════════════════════════════════════════════════════════ -->
   <div class="nw-card p-4 mb-4">
     <div class="nw-collapse-header" onclick="toggleAppearance()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;">
       <div class="nw-label" style="margin:0;">Appearance</div>
@@ -453,6 +555,70 @@
       </div>
 
     </div><!-- end appearance-body -->
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DASHBOARD PREFERENCES
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-1">Dashboard Preferences</div>
+    <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:20px;">
+      Set the default display mode for dashboard cards. Changes take effect on your next page load.
+    </p>
+
+    <!-- Speedtest default -->
+    <div style="margin-bottom:20px;">
+      <div style="font-size:0.75rem;font-weight:600;letter-spacing:1px;color:var(--text-muted);margin-bottom:10px;">SPEEDTEST CARD</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;" id="dp-spd-options">
+        <div class="pref-card" data-dpspd="latest" onclick="selectDpSpd('latest',this)">
+          <div style="font-size:0.82rem;font-weight:600;">Latest</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);">Most recent result</div>
+        </div>
+        <div class="pref-card" data-dpspd="1" onclick="selectDpSpd('1',this)">
+          <div style="font-size:0.82rem;font-weight:600;">1-Day Avg</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);">Past 24 hours</div>
+        </div>
+        <div class="pref-card" data-dpspd="7" onclick="selectDpSpd('7',this)">
+          <div style="font-size:0.82rem;font-weight:600;">7-Day Avg</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);">Past week</div>
+        </div>
+        <div class="pref-card" data-dpspd="30" onclick="selectDpSpd('30',this)">
+          <div style="font-size:0.82rem;font-weight:600;">30-Day Avg</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);">Past month</div>
+        </div>
+        <div class="pref-card" data-dpspd="all" onclick="selectDpSpd('all',this)">
+          <div style="font-size:0.82rem;font-weight:600;">All Time Avg</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);">All recorded tests</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reset events default -->
+    <div style="margin-bottom:20px;">
+      <div style="font-size:0.75rem;font-weight:600;letter-spacing:1px;color:var(--text-muted);margin-bottom:10px;">AUTO RESETS CARD</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;" id="dp-rst-options">
+        <div class="pref-card" data-dprst="1" onclick="selectDpRst('1',this)">
+          <div style="font-size:0.82rem;font-weight:600;">Today</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);">Past 24 hours</div>
+        </div>
+        <div class="pref-card" data-dprst="7" onclick="selectDpRst('7',this)">
+          <div style="font-size:0.82rem;font-weight:600;">7 Days</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);">Past week</div>
+        </div>
+        <div class="pref-card" data-dprst="30" onclick="selectDpRst('30',this)">
+          <div style="font-size:0.82rem;font-weight:600;">30 Days</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);">Past month</div>
+        </div>
+        <div class="pref-card" data-dprst="all" onclick="selectDpRst('all',this)">
+          <div style="font-size:0.82rem;font-weight:600;">All Time</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);">All recorded events</div>
+        </div>
+      </div>
+    </div>
+
+    <button class="nw-btn nw-btn-primary" onclick="saveDashboardPrefs()" style="min-width:160px;">
+      ✓ Save Dashboard Preferences
+    </button>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════════════
@@ -802,6 +968,8 @@ function buildAlertTypeGrids(globalSettings, overrides) {
   const smsGrid   = document.getElementById('sms-type-grid');
   const groups = { network: [], security: [], maintenance: [] };
   for (const [key, val] of Object.entries(globalSettings)) {
+    // Skip types marked unavailable for this user's role by the admin
+    if (!val.available) continue;
     const g = val.group || 'network';
     groups[g] = groups[g] || [];
     groups[g].push({ key, ...val });
@@ -1140,6 +1308,101 @@ document.getElementById('delete-account-modal').addEventListener('click', functi
   if (e.target === this) closeDeleteAccountDialog();
 });
 
+
+// ── MFA modals ─────────────────────────────────────────────────────────────────
+let _regenCodes  = [];     // holds codes after generation so copy button can access them
+let _regenCopied = false;  // true once copy button has been clicked
+
+function showRegenModal() {
+  _regenCodes = [];
+  _regenCopied = false;
+  document.getElementById('regen-password').value = '';
+  document.getElementById('regen-password').style.display = '';
+  document.getElementById('regen-error').style.display = 'none';
+  document.getElementById('regen-codes').style.display = 'none';
+  document.getElementById('regen-confirm-btn').style.display = '';
+  document.getElementById('regen-cancel-btn').style.display = '';
+  document.getElementById('regen-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('regen-password').focus(), 50);
+}
+function closeRegenModal() {
+  // Only allow closing if codes have not yet been shown (i.e. user hasn't committed)
+  if (_regenCodes.length === 0) {
+    document.getElementById('regen-modal').style.display = 'none';
+  }
+}
+function closeRegenModalForce() {
+  // Called by the Done button after codes are saved — reload so count updates
+  window.location.reload();
+}
+function copyRegenCodes() {
+  const btn  = document.getElementById('regen-copy-btn');
+  const done = document.getElementById('regen-done-btn');
+  navigator.clipboard.writeText(_regenCodes.join('\n')).then(() => {
+    _regenCopied = true;
+    btn.innerHTML = '<i class="bi bi-check2"></i> Copied!';
+    setTimeout(() => { btn.innerHTML = '<i class="bi bi-clipboard"></i> Copy all'; }, 2000);
+    if (done) { done.disabled = false; done.style.opacity = '1'; }
+  });
+}
+async function doRegen() {
+  const pw  = document.getElementById('regen-password').value;
+  const err = document.getElementById('regen-error');
+  const box = document.getElementById('regen-codes');
+  err.style.display = 'none';
+  const fd = new FormData();
+  fd.append('password', pw);
+  const res = await fetch('/account/mfa/backup_codes/regenerate', {method:'POST', body:fd});
+  const data = await res.json();
+  if (data.status !== 'ok') {
+    err.textContent = data.message || 'Error regenerating codes.';
+    err.style.display = 'block';
+    return;
+  }
+  // Store codes and show them — modal cannot be dismissed by backdrop from this point
+  _regenCodes  = data.codes;
+  _regenCopied = false;
+  document.getElementById('regen-confirm-btn').style.display = 'none';
+  document.getElementById('regen-cancel-btn').style.display  = 'none';
+  document.getElementById('regen-password').style.display    = 'none';
+  box.innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:8px;"><strong>Save these codes — they will only be shown once.</strong></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;">'
+    + data.codes.map(c => `<div style="font-family:var(--font-mono);font-size:0.85rem;letter-spacing:1px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:4px;padding:6px 10px;text-align:center;">${c}</div>`).join('')
+    + '</div>'
+    + '<button id="regen-copy-btn" class="nw-btn" style="width:100%;font-size:0.82rem;margin-bottom:8px;" onclick="copyRegenCodes()"><i class="bi bi-clipboard"></i> Copy all</button>'
+    + '<button id="regen-done-btn" class="nw-btn" style="width:100%;font-size:0.82rem;opacity:0.4;cursor:not-allowed;" onclick="closeRegenModalForce()" disabled><i class="bi bi-check2-circle"></i> Done — I have saved my codes</button>';
+  box.style.display = 'block';
+}
+document.getElementById('regen-modal').addEventListener('click', function(e) {
+  // Only close on backdrop click if codes haven't been shown yet
+  if (e.target === this && _regenCodes.length === 0) closeRegenModal();
+});
+
+function showDisableMfaModal() {
+  document.getElementById('disable-mfa-password').value = '';
+  document.getElementById('disable-mfa-error').style.display = 'none';
+  document.getElementById('disable-mfa-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('disable-mfa-password').focus(), 50);
+}
+async function doDisableMfa() {
+  const pw  = document.getElementById('disable-mfa-password').value;
+  const err = document.getElementById('disable-mfa-error');
+  err.style.display = 'none';
+  const fd = new FormData();
+  fd.append('password', pw);
+  const res = await fetch('/account/mfa/disable', {method:'POST', body:fd});
+  const data = await res.json();
+  if (data.status !== 'ok') {
+    err.textContent = data.message || 'Incorrect password.';
+    err.style.display = 'block';
+    return;
+  }
+  window.location.reload();
+}
+document.getElementById('disable-mfa-modal').addEventListener('click', function(e) {
+  if (e.target === this) document.getElementById('disable-mfa-modal').style.display = 'none';
+});
+
 // ── Custom color scheme (preferences page) ────────────────────────────────────
 function togglePrefCustomScheme() {
   const sel = document.getElementById("pref-custom-scheme-select");
@@ -1222,9 +1485,52 @@ async function clearPrefCustomLayout() {
   }
 }
 
+// ── Dashboard Preferences ──────────────────────────────────────────────────────
+
+let _dpSpd = "latest";
+let _dpRst = "1";
+
+function selectDpSpd(val, el) {
+  _dpSpd = val;
+  document.querySelectorAll("#dp-spd-options .pref-card").forEach(c => c.classList.remove("selected"));
+  el.classList.add("selected");
+}
+
+function selectDpRst(val, el) {
+  _dpRst = val;
+  document.querySelectorAll("#dp-rst-options .pref-card").forEach(c => c.classList.remove("selected"));
+  el.classList.add("selected");
+}
+
+async function saveDashboardPrefs() {
+  const res = await fetch("/api/preferences/dashboard", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ speedtest_range: _dpSpd, resets_range: _dpRst })
+  }).then(r => r.json());
+  showToast(res.status === "ok" ? "Dashboard preferences saved" : "Save failed",
+            res.status === "ok" ? "success" : "error");
+}
+
+async function initDashboardPrefs() {
+  try {
+    const prefs = await fetch("/api/preferences/dashboard").then(r => r.json());
+    _dpSpd = prefs.speedtest_range || "latest";
+    _dpRst = prefs.resets_range    || "1";
+
+    document.querySelectorAll("#dp-spd-options .pref-card").forEach(c => {
+      c.classList.toggle("selected", c.dataset.dpspd === _dpSpd);
+    });
+    document.querySelectorAll("#dp-rst-options .pref-card").forEach(c => {
+      c.classList.toggle("selected", c.dataset.dprst === _dpRst);
+    });
+  } catch(e) {}
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────────
 loadIdentity();
 loadMySubscription();
 initAppearance();
+initDashboardPrefs();
 </script>
 {% endblock %}

@@ -1,0 +1,232 @@
+FEATURE: ops-pi Infrastructure Build
+=====================================
+Type: Infrastructure (not a NetWatch feature -- ops-pi setup)
+Date: 2026-03-14
+Sessions: Session 16
+Outcome: Complete -- all services running and confirmed
+
+
+BACKGROUND
+----------
+The original gitea-pi (Pi 3B+) was set up in Session 11 to run Gitea only.
+Session 15 decided to add Prometheus + Loki + Grafana + Node Exporter to
+that same machine to complete the observability stack. The Pi 3B+ has 1GB
+RAM which is borderline for running Gitea + full observability stack
+simultaneously (estimated 500-650MB for all four services).
+
+Decision made in Session 16: use the Pi 4 8GB that was reserved for a future
+project. The observability stack is the right use for it -- it will serve
+all future projects as the central monitoring/logging infrastructure.
+
+Simultaneously: gitea-pi renamed to ops-pi. The name "gitea-pi" was already
+inaccurate after one day. ops-pi is broad enough to remain accurate as more
+services are added.
+
+
+HARDWARE
+--------
+Old hardware: Raspberry Pi 3B+ (retired, set aside)
+New hardware: Raspberry Pi 4, 8GB RAM
+Storage: Samsung 860 EVO 500GB SSD (moved from 3B+, data intact)
+SD card: Fresh Raspberry Pi OS Lite 64-bit (flashed via Raspberry Pi Imager)
+Static IP: 192.168.100.230 (unchanged from gitea-pi)
+Hostname: ops-pi
+Domain: ops-pi.home
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+
+SD card swap (Pi 3B+ -> Pi 4):
+Considered but rejected. Booting a 3B+ SD card on a Pi 4 is unreliable due
+to model-specific firmware in the boot partition. Since a full new stack was
+being installed anyway, a fresh install was the correct choice.
+
+Gitea 1.22.6:
+Downloaded and installed initially. Crashed immediately with:
+  "Migration Error: Your database (migration version: 323) is for a newer
+  Gitea, you can not use the newer database for this old Gitea release (299)."
+The SSD database was created by Gitea 1.25.5 (the version running on the 3B+).
+Migration version 323 corresponds to Gitea 1.25.x. Fixed by downloading
+Gitea 1.25.5 instead.
+
+Gitea app.ini permission denied:
+After installing 1.25.5, Gitea crashed with:
+  "Error saving internal token: failed to save app.ini: permission denied"
+Gitea needs write access to app.ini on first startup to generate and save its
+internal token. app.ini was owned root:gitea with 640 permissions -- gitea
+user could read but not write. Fixed by temporarily setting 660 before first
+start. After successful start, locked back to 640.
+
+git not installed:
+After fixing the permission issue, Gitea crashed with:
+  "git not found: exec: git: executable file not found in $PATH"
+Fresh Pi OS does not include git. Fixed with: sudo apt install git -y
+
+Loki 3.5.1 config -- missing delete_request_store:
+Initial Loki config had retention_enabled: true in the compactor block but
+did not set delete_request_store. Loki 3.x requires this field when retention
+is enabled. Error on startup:
+  "invalid compactor config: compactor.delete-request-store should be
+  configured when retention is enabled"
+Fixed by adding: delete_request_store: filesystem
+
+Prometheus 3.5.1 -- missing consoles/ directories:
+After extracting the Prometheus tarball, attempted to copy consoles/ and
+console_libraries/ directories to /etc/prometheus/. These directories do not
+exist in Prometheus 3.x releases -- they were removed. The cp commands
+failed with "cannot stat". Not needed for our setup; omitted.
+
+SCP host key warning (NetWatch Pi -> ops-pi):
+When SCP-ing the new TLS cert from NetWatch Pi to ops-pi, the NetWatch Pi's
+known_hosts still had the old 3B+ host key for 192.168.100.230. Fixed with:
+  ssh-keygen -f '/home/mboynton/.ssh/known_hosts' -R '192.168.100.230'
+
+
+WHAT WORKED
+-----------
+
+SD card flash and first boot:
+Raspberry Pi Imager used to flash fresh Raspberry Pi OS Lite 64-bit.
+Pre-configured in Imager: hostname=ops-pi, SSH enabled, username=mboynton.
+WiFi not configured (wired only).
+
+Static IP:
+nmcli used to set static IP:
+  sudo nmcli con mod "netplan-eth0" \
+    ipv4.addresses 192.168.100.230/24 \
+    ipv4.gateway 192.168.100.254 \
+    ipv4.dns 8.8.8.8 \
+    ipv4.method manual
+  sudo nmcli con up "netplan-eth0"
+Connection name on fresh Pi 4: "netplan-eth0" (same as Pi 3B+).
+
+SSD mount:
+/dev/sda1, UUID 89e538f9-c72a-4b9f-a55a-b830c1ada9bd (same as before).
+Mount point changed from /mnt/gitea-data to /mnt/ops-data.
+fstab entry:
+  UUID=89e538f9-c72a-4b9f-a55a-b830c1ada9bd /mnt/ops-data ext4
+  defaults,noatime 0 2
+Confirmed auto-mounting on reboot.
+
+TLS certificate for ops-pi.home:
+Generated on NetWatch Pi using existing LAN CA:
+  cd ~
+  openssl genrsa -out ops-pi.key 2048
+  openssl req -new -key ops-pi.key -out ops-pi.csr \
+    -subj "/C=US/ST=Home/L=HomeNetwork/O=OPSPi/CN=ops-pi.home"
+  cat > ops-pi-ext.cnf << EOF
+  subjectAltName=DNS:ops-pi.home,DNS:ops-pi,IP:192.168.100.230
+  EOF
+  sudo chmod 664 ~/netwatch/certs/ca/netwatch-ca.srl
+  openssl x509 -req -in ~/ops-pi.csr \
+    -CA ~/netwatch/certs/ca/netwatch-ca.crt \
+    -CAkey ~/netwatch/certs/ca/netwatch-ca.key \
+    -CAcreateserial -out ~/ops-pi.crt -days 3650 \
+    -extfile ~/ops-pi-ext.cnf
+Note: openssl commands must be run from ~ (home dir), not from
+~/netwatch/certs/ca/ -- that directory is owned by netwatch-svc and
+mboynton cannot write there.
+
+Cert/key placed at /etc/gitea/certs/gitea.crt and gitea.key.
+Owned root:gitea, 640 permissions.
+
+Gitea 1.25.5:
+Binary: /usr/local/bin/gitea
+Config: /etc/gitea/app.ini
+Data: /mnt/ops-data/ (repositories, data, log from SSD -- all intact)
+Service: /etc/systemd/system/gitea.service
+Cert: /etc/gitea/certs/gitea.crt + gitea.key
+Key fields in app.ini:
+  DOMAIN = ops-pi.home
+  ROOT_URL = https://ops-pi.home:3000/
+  PROTOCOL = https
+  DB_TYPE = sqlite3
+  PATH = /mnt/ops-data/data/gitea.db
+  ROOT (repos) = /mnt/ops-data/repositories
+  INSTALL_LOCK = true
+SECRET_KEY generated via: gitea generate secret SECRET_KEY
+All repos confirmed accessible at https://ops-pi.home:3000
+
+Prometheus 3.5.1:
+Binary: /usr/local/bin/prometheus
+Config: /etc/prometheus/prometheus.yml
+Data: /var/lib/prometheus
+Service user: prometheus (system, no home)
+Port: 9090
+Retention: 30 days
+Scrape targets:
+  - prometheus: localhost:9090
+  - ops-pi: localhost:9100
+  - netwatch-pi: 192.168.100.10:9100
+All three targets confirmed UP.
+
+Loki 3.5.1:
+Binary: /usr/local/bin/loki
+Config: /etc/loki/loki.yml
+Data: /var/lib/loki
+Service user: loki (system, no home)
+Port: 3100
+Storage: filesystem (chunks + rules in /var/lib/loki)
+Schema: TSDB v13, from 2024-01-01
+Retention: 30 days
+Compactor: delete_request_store = filesystem (required for retention in 3.x)
+
+Grafana (latest via APT):
+Installed via official Grafana APT repo:
+  wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor | \
+    sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
+  echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] \
+    https://apt.grafana.com stable main" | \
+    sudo tee /etc/apt/sources.list.d/grafana.list
+  sudo apt update && sudo apt install grafana -y
+Port: 3001 (changed from default 3000, which is taken by Gitea)
+Setting in /etc/grafana/grafana.ini: http_port = 3001 (uncommented)
+Data sources configured:
+  - Prometheus: http://localhost:9090 -- confirmed working
+  - Loki: http://localhost:3100 -- confirmed working
+Dashboard imported: Node Exporter Full (Grafana ID 1860)
+Live metrics confirmed for both Pis.
+
+Node Exporter 1.9.0 (both Pis):
+Binary: /usr/local/bin/node_exporter
+Service user: node_exporter (system, no home)
+Port: 9100
+Service: /etc/systemd/system/node_exporter.service
+Confirmed running on both ops-pi and NetWatch Pi.
+Prometheus scraping confirmed for both.
+
+Hosts file updates:
+Windows: 192.168.100.230 ops-pi.home (gitea-pi.home can be removed)
+NetWatch Pi /etc/hosts: 192.168.100.230 ops-pi.home
+
+
+CURRENT SERVICE STATUS (as of session end)
+-------------------------------------------
+ops-pi:
+  gitea.service          -- active (running), port 3000 HTTPS
+  prometheus.service     -- active (running), port 9090 HTTP
+  loki.service           -- active (running), port 3100 HTTP
+  grafana-server.service -- active (running), port 3001 HTTP
+  node_exporter.service  -- active (running), port 9100 HTTP
+
+NetWatch Pi:
+  node_exporter.service  -- active (running), port 9100 HTTP
+  netwatch-web           -- active (running), unchanged
+  netwatch-monitor       -- active (running), unchanged
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- No TLS on Grafana, Prometheus, or Loki. Currently HTTP only. Acceptable
+  on LAN; worth addressing before any external access is added.
+
+- Promtail not yet installed. Blocked on NetWatch structlog rework.
+  Once structlog is in place, Promtail goes on the NetWatch Pi and ships
+  JSON logs to Loki on ops-pi.
+
+- No TLS cert for Grafana/Prometheus/Loki. Gitea has a cert (ops-pi.home).
+  The other services are HTTP only for now.
+
+- ops-pi itself not in its own /etc/hosts for ops-pi.home resolution.
+  Currently only Windows and NetWatch Pi have the entry. Low priority.

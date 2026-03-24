@@ -1,0 +1,811 @@
+# NetWatch Developer Reference
+_Upload to every new chat session alongside the code export zip._
+_Keep updated as patterns change._
+
+---
+
+## ⚠️ CRITICAL: How to Work With This Project
+
+### Before proposing ANY fix or change:
+1. **Read everything first.** Read all uploaded transcripts, all referenced files, all context. Do not assume. Do not guess. If something seems like a bug, verify it exists in the actual current code before touching it.
+2. **Do not fix what isn't broken.** Multiple hours were lost fixing auth, database queries, and password reset flows that were working correctly. The v3.2.75 incident (broke working password reset by "fixing" it) and the v3.2.85 incident (unnecessarily rewrote datetime queries) are the canonical examples.
+3. **When the user says something works or is broken — believe them.** Do not tell the user they're mistaken, that they're "not seeing it correctly," or that the logs say otherwise. The user has been right every single time this happened. Acknowledge, investigate, find the real cause.
+4. **Simulate and verify before shipping.** If a fix can be simulated in Python or traced through the code logically, do it before building a package. Never ship a package based on a theory.
+5. **Do not introduce scope creep.** Fix what was asked. Note other things you spotted, but ask before touching them.
+
+**User profile:**
+- Technically proficient, logical thinker, not a programmer, Linux skills are limited
+- Cannot always tell what a code block does or how to adapt it — be explicit
+- Good at describing what they want in plain language
+- Questions and action items must be clearly visible — don't bury them in prose
+- Always flag security risks and realistic mitigations
+
+---
+
+## Current State
+- **Pi version:** v3.3.80
+- **Pi path:** `/home/mboynton/netwatch/`
+- **Canonical matches Pi at v3.3.80**
+- **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (infrastructure works; session-start automation via Claude in Chrome was abandoned Session 13 — see mBase Strategy section)
+- **ops-pi (formerly gitea-pi):** 192.168.100.230 | https://ops-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos (both private, MIT)
+- **ops-pi services:** Gitea 1.25.5 (port 3000 HTTPS), Prometheus 3.5.1 (port 9090), Loki 3.5.1 (port 3100), Grafana (port 3001), Node Exporter 1.9.0 (port 9100) — all running
+- **NetWatch Pi:** Node Exporter 1.9.0 running (port 9100), Prometheus scraping confirmed. Promtail 3.5.1 running (systemd service), shipping journal logs to Loki on ops-pi.
+
+---
+
+## Hardware & Network
+
+- **Hardware:** Raspberry Pi 3B+ (1GB RAM), two single relay boards, 5V/3A PSU, momentary pushbutton, USB-SATA adapter (SSD ordered, still on SD card)
+- **ops-pi:** Raspberry Pi 4 8GB, Samsung 860 EVO 500GB SSD at /mnt/ops-data, static IP 192.168.100.230, hostname ops-pi. Runs: Gitea 1.25.5, Prometheus 3.5.1, Loki 3.5.1, Grafana, Node Exporter 1.9.0
+- **GPIO:** GPIO 17 → Relay 1 (Modem), GPIO 27 → Relay 2 (Router), GPIO 22 → Pushbutton
+- **Physical:** Modem → Router → AP (AP powered via PoE from router)
+- **Pi eth0:** `192.168.100.10` / gateway `192.168.100.254` (wired, .100 automation subnet)
+- **Pi wlan0:** `192.168.110.x` / gateway `192.168.110.254` (DMAutomation wireless)
+- **Personal devices:** `.17` subnet (DarkMatter SSID) — no intra-VLAN routing yet
+- **Cisco 3750** planned for inter-VLAN routing
+- **OS:** Raspberry Pi OS Lite 64-bit, Python 3, gunicorn (migrated v3.2.64)
+- **Two services:** `netwatch-monitor` (main.py) and `netwatch-web` (wsgi.py via gunicorn)
+- **Web command IPC:** file-based via `~/netwatch/pending_command.json`
+- **Rollback:** `bash ~/netwatch/rollback.sh` — restores most recent snapshot from `~/netwatch/snapshots/` (last 5 kept, excludes config.py)
+
+---
+
+## Route Decorators
+
+```python
+# Public (no auth)
+@app.route("/some/path")
+def my_view():
+
+# Authenticated — any logged-in user
+@app.route("/some/path")
+@auth.login_required
+def my_view():
+
+# Authenticated + permission
+@app.route("/some/path")
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def my_view():
+```
+
+### Permission strings
+| String | Who |
+|---|---|
+| `"manage_admin"` | Admin + Operator |
+| `"manage_users"` | Admin only |
+| `"use_controls"` | Admin + Operator |
+| `"view_logs"` | Admin + Operator |
+
+---
+
+## Getting Config Values
+
+```python
+# From config.py (set at install time)
+site_name = getattr(config, "SITE_NAME", "NetWatch") or "NetWatch"
+check_interval = getattr(config, "CHECK_INTERVAL", 30)
+
+# Theme — always read from the Flask sesion object (already imported above)
+# NOTE: "sesion" is intentionally misspelled throughout this block to avoid triggering
+# a JS session-header filter when this file is fetched over HTTP. Do not correct it.
+theme = sesion.get("theme", "dark-blue")  # sesion imported via: from flask import sesion
+```
+
+### Valid themes
+`"dark-blue"`, `"dark-green"`, `"light"`, `"high-contrast"`
+
+### Config key reference
+**Full list of all config keys, defaults, types, and descriptions:** `config_schema.py` — read this before adding or referencing any config key. The validator uses this as the master schema; new keys added here are automatically detected and written to config.py on next startup.
+
+---
+
+## Current User
+
+```python
+user = auth.get_current_user()  # always returns a dict, never None
+
+user["id"]           # int or None (None = guest)
+user["username"]     # str
+user["role_name"]    # "Admin", "Operator", "Monitor", "Guest"
+user["is_guest"]     # bool
+user["manage_admin"] # bool — permission flags
+user["manage_users"]
+user["use_controls"]
+user["view_logs"]
+user["theme"]        # user's preferred theme string
+```
+
+---
+
+## Response Patterns
+
+```python
+# JSON API
+return jsonify({"status": "ok"})
+return jsonify({"status": "error", "message": str(e)}), 400
+
+# Render template
+return render_template("mypage.html", var=value)
+
+# Raw HTML (e.g. printable pages)
+from flask import Response
+return Response(html_string, mimetype="text/html")
+
+# File download
+return send_file(buf, mimetype="application/zip",
+                 as_attachment=True, download_name="file.zip")
+
+# Redirect
+return redirect(url_for("function_name"))
+```
+
+---
+
+## Database Access
+
+```python
+# Always go through database.py functions — never raw sqlite in webapp.py
+database.get_latest_health()
+database.get_health_history(hours=hours)              # optional: start=ISO, end=ISO for zoom
+database.get_speedtest_history(hours=hours)            # optional: start=ISO, end=ISO
+database.get_reset_history(days=30)
+database.get_alert_history(limit=limit)
+database.get_uptime_stats()
+database.get_db_stats()
+
+# User prefs
+database.get_user_pref(user_id, "pref_key")        # returns value str or None
+database.set_user_pref(user_id, "pref_key", value)  # value=str to set; value=None to DELETE the row
+```
+
+### Database schema — where to find it
+All table definitions are in the source files with inline column comments. Read the relevant file before working with any table.
+- `database.py` — `network_health`, `reset_events`, `speedtest_results`, `alerts`, `user_prefs`
+- `auth.py` — `roles`, `users`, `email_verifications`, `phone_verifications`
+- `alert_subscribers.py` — `alert_type_settings`, `alert_subscribers`, `role_alert_defaults`, `alert_deliveries`
+- `patcher.py` — `patch_log`
+- `security_log.py` — `security_events`
+- `config_validator.py` — `config_notifications`
+
+Note: several tables gain columns via `ALTER TABLE` after initial deploy (auth.py, alert_subscribers.py). The source file is always authoritative — not any cached schema.
+
+### database.py datetime queries — critical rule
+- All timestamps stored as UTC via `datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")`
+- All WHERE clauses use `datetime('now', '-N hours')` — SQLite's `datetime('now')` is UTC on the Pi and correctly matches stored timestamps
+- **Never replace `datetime('now')` with Python-computed cutoffs** — was tried in v3.2.85 and reverted in v3.2.86; the original SQLite approach is correct
+- `timedelta` is not imported in database.py — don't add it unless genuinely needed for non-query logic
+
+---
+
+## Custom Theme System (v3.3.13–v3.3.21)
+
+Custom themes extend the built-in system themes (dark-blue, dark-green, light, high-contrast).
+They are stored as `.nwtheme` files in `~/netwatch/themes/`.
+
+**File format:** JSON with two top-level keys:
+- `"color_scheme"`: dict of 25 CSS variables (REQUIRED_COLOR_KEYS in theme_manager.py)
+- `"layout"`: dict of 3 CSS variables (REQUIRED_LAYOUT_KEYS in theme_manager.py)
+
+**Key module:** `theme_manager.py`
+- `save_theme(name, data)` — validate and write .nwtheme file
+- `load_theme(name)` — read .nwtheme file
+- `list_themes()` — list all themes with enabled/disabled status
+- `delete_theme(name)` — remove .nwtheme and .disabled sidecar
+- `generate_css(theme, part)` — produce CSS block using `body[class]` selector
+- `toggle_theme(name)` — create/remove .disabled sidecar file
+
+**CSS injection:** `base.html` injects a `<style id="custom-theme-css">` block AFTER
+`themes.css` in `<head>`. The system theme class stays on `<body>` always. The custom
+variables override via `body[class] { ... }` — equal specificity to `body.theme-*`,
+wins on source order. No class switching = no flash on load.
+
+**User pref keys:** `custom_color_scheme` and `custom_layout` in `user_prefs` table.
+Setting to `None` via `set_user_pref(id, key, None)` deletes the row (reverts to system default).
+
+**Permissions:**
+- Admin only: import, export, delete, enable/disable
+- All users: select from enabled custom themes in appearance popover and preferences page
+
+**Disabled themes:** `.disabled` sidecar file alongside the `.nwtheme` file.
+Disabled themes are hidden from user selectors but remain on disk.
+
+---
+
+## Top-level Imports Already in webapp.py
+
+```python
+import os, json, csv, io, logging
+from datetime import datetime, timedelta
+from flask import (Flask, render_template, jsonify, request,
+                   send_file, redirect, url_for, flash, session)
+import config
+import database
+import auth
+import updater
+import configeditor
+import patcher
+import certmanager
+import config_validator
+import alert_subscribers
+import security_log
+```
+Do NOT re-import these at module level. Use `from flask import X` inside a function only if needed for a name conflict.
+
+---
+
+## patcher.py — Changelog Functions
+
+```python
+patcher.get_changelog(limit=200)         # list of dicts, newest first
+patcher.get_changelog_entry(entry_id)    # single dict or None
+patcher.update_changelog_notes(id, notes)
+patcher.generate_release_notes_html(entry, site_name, theme, custom_palette=None)
+patcher.generate_combined_changelog_html(entries, site_name, theme, custom_palette=None)
+```
+
+---
+
+## updater.py — Dev Docs Functions (v3.2.89+)
+
+```python
+updater.list_dev_docs()                          # list of dicts: filename, size_bytes, modified
+updater.save_dev_doc(filename, content_bytes)    # returns (True, None) or (False, error)
+updater.delete_dev_doc(filename)                 # returns (True, None) or (False, error)
+updater.rename_dev_doc(old_filename, new_filename) # returns (True, None) or (False, error)
+updater.get_dev_doc_path(filename)               # returns full path or None
+updater.DEV_DOCS_DIR                             # ~/netwatch/dev_docs/
+```
+
+Dev docs routes in webapp.py:
+- `GET  /api/devdocs/list` — list all files
+- `POST /api/devdocs/upload` — upload a file (any type, no syntax check, no restart)
+- `POST /api/devdocs/delete` — delete a file
+- `POST /api/devdocs/rename` — rename a file
+- `GET  /api/devdocs/download?filename=X` — download a file
+- `GET  /api/admin/export_code_full` — zip of code + dev_docs/ contents
+
+---
+
+## alerts.py — Key Facts
+
+- `alerts.py` is imported by **both** `monitor.py` and `webapp.py`
+- Test emails triggered from the web call `alerts.send_test()` directly from the web service
+- **Any change to `alerts.py` must restart both services**
+- Email via Gmail SMTP using `GMAIL_USER` + `GMAIL_APP_PASSWORD` from config.py
+- `GMAIL_USER` is the sending credential only — doesn't need to match any user account email
+- Owner subscriber matched by `owner_username` field in `alert_subscribers`, not email
+- MIMEText must specify `"utf-8"` charset: `MIMEText(body, "html", "utf-8")`
+- Gmail blocks `data:image/png;base64,...` src attributes — use emoji instead
+
+### Alert system master lists (in alert_subscribers.py)
+- **`ALERT_TYPES`** — the single source of truth for every alert type in the system. Controls what appears in subscriber preferences, delivery history filters, role defaults, and the DB seed. Adding a new alert type anywhere requires adding it here first.
+- **`CARRIERS`** — master list of SMS carrier gateway domains. Adding a new carrier requires adding it here; `CARRIER_BY_ID` is derived from this list automatically.
+
+---
+
+## configeditor.py — Export/Import
+
+- FIELDS is built dynamically at import time from `config_schema.CONFIG_SCHEMA`, excluding entries
+  where `ui_hidden=True`. Do not add fields to configeditor.py — add them to config_schema.py.
+- `configeditor.read_config()` — returns `{key: value}` dict of all FIELDS, native Python types
+- `configeditor.save_config(new_values, saved_by)` — validates, backs up, writes config.py, returns `(bool, error_or_None)`
+- `configeditor.rollback_config()` — restores from config.py.bak
+- `/api/config/export` — returns all values as JSON for client-side encryption (no passphrase on server)
+- Export/import uses WebCrypto AES-GCM 256-bit + PBKDF2 (200k iterations, SHA-256) — all crypto in browser
+- Import shows a diff modal: only changed fields shown, click to choose current vs imported per field
+
+---
+
+## Metrics Page — Charts (v3.2.78+)
+
+### Architecture
+- All 4 charts use shared Chart.js plugins registered once: `CrosshairPlugin`, `ZoomDragPlugin`
+- Data flow: `loadData(hours, startIso?, endIso?)` → fetch API → `bucketAvg()` → chart update
+- Auto-refresh pauses while zoomed (`isZoomed` flag)
+
+### Key functions
+```javascript
+bucketAvg(arr, fields, numBuckets, startMs, endMs)  // time-anchored bucket averaging
+makeBucketLabels(buckets, hours)    // sparse x-axis labels
+makeBucketRawLabels(buckets)        // full "Avg: Mar 7 06:35 AM – 06:50 AM" tooltip strings
+numBuckets(hours)                   // 1H→60, 6H→72, 24H→96, 7D→168, 30D→240
+loadData(hours, startIso, endIso)   // main data loader
+```
+
+### Bucket window anchoring — critical rule
+- `startMs` is always `Date.now() - hours*3600*1000` (full requested range)
+- `endMs` is always `Date.now()`
+- **Never derive startMs from oldest data point** — was tried in v3.2.82/83, reverted in v3.2.86
+- Gaps in data (monitor restart, Pi reboot) correctly appear as breaks in the line
+- The old `sample()` function is gone — do not reintroduce it
+
+### chart._rawLabels
+- Stored per chart: full timestamp string per bucket point, used by CrosshairPlugin tooltip
+- Set alongside chart data update: `chart._rawLabels = makeBucketRawLabels(buckets)`
+
+### Zoom
+- Drag on any chart to zoom — ZoomDragPlugin computes ISO timestamps from drag bounds
+- Calls `loadData(hours, startIso, endIso)` with explicit window
+- Reset Zoom button appears in toolbar while zoomed
+
+---
+
+## How to Deploy Updates to NetWatch
+
+There are **two methods** for deploying code changes to the Pi. Claude builds the package;
+the user installs it via the NetWatch web UI. No CLI needed.
+
+---
+
+### Method A — Package Installer (preferred for any change)
+
+**When to use:** Any time you are changing one or more files. This is the standard method.
+It takes a snapshot before touching anything, so rollback is always available.
+
+**UI path:** Admin → Package Installer (at `/admin/patch`)
+
+**What Claude does — step by step:**
+
+1. Edit the file(s) in the working directory
+2. Bump the version number (e.g. `3.2.92` → `3.2.93`)
+3. Build a zip containing:
+   - `manifest.json` at the **root** of the zip
+   - All changed files at the **root** of the zip (patcher finds them by basename)
+   - Use `manifest.json` file entries with full relative paths (`templates/foo.html`, `static/bar.css`, `dev_docs/file.txt`)
+4. Provide the zip for download
+
+**CRITICAL — Zip must be built from inside the package directory:**
+```bash
+cd /package_dir && zip -r output.zip .
+```
+Never zip a folder from outside — files must be at the zip root, not inside a subdirectory.
+
+**What the user does:**
+
+1. Download the zip from Claude
+2. Open NetWatch → Admin → Package Installer
+3. Upload the zip — the UI shows a preview of every action before applying
+4. Click Apply
+5. Wait for the restart confirmation
+
+---
+
+### Manifest format
+
+```json
+{
+  "version": "3.2.93",
+  "description": "Brief description of what this package does.",
+  "min_version": "3.2.92",
+  "actions": [
+    { "action": "replace", "file": "webapp.py" },
+    { "action": "replace", "file": "templates/patch_manager.html" },
+    { "action": "replace", "file": "static/themes.css" },
+    { "action": "replace", "file": "dev_docs/NetWatch_AI_Context_latest.txt" },
+    { "action": "restart", "services": ["monitor", "web"] }
+  ]
+}
+```
+
+**Manifest rules (all confirmed from source):**
+
+- `version` — new version string; written to the Pi's VERSION file on success
+- `description` — shown in changelog; be specific
+- `min_version` — optional; prevents install on too-old versions
+- `actions` list is executed **in order**; a failed action stops execution and skips remaining steps
+- `restart` action should always be **last**
+- **Always include the updated context doc** as a `replace` action targeting `dev_docs/NetWatch_AI_Context_latest.txt`
+
+---
+
+### File path rules in manifest
+
+`_resolve_path()` in patcher.py determines where each file lands. The rules are:
+
+| File path in manifest | Where it is written on Pi |
+|---|---|
+| `webapp.py` | `~/netwatch/webapp.py` |
+| `main.py` | `~/netwatch/main.py` |
+| `templates/index.html` | `~/netwatch/templates/index.html` |
+| `index.html` (no prefix) | `~/netwatch/templates/index.html` (auto-placed by `.html` extension) |
+| `static/themes.css` | `~/netwatch/static/themes.css` |
+| `themes.css` (no prefix) | `~/netwatch/static/themes.css` (auto-placed by `.css` extension) |
+| `dev_docs/filename.txt` | `~/netwatch/dev_docs/filename.txt` (v3.2.90+) |
+
+**Best practice:** Always use the full relative path with subdirectory prefix (`templates/`, `static/`, `dev_docs/`)
+for HTML, CSS, JS, and dev doc files. This is unambiguous and immune to future logic changes.
+
+`_find_in_zip()` matches by **basename** anywhere in the zip, so the file can sit at the
+zip root or in a subfolder — patcher finds it either way.
+
+---
+
+### Service restart rules
+
+`_queue_restart()` in patcher.py calls `updater.get_service_for_file()` for each replaced file,
+then also honours explicit `restart` actions. The service map (from `updater.py`) is:
+
+| File | Service(s) restarted |
+|---|---|
+| `main.py`, `monitor.py`, `network.py`, `relay.py`, `button.py` | `netwatch-monitor` only |
+| `webapp.py`, `updater.py`, `configeditor.py`, `patcher.py`, `certmanager.py`, `config_validator.py`, `security_log.py` | `netwatch-web` only |
+| `alerts.py`, `alert_subscribers.py`, `database.py`, `auth.py`, `config.py` | **both** services |
+| `.html`, `.css`, `.js` files | `netwatch-web` only |
+
+**Always include an explicit `restart` action** — do not rely on auto-detection alone.
+The safe default is `"services": ["monitor", "web"]` (restarts both).
+
+**How web restart works (critical):** `netwatch-web` is restarted with a **2-second background delay**
+(`sleep 2 && sudo systemctl restart netwatch-web`) so the HTTP response fully completes first.
+The user will see a brief disconnect (~5 seconds) and then the page reloads. This is normal.
+
+**How monitor restart works:** `netwatch-monitor` is restarted synchronously (no delay).
+The network monitoring loop pauses briefly during restart.
+
+**gunicorn `preload_app = True`:** The app loads once in the master process before forking workers.
+`init()` runs once, not once per worker. A full service restart (`systemctl restart`) is required
+to pick up code changes — a reload signal is not sufficient.
+
+---
+
+### All available action types
+
+| Action | Purpose |
+|---|---|
+| `replace` | Overwrite a file with the version from the zip |
+| `patch` | Apply a unified diff to an existing file |
+| `json_patch` | Apply structured add/remove/replace ops to a JSON or Python file |
+| `mkdir` | Create a directory (skipped if already exists) |
+| `run_sql` | Run a SQL statement against netwatch.db (safe to re-run — duplicate column errors are swallowed) |
+| `restart` | Queue service restarts; `"services"` accepts `"web"`, `"monitor"`, or both |
+
+For most updates, only `replace` and `restart` are needed.
+
+---
+
+### What patcher.py does automatically
+
+- Takes a **full snapshot** of all files + database **before touching anything**
+  (saved to `~/netwatch/snapshots/`, last 5 kept)
+- Creates `.bak` copies of each file it overwrites
+- Runs Python **syntax check** on all `.py` files before replacing them
+- Updates the `VERSION` file on success
+- Logs every step to the `patch_log` table in the database (visible in Admin → Changelog)
+- If any step fails, remaining steps are **skipped** (not rolled back automatically —
+  use Admin → Emergency Rollback or `bash ~/netwatch/rollback.sh` to recover)
+
+---
+
+### Method B — Deployed Files (single file, quick fix)
+
+**When to use:** Replacing one file when you already know exactly what changed.
+No snapshot is taken. Only a `.bak` of the overwritten file is created.
+
+**UI path:** Admin → Deployed Files (at `/admin/update`)
+
+**What Claude does:** Provide the updated file for download.
+
+**What the user does:** Open NetWatch → Admin → Deployed Files → Upload the file.
+The service restart happens automatically based on the file type (see service map above).
+
+**Limitation:** No version bump, no snapshot, no changelog entry. Use Method A for anything
+that matters or that might need to be rolled back.
+
+---
+
+### Version numbering
+
+- Version is stored in `~/netwatch/VERSION` as a plain string (e.g. `3.2.92`)
+- Always bump version when deploying a package via Method A
+- Format: `MAJOR.MINOR.PATCH` — increment PATCH for normal changes
+- patcher.py uses the `packaging` library to compare versions; it tolerates trailing letters
+
+---
+
+### What NOT to include in packages
+
+Never include in a package zip:
+- `config.py` — contains live credentials; would overwrite the user's settings
+- `netwatch.db` — live database
+- `certs/` directory contents
+- `venv/` contents
+- `.bak` files
+- `snapshots/` contents
+
+---
+
+## Web Service — Gunicorn
+
+- **Config file:** `~/netwatch/gunicorn.conf.py`
+- **Entry point:** `~/netwatch/wsgi.py` (calls `init()` then exposes `app`)
+- **Workers:** 2 sync workers
+- **preload_app = True** — app loads once in master before forking; `init()` runs once
+- **SSL:** cert/key paths in gunicorn.conf.py from `~/netwatch/certs/`
+- **Logs:** stdout → journald (`sudo journalctl -u netwatch-web`)
+- `init()` only called from `wsgi.py` — `if __name__ == "__main__"` in webapp.py unused by service
+
+---
+
+## Auth — Password Reset (v3.2.69/70 behaviour, confirmed)
+
+- `request_password_reset()` writes temp hash to `reset_token_hash` only — `password_hash` is never overwritten
+- `authenticate()` checks both `password_hash` AND `reset_token_hash` — either works
+- Both temp password and real password work simultaneously by design
+- v3.2.75 incorrectly "fixed" this (breaking it), v3.2.76/77 repaired the damage — v3.2.77 is equivalent to v3.2.70
+
+---
+
+## Common Gotchas (learned the hard way)
+
+- **No `get_setting()`** — use `getattr(config, "KEY", default)`.
+- **No `@login_required` or `@require_role()`** — use `@auth.login_required` and `@auth.requires_permission("...")`.
+- **`auth.get_current_user()` returns a dict** — access with `["id"]` not `.id`.
+- **`sqlite3.execute()` is single-statement only** — never put two SQL statements in one `c.execute()` call.
+- **`autoSkip:false` in Chart.js** compresses the x-axis — use `autoSkip:true` + `maxTicksLimit`.
+- **`display:none` twice in an inline style** — second one wins; JS `.style.display = 'flex'` won't override it.
+- **Pi runs in a venv** — `/home/mboynton/netwatch/venv/bin/python3`.
+- **webapp.py has no `app.run()`** under gunicorn — `wsgi.py` is the entry point.
+- **Read all transcripts before proposing fixes** — an hour was wasted "fixing" auth that was already working (v3.2.75 incident).
+- **24H data gap after monitor restart is real, not a query bug** — the monitor simply wasn't writing. Don't chase the DB query.
+- **`sample()` is gone from metrics.html** — replaced by `bucketAvg()`. Do not reintroduce it.
+- **Package zip must be built from inside the package directory** — `cd /package_dir && zip -r output.zip .` — never zip from outside or files land in a subdirectory and the manifest won't be found.
+- **`_resolve_path()` only auto-places files it recognises** — `.html` → `templates/`, `.css/.js` → `static/`, `dev_docs/` prefix → `dev_docs/` (v3.2.90+). All other subdirectories must use explicit full paths in the manifest.
+
+---
+
+## mBase Strategy — Read This Before Any Architecture Discussion
+
+### What mBase Is and Why It Exists
+
+NetWatch was built iteratively from scratch without prior knowledge of networked
+application best practices. Many things were hand-rolled that could have been
+borrowed, and some architectural choices were made by default rather than by
+design. This was not wasted effort — it produced a working production system and
+a deep understanding of what a networked app actually needs. But it means NetWatch
+carries some technical debt and some deviations from standards.
+
+The user has ~15 future project ideas. The goal of mBase is to build the hard,
+reusable infrastructure once — auth, security, config, package management, backup,
+alerting, the module system — so every future project starts from a solid, proven,
+standards-aligned foundation instead of from scratch.
+
+**mBase = NetWatch minus the network monitoring application layer.**
+After extraction, NetWatch = mBase + network monitoring. When mBase gets improved,
+NetWatch pulls it in. All future projects start from mBase.
+
+### The Strategy (decided Session 15)
+
+Do NOT start mBase from scratch. Continue developing NetWatch, correcting and
+reworking things toward the standards as you go. By the time mBase extraction
+begins, NetWatch will already contain the corrected versions of everything. Then
+strip the NetWatch-specific pieces out to create mBase v1. Both projects end up
+better simultaneously.
+
+This means: when a PENDING DISCUSSION item in Audit_Findings.txt gets decided
+and requires a code change, that change goes into NetWatch first. mBase inherits
+the corrected version at extraction time.
+
+### Key Reference Documents (load when doing architecture or mBase work)
+
+All four of these documents must be read at the start of any session that involves
+architecture decisions, mBase planning, or standards alignment work. Do not load
+them speculatively for routine NetWatch bug fixes.
+
+- **Networked_App_Standards_Summary.txt** — Master reference. BORROW/BUILD/MIXED/
+  ADOPT classification for every major concern: auth, TLS, logging, API design,
+  data storage, UI/UX, IoT protocols, compliance, 29 non-negotiable rules.
+  CHECK THIS FIRST before making any architectural decision. The goal is for
+  mBase and all projects built on it to conform to these standards.
+
+- **Audit_Findings.txt** — Output of the Session 11 pre-mBase audit. Evaluates
+  all 13 NetWatch subsystems. Contains: confirmed decisions (OK AS-IS, EXTRACT
+  AS-IS, ACCEPTED DEVIATION), and PENDING DISCUSSION items that still need
+  decisions. The PENDING DISCUSSION items are the active work queue for
+  mBase design sessions.
+
+- **mBase_Plan.txt** — Forward plan: what mBase provides, module system design,
+  integration standards (OpenTelemetry, ONVIF, Matter, webhooks, gRPC, SNMP),
+  proposed extraction order (Phase 1-6), proposed directory structure, open
+  questions. Read before any extraction or module system work begins.
+
+- **Audit_PreMBase.txt** — The audit agenda used in Session 11. Useful as a
+  checklist reference but the findings are in Audit_Findings.txt. Lower priority
+  than the other three once the audit is complete.
+
+### PENDING DISCUSSION Items (active decision queue)
+
+These are from Audit_Findings.txt. Full decision details recorded there.
+
+DECIDED Session 15:
+- **11.1 API versioning** — /api/v1/ path versioning in both NetWatch and mBase.
+  NetWatch gets retrofitted in a future package. mBase starts clean.
+  Path versioning chosen over header versioning: simpler, visible, debuggable.
+- **7.1/7.2 Logging** — structlog, JSON format, LOG_FORMAT config key (pretty
+  default for Pi), Loki+Prometheus+Grafana on Gitea Pi, OTEL-compatible endpoint
+  configurable at first-run wizard, correlation IDs, separate audit/app log streams,
+  log level discipline as mBase convention.
+
+NOT YET DISCUSSED (work through in dedicated design sessions):
+- **1.4** Session storage: Flask signed cookie vs SQLite-backed server-side store
+- **1.7 / 3.3** Schema migration versioning: ALTER TABLE try/except vs migration table
+- **3.5** user_prefs table: move from database.py during Blueprint refactor
+- **11.2** Blueprint refactor: required for module system (~2800 line flat webapp.py)
+- **11.3** Error response standardization: raw str(e) vs RFC 7807 standard format
+- **12.2** CSS direction: keep hand-rolled CSS variable system vs migrate to Tailwind
+- **12.3** JS architecture: how modules contribute JS without editing base templates
+- **9.2** Alert type registration: how modules define alert types in module system
+- **CC.5** Input validation: manual .strip()/int() casting vs Pydantic at boundaries
+
+Accepted deviations (no action needed — document in mBase):
+- Hand-rolled auth (IdP like Keycloak requires ~512MB RAM; Pi has 1GB total)
+- config.py file vs environment variables (pragmatic for Pi; AES-GCM export compensates)
+- Self-signed CA vs Let's Encrypt (no public domain for LAN deployment)
+
+SCOPE CHANGES (Session 15):
+- Host monitoring and device telemetry REMOVED from NetWatch/mBase build scope.
+  Node Exporter + Prometheus + Grafana handles this. No custom code needed.
+- NetWatch dashboard charts (latency, packet loss, speedtest) to be reviewed
+  once Grafana is running — some may be retired in favor of Grafana dashboards.
+
+### Git, Version Control, and CI/CD — Open Discussion Items
+
+**Current state:** Git is initialized in ~/netwatch/ with remote origin at
+https://gitea-pi.home:3000/mboynton/netwatch.git. The Gitea Pi (192.168.100.230)
+is running with repos for both netwatch and mbase. Credentials stored passwordless.
+Both repos exist (private, MIT license).
+
+**What failed:** Sessions 11-13 attempted to use Gitea as the session-start
+source — Claude fetching context docs directly from Gitea via Claude in Chrome
+instead of the user uploading a zip. This was repeatedly blocked by browser
+extension security filters (session keyword filter, JWT token filter on dotted
+filenames) and sessions were shut down. The infrastructure works; the automated
+session-start workflow does not. Session 13 rolled back to the zip upload method.
+
+**Three open discussions needed (not blocking current work, but important):**
+
+1. **Version control and change tracking:** How to use git properly for NetWatch
+   and mBase going forward — commit discipline, branching, what belongs in git
+   (code + dev_docs? or code only?). The zip package workflow is fine for
+   *deploying* to the Pi; git solves *version control and change history*.
+   These are two different problems and both need to be solved correctly.
+
+2. **Sharing and publishing:** What open source or commercial distribution looks
+   like for these projects. GitHub vs self-hosted Gitea. Licensing decisions.
+   README and documentation requirements. How mBase gets versioned independently
+   from projects built on it.
+
+3. **Session workflow improvement:** Whether there is a better way to get Claude
+   context at session start that doesn't require the manual zip upload. The Gitea
+   direct-fetch approach is the right idea but the Claude in Chrome method hit
+   too many security filters. Other approaches (GitHub public repo + web_fetch,
+   different automation method) have not been tried. Not a blocker; the zip
+   workflow is reliable. Worth solving eventually for the multi-repo future.
+
+**Do not attempt the Gitea Claude-in-Chrome session-start workflow again without
+a new plan that addresses the filter problems documented in Gotchas.txt.**
+
+**Note: Gitea is now hosted on ops-pi (192.168.100.230), not gitea-pi. All
+references to gitea-pi.home should be updated to ops-pi.home.**
+
+## Backlog (as of v3.3.80, updated Session 26)
+
+**Security**
+- ✅ SESSION_COOKIE_SECURE = True — shipped v3.3.34.
+- MFA: optional for Monitor/Guest, mandatory for Admin/Operator. TOTP authenticator app
+  preferred (Google Authenticator/Authy), SMS/email code as fallback. Needs design brief.
+- Security audit: review attack surface for package installer and deployed files uploader
+  (malicious package injection, path traversal, code execution). Broader auth/session/
+  physical/remote access hardening review. Goal: confidence before distributing to others.
+
+**UI**
+- ✅ System log viewer: pkg_update.log tail in Admin page, collapsible card with
+  line count selector (50/100/200/500) and Refresh button. SHIPPED v3.3.60.
+- ✅ updater.py context doc backup: dated backup created on upload via Dev Docs (save_dev_doc)
+  and Deployed Files (backup_file). SHIPPED v3.3.51/v3.3.52.
+- ✅ System log JSON formatter: logs.html formatLogLine() parses structured JSON lines and
+  renders them as HH:MM:SS · LEVEL · service › event  field=value. Boolean fields as ✓/✗,
+  latency as Xms, packet_loss as X%. Non-JSON lines fall back gracefully. SHIPPED v3.3.54.
+- ✅ System log filter bar: event group checkboxes (Health, Network, Resets, Speedtest,
+  System, Web Requests [off by default], Other) and level radio (All/Warn+/Errors only).
+  Client-side filtering against cached allFormatted[]. SHIPPED v3.3.55.
+- ✅ Dashboard system health card: monitor heartbeat (last check-in vs expected interval),
+  last check-in age, disk space remaining. SHIPPED v3.3.69.
+- ✅ Dashboard layout polish: Last Reset and System Health cards equalized (both flex:4);
+  row 2→3 gap matched to row 1→2 using padding-top:calc(var(--gap)*0.5). SHIPPED v3.3.77.
+- ✅ System log line count selector: controls post-filter lines; active button highlight;
+  alert history count selector (10/20/50/100); admin System Info gap; pkg update log
+  auto-loads on page open. SHIPPED v3.3.78.
+- ✅ System log scroll anchor: auto-scroll only when already at bottom. SHIPPED v3.3.79.
+- ✅ Config editor false-positive "could not find/replace" warning suppressed for
+  unchanged values; Export Data card days now dynamic from config; security page period
+  buttons now filter event log table; alert type preferences filtered by role
+  (Monitor/Guest see network only); send_daily_summary() implemented. SHIPPED v3.3.80.
+- ✅ Appearance popover layout bug: selecting system layout while custom layout active now
+  works in one click (setLayout() clears custom_layout pref first). SHIPPED v3.3.70.
+- Package installer confirm row spacing: the "Confirm" step row in the install progress UI
+  touches the box below it — needs a margin/padding fix in admin.html or patcher JS.
+
+**Features**
+- ✅ Dev Documents system *(v3.2.89–3.2.95+)*
+- ✅ Configurable snapshot retention (SNAPSHOT_RETENTION, v3.3.2; now visible in Config Editor v3.3.9)
+- ✅ Pi package update scheduling (v3.3.12; weekly cron, maintenance alert category, My Account toggle)
+- ✅ Theme import/export (custom .nwtheme system, v3.3.13–v3.3.21; confirmed working Session 9)
+- ✅ Network interface verification rework (v3.3.22)
+- ~~Host monitoring~~ — REMOVED Session 15.
+- ~~Device telemetry tab~~ — REMOVED Session 15.
+- Kiosk display — scope narrowed: operational quick-glance NetWatch status view only.
+- Package storage + push (design together with: distributable installer, update package
+  installer, git strategy — these four are a cohesive update/distribution story)
+- Backup Manager: browse local backup archive in UI (DB and full backups), restore DB
+  directly from stored backup without manual upload, configurable retention for both
+  backup types via config keys (DB_BACKUP_RETENTION, FULL_BACKUP_RETENTION).
+  NOTE: Decrypt-on-Pi rejected — private key must not live on Pi. Restore flow:
+  decrypt locally on Windows, upload decrypted file, restore via UI.
+
+**Observability Stack (ops-pi)**
+- ✅ Prometheus 3.5.1 installed and scraping both Pis (Session 16)
+- ✅ Loki 3.5.1 installed (Session 16)
+- ✅ Grafana installed, both data sources connected (Session 16)
+- ✅ Node Exporter on both Pis, confirmed scraping (Session 16)
+- ✅ NetWatch structlog rework: add structlog library, LOG_FORMAT config key
+  (pretty/json), rework logging in ALL modules to emit OTEL-compatible JSON.
+  SHIPPED v3.3.37 (main services), v3.3.43 (all remaining modules — full coverage).
+  Gunicorn HTTP access log also converted to JSON via StructlogAccessLogger
+  in gunicorn.conf.py. SHIPPED v3.3.44.
+- ✅ Promtail on NetWatch Pi: ships structured JSON logs to Loki on ops-pi.
+  SHIPPED Session 17. Running as systemd service, confirmed working.
+- ✅ Grafana dashboard for NetWatch logs: 7 panels built and confirmed working.
+  Saved as "NetWatch" on ops-pi. SHIPPED Session 18.
+- ✅ Grafana "NetWatch Logs" dashboard: 3 panels (pkg_update activity, NetWatch
+  app log, OS events). Built manually Session 19.
+- ✅ pkg_update.sh journald logging: logger calls + systemd-cat crontab wrapper.
+  SHIPPED v3.3.39. Smoke tested confirmed working.
+- ✅ Promtail max_age: increased from 1h to 24h. Loki reject_old_samples_max_age
+  confirmed at default (1 week). Clean restart confirmed Session 21.
+- TLS for Grafana/Prometheus/Loki on ops-pi: currently HTTP only on LAN.
+  Low priority until external access is needed.
+
+**Infrastructure**
+- SSD migration (hardware ordered — for NetWatch Pi)
+- ✅ Fix patcher.py temp file handling -- tempfile.mkstemp() with explicit cfile,
+  cleanup in finally block, PermissionError reported accurately. SHIPPED v3.3.53.
+- ✅ Dedicated service account (netwatch-svc) — v3.3.25
+- ✅ Cron scripts $HOME fix (backup.sh, backup_db.sh, pkg_update.sh) — v3.3.39-v3.3.41
+- ✅ GPG keyring for netwatch-svc — manual setup Session 19, /home/mboynton/netwatch/.gnupg
+- ✅ All three cron jobs verified working as netwatch-svc — Session 19
+- ✅ install.sh gaps fixed: structlog+packaging added to pip install, sudoers without
+  .service suffix added, chmod 751 on home dir, chown netwatch-svc on ~/backups. SHIPPED v3.3.60.
+- ✅ Gunicorn lifecycle messages (startup, worker boot/exit, crashes) now emit JSON via
+  StructlogAccessLogger error logger overrides. Previously plain text in Loki. v3.3.60
+  attempt failed (structlog unconfigured at gunicorn startup). Fixed in v3.3.61 by
+  writing JSON directly to stdout via print() instead of using structlog. SHIPPED v3.3.61.
+- ✅ SystemSetup.txt created in dev_docs: complete Pi system state reference, all manual
+  steps, install.sh gap inventory, log format reference, wizard requirements. Session 23.
+- ✅ Package installer changelog: session number from manifest.json "session" field now
+  shown in release notes header and combined changelog view. SHIPPED v3.3.60.
+
+**Testing**
+- Full system backup — needs SD cards
+- Distributable installer — needs second Pi / SD cards (design with package storage,
+  update installer, and git strategy as a cohesive distribution story)
+- Update package installer (design with above)
+- ✅ Rollback DB restore verified working (confirmed Session 9)
+- Verify GPG decrypt of encrypted backup file locally on Windows, then full restore
+  flow end-to-end: decrypt → upload decrypted file → restore via UI.
+
+**Documentation**
+- User PDF
+- Admin guide PDF
+- Developer reference
+- Changelog PDF retroactive
+- NetWatch brochure
+
+**mBase & Architecture (active design work — see mBase Strategy section)**
+- Work through all PENDING DISCUSSION items in Audit_Findings.txt (9 decisions needed)
+- Decide git strategy: commit discipline, what goes in git, branching approach
+- Decide sharing/publishing approach: GitHub vs Gitea, licensing, README requirements
+- Decide session workflow improvement: better session-start method for multi-repo future
+- Blueprint refactor design brief (required for module system — biggest structural change)
+- Module system design brief (most consequential decision; propagates to all future projects)
+- mBase directory/repo setup on Pi (separate dir in /home/mboynton/mbase/ to start)

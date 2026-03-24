@@ -6,12 +6,13 @@
 import os
 import json
 import logging
+import structlog
 import sqlite3
 from datetime import datetime
 
 NETWATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 
-log = logging.getLogger("netwatch.subscribers")
+log = structlog.get_logger().bind(service="monitor")
 
 DB_PATH = os.path.join(NETWATCH_DIR, "netwatch.db")
 
@@ -45,6 +46,11 @@ ALERT_TYPES = [
     {"key": "security_event",    "label": "Security Event",       "group": "security",    "default_email": False, "default_sms": False, "critical": False},
     # ── Maintenance alerts ──────────────────────────────────────────────────────
     {"key": "pkg_update",        "label": "Pi Package Update",    "group": "maintenance", "default_email": False, "default_sms": False, "critical": False},
+
+    # Audit-only types — logged to delivery history but never shown in subscription UI
+    {"key": "mfa_code",         "label": "MFA Verification Code", "group": "system",      "default_email": False, "default_sms": False, "critical": False},
+    {"key": "backup_db",         "label": "Daily DB Backup",       "group": "system",      "default_email": False, "default_sms": False, "critical": False},
+    {"key": "backup_full",       "label": "Full System Backup",    "group": "system",      "default_email": False, "default_sms": False, "critical": False},
 ]
 ALERT_TYPE_KEYS = [a["key"] for a in ALERT_TYPES]
 
@@ -108,9 +114,24 @@ def init_subscribers_db():
             alert_type    TEXT    NOT NULL,
             email_enabled INTEGER DEFAULT 1,
             sms_enabled   INTEGER DEFAULT 0,
+            available     INTEGER DEFAULT 1,  -- 0 = type hidden from role, overrides purged on save
             PRIMARY KEY (role_id, alert_type)
         )
     """)
+    # Migration: add available column to existing databases
+    try:
+        c.execute("ALTER TABLE role_alert_defaults ADD COLUMN available INTEGER DEFAULT 1")
+    except Exception:
+        pass  # column already exists
+
+    # Seed standalone subscriber defaults (role_id=0) — represents admin-managed
+    # subscribers without accounts. Safe to run every startup via INSERT OR IGNORE.
+    for atype in ALERT_TYPES:
+        c.execute("""
+            INSERT OR IGNORE INTO role_alert_defaults
+                (role_id, alert_type, email_enabled, sms_enabled, available)
+            VALUES (0, ?, ?, ?, 1)
+        """, (atype["key"], int(atype["default_email"]), int(atype["default_sms"])))
 
     # Per-recipient delivery log — written by alerts.py for each send attempt
     c.execute("""
@@ -250,7 +271,7 @@ def cleanup_duplicate_owner():
 
         conn.execute("DELETE FROM alert_subscribers WHERE id=? AND is_owner=0", (dup["id"],))
         conn.commit()
-        log.info(f"Merged duplicate subscriber record for owner '{owner['username']}'")
+        log.info("Merged duplicate subscriber record", owner=owner['username'])
 
     conn.close()
 
@@ -304,7 +325,7 @@ def backfill_account_subscribers():
 
     if seeded:
         conn.commit()
-        log.info(f"Backfilled {seeded} account subscriber record(s)")
+        log.info("Backfilled account subscriber records", count=seeded)
     conn.close()
 
 
@@ -448,13 +469,13 @@ def merge_standalone_into_account(account_user_id, standalone_id):
         # Account holder already has a subscriber record — account holder's overrides win
         # Just delete the standalone record
         conn.execute("DELETE FROM alert_subscribers WHERE id=?", (standalone_id,))
-        log.info(f"Merged standalone subscriber {standalone_id} into account user_id={account_user_id} (account record existed)")
+        log.info("Merged standalone subscriber into account", standalone_id=standalone_id, user_id=account_user_id)
     else:
         # No account subscriber record yet — upgrade the standalone record to be account-linked
         conn.execute("""
             UPDATE alert_subscribers SET user_id=? WHERE id=? AND user_id IS NULL AND is_owner=0
         """, (account_user_id, standalone_id))
-        log.info(f"Upgraded standalone subscriber {standalone_id} to account user_id={account_user_id}")
+        log.info("Upgraded standalone subscriber to account", standalone_id=standalone_id, user_id=account_user_id)
 
     conn.commit()
     conn.close()
@@ -548,8 +569,8 @@ def seed_role_alert_defaults(role_id):
     global_settings = conn.execute("SELECT * FROM alert_type_settings").fetchall()
     for row in global_settings:
         conn.execute("""
-            INSERT OR IGNORE INTO role_alert_defaults (role_id, alert_type, email_enabled, sms_enabled)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO role_alert_defaults (role_id, alert_type, email_enabled, sms_enabled, available)
+            VALUES (?, ?, ?, ?, 1)
         """, (role_id, row["alert_type"], row["email_enabled"], row["sms_enabled"]))
     conn.commit()
     conn.close()
@@ -558,20 +579,56 @@ def seed_role_alert_defaults(role_id):
 def update_role_alert_defaults(role_id, settings):
     """
     Update per-role alert defaults.
-    settings: dict of {alert_type: {email_enabled, sms_enabled}}
+    settings: dict of {alert_type: {email_enabled, sms_enabled, available}}
+
+    When available is set to 0 for a type, any per-user overrides for that type
+    are immediately purged from all subscribers belonging to this role.
     """
     conn = _connect()
+
+    # Collect alert types being set to unavailable so we can purge overrides
+    types_made_unavailable = []
+
     for atype, vals in settings.items():
+        avail = int(vals.get("available", 1))
         conn.execute("""
-            INSERT INTO role_alert_defaults (role_id, alert_type, email_enabled, sms_enabled)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO role_alert_defaults (role_id, alert_type, email_enabled, sms_enabled, available)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(role_id, alert_type) DO UPDATE SET
                 email_enabled=excluded.email_enabled,
-                sms_enabled=excluded.sms_enabled
+                sms_enabled=excluded.sms_enabled,
+                available=excluded.available
         """, (role_id, atype,
               int(vals.get("email_enabled", 1)),
-              int(vals.get("sms_enabled", 0))))
+              int(vals.get("sms_enabled", 0)),
+              avail))
+        if avail == 0:
+            types_made_unavailable.append(atype)
+
     conn.commit()
+
+    # Purge overrides for unavailable types from all subscribers in this role
+    if types_made_unavailable:
+        rows = conn.execute("""
+            SELECT s.id, s.alert_overrides
+            FROM alert_subscribers s
+            JOIN users u ON s.user_id = u.id
+            WHERE u.role_id = ?
+        """, (role_id,)).fetchall()
+        for row in rows:
+            overrides = json.loads(row["alert_overrides"] or "{}")
+            changed = False
+            for atype in types_made_unavailable:
+                if atype in overrides:
+                    del overrides[atype]
+                    changed = True
+            if changed:
+                conn.execute(
+                    "UPDATE alert_subscribers SET alert_overrides=? WHERE id=?",
+                    (json.dumps(overrides), row["id"])
+                )
+        conn.commit()
+
     conn.close()
 
 
@@ -653,6 +710,7 @@ def get_active_recipients(alert_type):
     """
     Return list of delivery targets for a given alert type.
     Resolution order: subscriber overrides > role defaults > global defaults.
+    If the role has available=0 for this alert type, the subscriber is skipped entirely.
     """
     global_settings   = get_alert_type_settings()
     global_email      = bool(global_settings.get(alert_type, {}).get("email_enabled", True))
@@ -674,7 +732,14 @@ def get_active_recipients(alert_type):
         type_override = overrides.get(alert_type, {})
 
         role_id       = sub.get("role_id")
-        role_defaults = all_role_defaults.get(role_id, {}).get(alert_type, {}) if role_id else {}
+        # Standalone subscribers (no user account) use sentinel role_id=0 for defaults
+        lookup_role_id = role_id if role_id else 0
+        role_defaults = all_role_defaults.get(lookup_role_id, {}).get(alert_type, {})
+
+        # If the role/subscriber-group has marked this alert type unavailable, skip entirely
+        if role_defaults and not bool(role_defaults.get("available", 1)):
+            continue
+
         role_email    = bool(role_defaults["email_enabled"]) if role_defaults else global_email
         role_sms      = bool(role_defaults["sms_enabled"])   if role_defaults else global_sms
 

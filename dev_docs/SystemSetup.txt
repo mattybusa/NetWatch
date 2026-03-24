@@ -1,0 +1,383 @@
+NETWATCH SYSTEM SETUP REFERENCE
+================================
+Version: 1.0 | Created: 2026-03-20 | Session 23
+Purpose: Track every manual configuration step ever performed on the NetWatch Pi
+  outside of a patcher package. This is the authoritative reference for what a
+  fresh Pi needs beyond running install.sh, and the spec for what the first-run
+  wizard must eventually cover.
+
+LEGEND
+------
+[IN INSTALL.SH]  -- Handled automatically by install.sh for fresh installs
+[GAP]            -- NOT in install.sh; must be done manually or via wizard
+[OPS-PI ONLY]    -- Applies to ops-pi (192.168.100.230), not NetWatch Pi
+[MANUAL-ONCE]    -- One-time manual step; does not repeat on update
+
+================================================================================
+SECTION 1: NETWATCH PI — BASE SYSTEM
+================================================================================
+
+1.1 OS & NETWORKING
+-------------------
+[MANUAL-ONCE] Raspberry Pi OS Lite 64-bit installed on SD card
+[MANUAL-ONCE] Static IP assigned: 192.168.100.10 (eth0), 192.168.110.x (wlan0)
+  Command (NetworkManager/netplan): sudo nmcli con mod "netplan-eth0"
+    ipv4.addresses 192.168.100.10/24 ipv4.gateway 192.168.100.254
+    ipv4.dns 8.8.8.8 ipv4.method manual
+  sudo nmcli con up "netplan-eth0"
+[MANUAL-ONCE] Hostname set (default: raspberrypi or similar)
+[MANUAL-ONCE] SSH enabled
+[IN INSTALL.SH] apt packages: python3 python3-pip python3-venv sqlite3 gpg
+  rsync curl libgpiod2 python3-lgpio speedtest-cli
+
+1.2 NETWATCH DIRECTORY & PERMISSIONS
+--------------------------------------
+[IN INSTALL.SH] ~/netwatch/ directory created
+[IN INSTALL.SH] Subdirectories: logs/ data/ certs/ static/ templates/ scripts/
+[IN INSTALL.SH] ~/backups/ created for backup files
+[IN INSTALL.SH] File ownership: sudo chown -R netwatch-svc:netwatch-svc ~/netwatch
+[IN INSTALL.SH] Directory permissions: sudo chmod -R 750 ~/netwatch
+[GAP] Parent directory traversal: sudo chmod 751 /home/mboynton
+  WHY: netwatch-svc runs with WorkingDirectory=/home/mboynton/netwatch. The
+  default /home/mboynton is 700 (owner-only). The service account needs execute
+  permission on the parent to traverse into it. Without this, service fails at
+  startup with status=200/CHDIR (Permission denied).
+  SESSION: 10 | GOTCHA: SERVICE ACCOUNT HOME DIRECTORY TRAVERSAL
+
+1.3 SERVICE ACCOUNT (netwatch-svc)
+------------------------------------
+[IN INSTALL.SH] Account created:
+  sudo useradd --system --shell /usr/sbin/nologin
+    --home-dir /nonexistent --no-create-home netwatch-svc
+[IN INSTALL.SH] Installing user added to group:
+  sudo usermod -aG netwatch-svc mboynton
+[IN INSTALL.SH] Sudoers written to /etc/sudoers.d/netwatch-svc (chmod 440):
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-web.service
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-monitor.service
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop netwatch-web.service
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop netwatch-monitor.service
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl start netwatch-web.service
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl start netwatch-monitor.service
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/apt-get update
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/apt-get upgrade -y
+  netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/apt-get upgrade --dry-run
+[GAP] Sudoers WITHOUT .service suffix -- both forms required. patcher.py calls
+  "systemctl restart netwatch-web" (no suffix). Sudoers does exact string matching.
+  Without the suffix-less forms, patcher restarts are silently blocked and installs
+  appear to succeed but old code keeps running.
+  Add to /etc/sudoers.d/netwatch-svc:
+    netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-web
+    netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-monitor
+    netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop netwatch-web
+    netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop netwatch-monitor
+    netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl start netwatch-web
+    netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl start netwatch-monitor
+  SESSION: 13 | GOTCHA: SUDOERS EXACT MATCH
+
+1.4 PYTHON VIRTUAL ENVIRONMENT
+--------------------------------
+[IN INSTALL.SH] venv created: python3 -m venv ~/netwatch/venv
+[IN INSTALL.SH] Packages installed (as of v3.3.86):
+  flask flask-session bcrypt speedtest-cli RPi.GPIO lgpio
+  requests cryptography gunicorn structlog packaging pyotp qrcode
+[MANUAL-ONCE] pyotp and qrcode were installed manually on the existing Pi at v3.3.86
+  (install.sh was updated in the same package, so future fresh installs handle this
+  automatically):
+    sudo -u netwatch-svc ~/netwatch/venv/bin/pip install pyotp qrcode
+  SESSION: 28
+
+1.5 SYSTEMD SERVICES
+---------------------
+[IN INSTALL.SH] Service unit files written:
+  /etc/systemd/system/netwatch-monitor.service (User=netwatch-svc)
+  /etc/systemd/system/netwatch-web.service     (User=netwatch-svc)
+[IN INSTALL.SH] sudo systemctl daemon-reload
+[IN INSTALL.SH] sudo systemctl enable netwatch-monitor netwatch-web
+[IN INSTALL.SH] sudo systemctl start netwatch-monitor netwatch-web
+
+1.6 GPG ENCRYPTION (BACKUP)
+-----------------------------
+[IN INSTALL.SH] GPG public key imported from netwatch-backup-public.asc
+  (if present alongside install.sh at install time)
+[IN INSTALL.SH] Key trusted via --import-ownertrust
+[GAP] netwatch-svc GPG keyring -- required for backup scripts to encrypt.
+  The web service (netwatch-svc) runs backup.sh which calls gpg. GPG refuses to
+  use a keyring owned by a different user. A dedicated keyring must be created:
+    sudo mkdir -p /home/mboynton/netwatch/.gnupg
+    sudo chmod 700 /home/mboynton/netwatch/.gnupg
+    sudo chown netwatch-svc:netwatch-svc /home/mboynton/netwatch/.gnupg
+    gpg --export --armor <recipient@email.com> > /tmp/pubkey.asc
+    sudo -u netwatch-svc gpg --homedir /home/mboynton/netwatch/.gnupg \
+      --import /tmp/pubkey.asc
+    rm /tmp/pubkey.asc
+  SESSION: 19 | GOTCHA: GPG KEYRING IS USER-SPECIFIC
+  NOTE (Session 26): If gpg reports "unsafe ownership" or "Permission denied" on
+  .gnupg, the keyring ownership has drifted. Recovery:
+    sudo chown -R netwatch-svc:netwatch-svc /home/mboynton/netwatch/.gnupg
+    sudo chmod 700 /home/mboynton/netwatch/.gnupg
+  Verify with: sudo ls -la /home/mboynton/netwatch/.gnupg/
+  All entries should show netwatch-svc:netwatch-svc ownership.
+
+GPG KEY REPLACEMENT (when generating a new key pair):
+  Use when the passphrase is forgotten or the key pair needs to be rotated.
+  Old encrypted backups will NOT be recoverable with the new key — that is expected.
+  Steps:
+  1. On Windows (Kleopatra): delete old key pair, generate new RSA 4096 key for
+     mattybusa@gmail.com, export public key as .asc file. Record the passphrase.
+  2. SCP public key to Pi (from a separate PowerShell window, not inside SSH):
+       scp netwatch-pubkey.asc mboynton@192.168.100.10:/tmp/netwatch-pubkey.asc
+  3. On Pi -- replace key in netwatch-svc keyring:
+       sudo -u netwatch-svc gpg --homedir /home/mboynton/netwatch/.gnupg \
+         --batch --yes --delete-keys mattybusa@gmail.com
+       sudo -u netwatch-svc gpg --homedir /home/mboynton/netwatch/.gnupg \
+         --import /tmp/netwatch-pubkey.asc
+       rm /tmp/netwatch-pubkey.asc
+       sudo -u netwatch-svc gpg --homedir /home/mboynton/netwatch/.gnupg --list-keys
+  4. Test: sudo -u netwatch-svc bash /home/mboynton/netwatch/backup.sh
+  5. Verify decrypt on Windows: scp backup file down, gpg --decrypt, confirm passphrase works.
+  SESSION: 27
+
+[GAP] ~/backups/ ownership -- backup scripts run as netwatch-svc and write there.
+  sudo chown netwatch-svc:netwatch-svc /home/mboynton/backups
+  SESSION: 19
+
+1.7 HTTPS / TLS CERTIFICATES
+------------------------------
+[MANUAL-ONCE] Private CA generated via generate_certs.sh (one-time setup):
+  bash ~/netwatch/scripts/generate_certs.sh
+  Produces: ~/netwatch/certs/ca/ (CA key + cert) and ~/netwatch/certs/ (server cert)
+[MANUAL-ONCE] CA cert installed in browsers (Windows + iOS):
+  Copy netwatch-ca.crt to each device and install as trusted CA
+[MANUAL-ONCE] CA cert installed on NetWatch Pi system trust store:
+  sudo cp ~/netwatch/certs/ca/netwatch-ca.crt /usr/local/share/ca-certificates/
+  sudo update-ca-certificates
+
+1.8 PI PACKAGE UPDATE (APT CRON)
+----------------------------------
+[GAP] APT sudoers entries must exist before the schedule can run. These ARE in
+  install.sh (/etc/sudoers.d/netwatch-svc), but the schedule itself is set via
+  the Admin UI. Verify cron entry after enabling:
+    sudo crontab -l -u netwatch-svc | grep netwatch-pkg-update
+[GAP] Crontab wrapper (systemd-cat) was added manually in Session 19 to capture
+  full pkg_update.sh output in journald. The crontab entry should be:
+    0 3 * * 0 systemd-cat -t pkg_update /bin/bash /home/mboynton/netwatch/pkg_update.sh --alert
+  This is set automatically when the schedule is saved via the Admin UI -- but
+  verify the exact format after enabling if journald capture is needed.
+  SESSION: 19
+
+================================================================================
+SECTION 2: NETWATCH PI — OBSERVABILITY (PROMTAIL)
+================================================================================
+
+2.1 PROMTAIL (LOG SHIPPING TO LOKI)
+-------------------------------------
+Promtail is not part of install.sh. It is a separate infrastructure component.
+All steps below are manual. Repeat on any new NetWatch Pi instance.
+
+[MANUAL-ONCE] Download binary (ARM64 -- Pi 3B+ is 64-bit):
+  cd /tmp
+  wget https://github.com/grafana/loki/releases/download/v3.5.1/promtail-linux-arm64.zip
+  unzip promtail-linux-arm64.zip
+  sudo mv promtail-linux-arm64 /usr/local/bin/promtail
+  sudo chmod +x /usr/local/bin/promtail
+  NOTE: Always use linux-arm64, NOT linux-arm (32-bit). See Gotchas.txt.
+  SESSION: 17
+
+[MANUAL-ONCE] Create directories:
+  sudo mkdir -p /etc/promtail
+  sudo mkdir -p /var/lib/promtail
+
+[MANUAL-ONCE] Create service user:
+  sudo useradd --system --no-create-home --shell /bin/false promtail
+  sudo usermod -a -G systemd-journal promtail
+  sudo chown promtail:promtail /var/lib/promtail
+
+[MANUAL-ONCE] Config at /etc/promtail/config.yaml:
+  server:
+    http_listen_port: 9080
+    grpc_listen_port: 0
+  positions:
+    filename: /var/lib/promtail/positions.yaml
+  clients:
+    - url: http://192.168.100.230:3100/loki/api/v1/push
+  scrape_configs:
+    - job_name: journal
+      journal:
+        max_age: 24h
+        labels:
+          job: netwatch-pi
+          host: netwatch-pi
+      relabel_configs:
+        - source_labels: [__journal__systemd_unit]
+          target_label: unit
+        - source_labels: [__journal__hostname]
+          target_label: hostname
+  NOTE: max_age was 1h initially (Session 17), bumped to 24h (Session 21).
+
+[MANUAL-ONCE] Systemd service at /etc/systemd/system/promtail.service:
+  [Unit]
+  Description=Promtail log shipping agent
+  After=network-online.target
+  Wants=network-online.target
+
+  [Service]
+  User=promtail
+  Group=promtail
+  ExecStart=/usr/local/bin/promtail -config.file=/etc/promtail/config.yaml
+  Restart=always
+  RestartSec=5
+
+  [Install]
+  WantedBy=multi-user.target
+
+[MANUAL-ONCE] Enable and start:
+  sudo systemctl daemon-reload
+  sudo systemctl enable promtail
+  sudo systemctl start promtail
+
+[MANUAL-ONCE] Verify:
+  sudo journalctl -u promtail -n 10 --no-pager
+  Then check Grafana Explore: {host="netwatch-pi"}
+
+2.2 NODE EXPORTER (METRICS FOR PROMETHEUS)
+--------------------------------------------
+Node Exporter is not part of install.sh. Manual install on NetWatch Pi.
+
+[MANUAL-ONCE] Download (ARM64):
+  cd /tmp
+  wget https://github.com/prometheus/node_exporter/releases/download/v1.9.0/\
+    node_exporter-1.9.0.linux-arm64.tar.gz
+  tar xzf node_exporter-1.9.0.linux-arm64.tar.gz
+  sudo mv node_exporter-1.9.0.linux-arm64/node_exporter /usr/local/bin/
+  SESSION: 16
+
+[MANUAL-ONCE] Create service user:
+  sudo useradd --system --no-create-home --shell /bin/false node_exporter
+
+[MANUAL-ONCE] Systemd service and enable (standard node_exporter setup, port 9100)
+
+[MANUAL-ONCE] Prometheus on ops-pi must have the scrape target configured:
+  - job_name: netwatch-pi
+    static_configs:
+      - targets: ['192.168.100.10:9100']
+
+================================================================================
+SECTION 3: OPS-PI (192.168.100.230) — SERVICE REFERENCE
+================================================================================
+Full setup documented in Feature_OpsPiInfrastructure.txt (Session 16).
+This section is a quick-reference state summary only.
+
+3.1 INSTALLED SERVICES
+-----------------------
+Gitea 1.25.5        HTTPS port 3000   /etc/gitea/app.ini
+                                       Data: /mnt/gitea-data/
+Prometheus 3.5.1    HTTP  port 9090   /etc/prometheus/prometheus.yml
+                                       30-day retention
+Loki 3.5.1          HTTP  port 3100   /etc/loki/loki.yml
+                                       Filesystem storage, TSDB schema v13
+                                       30-day retention
+                                       delete_request_store: filesystem (required)
+Grafana             HTTP  port 3001   Installed via APT (official repo)
+                                       Both data sources connected
+Node Exporter 1.9.0 port 9100        Scraping ops-pi and netwatch-pi
+
+3.2 CERTIFICATES (OPS-PI)
+--------------------------
+[MANUAL-ONCE] ops-pi TLS cert for Gitea signed by NetWatch LAN CA:
+  CN=ops-pi.home, SAN: DNS:ops-pi.home, IP:192.168.100.230
+  Valid 2026-03-14 to 2036-03-10
+[MANUAL-ONCE] Windows hosts file: 192.168.100.230 ops-pi.home
+[MANUAL-ONCE] NetWatch Pi /etc/hosts: 192.168.100.230 ops-pi.home
+
+3.3 PROMETHEUS SCRAPE TARGETS
+-------------------------------
+All three confirmed UP:
+  - prometheus (localhost self-scrape)
+  - ops-pi node_exporter (localhost:9100)
+  - netwatch-pi node_exporter (192.168.100.10:9100)
+
+================================================================================
+SECTION 4: KNOWN GAPS IN INSTALL.SH
+================================================================================
+These items must be fixed before a distributable is released to anyone else.
+All are either wizard candidates or install.sh additions.
+
+GAP-1: chmod 751 /home/mboynton
+  Service traversal fix. Cannot be done by install.sh without knowing the username.
+  Wizard candidate -- detect username and apply automatically.
+  Session: 10
+
+GAP-2: Sudoers without .service suffix
+  Both "netwatch-web" and "netwatch-web.service" forms needed.
+  Easy install.sh fix -- add both forms to the sudoers block.
+  Session: 13
+
+GAP-3: structlog and packaging missing from pip install
+  FIXED in v3.3.60 (Session 23) -- both added to install.sh pip block.
+  Session: 17, 10
+
+GAP-4: netwatch-svc GPG keyring at ~/netwatch/.gnupg
+  Required for backup encryption to work when running as netwatch-svc.
+  Wizard candidate -- prompt for recipient email, create keyring, import key.
+  Session: 19
+
+GAP-5: chown netwatch-svc:netwatch-svc ~/backups
+  Backup scripts write to ~/backups as netwatch-svc. Fails without this.
+  Easy install.sh fix -- add chown after mkdir -p ~/backups.
+  Session: 19
+
+GAP-6: Promtail not in install.sh
+  Entire Promtail install is manual. Must repeat on any new Pi.
+  Installer candidate -- add as optional observability step with Loki URL prompt.
+
+GAP-7: Node Exporter not in install.sh
+  Same as GAP-6 -- entirely manual.
+
+================================================================================
+SECTION 5: LOG FORMAT REFERENCE
+================================================================================
+What is sent to Loki from the NetWatch Pi, and in what format:
+
+SOURCE                        FORMAT    NOTES
+----------------------------  --------  ----------------------------------------
+netwatch-monitor              JSON      structlog, service="monitor" (v3.3.37+)
+netwatch-web (app events)     JSON      structlog, service="web" (v3.3.37+)
+gunicorn HTTP access log       JSON      StructlogAccessLogger.access() (v3.3.44+)
+gunicorn lifecycle messages   PLAIN     Startup/worker messages. access() override
+                                        only covers HTTP requests, not internal
+                                        gunicorn error logger. Fix pending (S23).
+pkg_update.sh                 PLAIN     Shell output via logger/systemd-cat.
+                                        Plain text is acceptable -- low volume,
+                                        not queried by field.
+SSH (sshd)                    PLAIN     System service. Cannot convert without
+                                        OTEL Collector middleware. Acceptable --
+                                        pattern search with |= works fine.
+systemd / kernel / OS         PLAIN     Same as SSH. System services. Acceptable.
+Node Exporter                 PLAIN     Startup messages only. No operational value.
+Promtail itself               PLAIN     Startup messages only. No operational value.
+
+RULE: Only log sources controlled by NetWatch code are expected to emit JSON.
+Third-party system services (SSH, systemd, OS, Node Exporter, Promtail) emit plain
+text. This is normal and expected. Loki can search them with |= pattern matching.
+The gunicorn lifecycle message gap is the only remaining controllable fix.
+
+================================================================================
+SECTION 6: FIRST-RUN WIZARD — FUTURE REQUIREMENTS
+================================================================================
+Items that should be handled by the first-run wizard in a distributable release,
+beyond what it currently covers:
+
+Currently covered by wizard:
+  - SITE_NAME, network targets, relay assignment
+  - GMAIL_USER, GMAIL_APP_PASSWORD, ALERT_TO
+  - SSL certificate generation
+
+Should be added to wizard or install.sh before distributable:
+  - chmod 751 on the installing user's home directory (GAP-1)
+  - Sudoers without .service suffix (GAP-2) -- install.sh fix
+  - structlog + packaging pip install (GAP-3) -- install.sh fix
+  - netwatch-svc GPG keyring setup: prompt for recipient email (GAP-4)
+  - chown netwatch-svc on ~/backups (GAP-5) -- install.sh fix
+  - Optional: Promtail install with Loki URL prompt (GAP-6)
+  - Optional: Node Exporter install (GAP-7)
+  - LOG_FORMAT config key: prompt for pretty/json (currently defaults to pretty)

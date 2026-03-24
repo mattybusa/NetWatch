@@ -1,0 +1,163 @@
+NETWATCH CHAT SUMMARY
+=====================
+Session: 17
+Date: 2026-03-15
+Starting version: v3.3.36 (context doc authoritative; zip label matched)
+Ending version: v3.3.37 (NetWatch package); Promtail installed as infrastructure (no version bump)
+Summary: Structlog rework shipped as v3.3.37, JSON mode verified, Promtail installed
+  on the NetWatch Pi and confirmed shipping journal logs to Loki on ops-pi.
+
+SCOPE NOTE: This session covered two distinct arcs (structlog rework and Promtail
+install) plus design discussion. Expanded summaries produced for both major items.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+- Design discussion: structlog rework design brief produced. Three approaches evaluated
+  (minimal adoption, full adoption, hand-rolled JSON formatter). Option B (full
+  structlog adoption) selected. Flat service names chosen over dotted Python logger
+  names (monitor, web, main) after a follow-up question surfaced a flip in the initial
+  recommendation. Full reasoning documented in the brief.
+
+- v3.3.37 -- Structlog rework (see Feature_StructlogRework.txt):
+  structlog 25.5.0 installed in venv as netwatch-svc. wsgi.py and main.py rewritten
+  with structlog configuration (_configure_structlog() function). monitor.py and
+  webapp.py updated to use structlog.get_logger().bind(service="..."). All log calls
+  converted from f-string format to keyword argument format. LOG_FORMAT config key
+  added to config_schema.py (pretty/json, Logging section). JSON mode verified in
+  journalctl showing structured fields (service, event, level, timestamp, and
+  domain-specific fields like lan, wan, latency_ms etc.).
+
+- Promtail install (see Feature_PromtailInstall.txt):
+  Promtail 3.5.1 linux-arm64 binary installed at /usr/local/bin/promtail. Config at
+  /etc/promtail/config.yaml reading from systemd journal, shipping to Loki on
+  ops-pi (192.168.100.230:3100). Systemd service running as dedicated promtail user
+  with systemd-journal group membership. Confirmed working end-to-end: logs visible
+  in Grafana Explore with {host="netwatch-pi"} query.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- Promtail linux-arm binary (v3.5.1): Downloaded and extracted successfully but failed
+  to execute with "required file not found". The binary is a 32-bit armhf ELF
+  requesting /lib/ld-linux-armhf.so.3, which is not present on the 64-bit OS.
+  The Pi 3B+ has a 64-bit Cortex-A53 processor running 64-bit Raspberry Pi OS --
+  the arm64 binary is the correct choice. Replaced with promtail-linux-arm64.zip
+  which ran natively with no issues.
+
+- Alloy (Grafana's Promtail replacement): Investigated as the forward-looking choice
+  since Promtail reached EOL in March 2026. Alloy only supports Linux AMD64 and ARM64
+  officially -- confirmed. However the GitHub issue tracker revealed Grafana has been
+  reluctant to add armhf support, which was the concern that led to the Alloy
+  investigation in the first place. Once it was confirmed the Pi is 64-bit (ARM64),
+  Alloy would actually be viable -- but we chose to stay with Promtail 3.5.1 to match
+  the Loki version on ops-pi and keep things simple. Alloy migration is a future option
+  if needed.
+
+- Promtail permissions failure: When the service was first started, it failed with
+  "open /var/lib/promtail/positions.yaml: permission denied". Root cause: the
+  positions.yaml file was created during a manual test run as mboynton, then the
+  service was configured to run as the promtail user. The file was owned by mboynton.
+  Fixed with sudo chown -R promtail:promtail /var/lib/promtail.
+
+- Initial max_age: 12h caused Loki 400 rejections: on the first test run, Promtail
+  tried to ship 12 hours of backlog journal entries. Loki rejected entries older than
+  its acceptance window with HTTP 400. Fixed by changing max_age to 1h in the config.
+
+
+DECISIONS MADE
+--------------
+- Structlog full adoption (Option B) over minimal adoption: full adoption is the only
+  approach that makes Loki queries actually useful. Minimal adoption would ship JSON
+  with all data buried in the message string, defeating the purpose.
+
+- Flat service names (monitor, web, main) over dotted Python logger names
+  (netwatch.monitor etc.): the dotted hierarchy is a standard-logging concept that
+  adds no value in structlog. Shorter names are cleaner in Grafana label filters.
+  Initial recommendation in the design brief said to keep existing names -- this was
+  reversed after the user asked a follow-up question that prompted real reasoning.
+
+- journald as Promtail source (not file-based): user correctly pushed back on the
+  initial suggestion to tail only netwatch.log. The Pi runs other things worth having
+  in Loki (systemd events, SSH logins, apt activity, kernel messages). journald
+  captures everything; file tailing only captures what we explicitly think to include.
+
+- Promtail over Alloy: Promtail 3.5.1 chosen to match the Loki version on ops-pi
+  and avoid complexity. Alloy migration deferred -- it is viable on this hardware
+  (ARM64) but adds no value right now.
+
+- max_age: 1h in Promtail config: conservative initial value to avoid Loki rejections
+  on first run. Can be increased once the pipeline is stable and the Loki retention
+  window is understood.
+
+- End-of-session context doc update included in v3.3.37 package. Backlog updated
+  to mark structlog rework complete and Promtail ready-to-install (now also complete).
+  Ops-pi service reference and next-task documented in CurrentTask.txt.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] Grafana dashboard for NetWatch logs: Promtail is shipping to Loki but no
+  NetWatch-specific Grafana dashboard has been built yet. Next session should build
+  a dashboard that surfaces health_check events, reset events, and error counts.
+
+- [PENDING] Promtail max_age: currently set to 1h. Once the pipeline is confirmed
+  stable over a few days, consider increasing to 12h or 24h so historical context
+  is available in Loki after a Pi reboot or Promtail restart.
+
+- [PENDING] Alloy migration: Promtail is EOL as of March 2026. Not urgent -- it will
+  continue working -- but worth noting for future sessions. The Pi is ARM64 so Alloy
+  is viable when the time comes.
+
+- [PENDING] Weekly Pi update cron (v3.3.12): still not confirmed fired in the wild.
+  Verify: crontab -l | grep netwatch-pkg-update
+
+- [PENDING] Web service silent-exit after delayed restart: still unconfirmed potential
+  bug. Continue watching journalctl on package installs.
+
+- [PENDING] API versioning (/api/v1/) retrofit of NetWatch: decided Session 15,
+  not yet implemented.
+
+- [PENDING] 9 PENDING DISCUSSION items in Audit_Findings.txt remain open.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- NetWatch structlog rework (v3.3.37) -- structlog library, LOG_FORMAT config key,
+  JSON output in all four services
+- Promtail on NetWatch Pi -- installed, configured, running as service, confirmed
+  shipping to Loki on ops-pi
+
+No new backlog items added.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Feature_StructlogRework.txt -- Full detail on structlog adoption: design brief,
+  file-by-file changes, log call conversions, LOG_FORMAT config key, JSON mode
+  verification.
+- Feature_PromtailInstall.txt -- Full detail on Promtail install: binary selection
+  failures, final arm64 install, config, service setup, permissions fix, verification.
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during this dev session per process:
+
+- PI 3B+ IS 64-BIT (ARM64), NOT 32-BIT -- new entry. The Cortex-A53 is ARMv8/64-bit.
+  Raspberry Pi OS Lite 64-bit runs a 64-bit kernel and userspace. Always use arm64
+  binaries, not armhf/arm binaries.
+- CREATE SERVICE USER BEFORE RUNNING MANUALLY -- new entry. If a service account is
+  planned for a daemon, create it and set directory ownership before doing any manual
+  test runs. Running manually as a different user creates files with wrong ownership
+  that the service account cannot write, causing immediate startup failure.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.37
+- Promtail running as systemd service, confirmed shipping to Loki
+- All NetWatch services running normally on JSON log format
+- Next task: build a Grafana dashboard for NetWatch logs (health_check events,
+  reset events, error rates from Loki)

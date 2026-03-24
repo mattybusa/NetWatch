@@ -7,6 +7,7 @@ import os
 import re
 import smtplib
 import logging
+import structlog
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -17,7 +18,7 @@ import alert_subscribers as subs
 
 NETWATCH_DIR = os.path.dirname(os.path.abspath(__file__))
 
-log = logging.getLogger("netwatch.alerts")
+log = structlog.get_logger().bind(service="monitor")
 
 SUBJECTS = {
     "outage":            "⚠️  NetWatch: Network Outage Detected",
@@ -33,6 +34,7 @@ SUBJECTS = {
     "email_verification":"✉️  NetWatch: Email Verification Code",
     "password_reset":    "🔑  NetWatch: Password Reset",
     "pkg_update":        "🔧  NetWatch: Pi Package Update Complete",
+    "mfa_code":           "🔐  NetWatch: Login Verification Code",
 }
 
 COLORS = {
@@ -61,6 +63,7 @@ SMS_LABELS = {
     "brute_force":       "BRUTE FORCE",
     "security_event":    "SECURITY",
     "pkg_update":        "PKG UPDATE",
+    "mfa_code":           "MFA CODE",
 }
 
 
@@ -92,10 +95,10 @@ def _send_one(to_address, subject, html_body, plain_body):
             server.sendmail(gmail_user, to_address, msg.as_string())
         return True
     except smtplib.SMTPAuthenticationError as e:
-        log.error(f"Alert failed auth ({e.smtp_code}): {e.smtp_error}")
+        log.error("Alert send failed: SMTP auth error", smtp_code=e.smtp_code, smtp_error=str(e.smtp_error))
         return False
     except Exception as e:
-        log.error(f"Alert failed: {e}")
+        log.error("Alert send failed", error=str(e))
         return False
 
 
@@ -241,7 +244,7 @@ def send_alert(alert_type, message, force=False, force_email=None, subject=None,
         return ok
 
     if not config.ALERTS_ENABLED and not force:
-        log.info(f"Alert logged (disabled): [{alert_type}] {message}")
+        log.info("Alert suppressed (disabled)", alert_type=alert_type)
         return False
 
     if force:
@@ -257,7 +260,7 @@ def send_alert(alert_type, message, force=False, force_email=None, subject=None,
         recipients = subs.get_active_recipients(alert_type)
 
     if not recipients:
-        log.warning(f"No recipients for alert: {alert_type}")
+        log.warning("No recipients for alert", alert_type=alert_type)
         return False
 
     subject  = SUBJECTS.get(alert_type, f"NetWatch: {alert_type}")
@@ -286,7 +289,7 @@ def send_alert(alert_type, message, force=False, force_email=None, subject=None,
             pass
         if ok:
             any_sent = True
-            log.info(f"Alert [{alert_type}] -> {recipient['channel']}:{recipient['address']}")
+            log.info("Alert sent", alert_type=alert_type, channel=recipient["channel"], address=recipient["address"])
 
     if any_sent and alert_id:
         database.mark_alert_sent(alert_id)
@@ -337,6 +340,49 @@ def send_test(subscriber_id, channel):
         return ok, f"Test SMS sent to {sms_addr}" if ok else f"Failed to send to {sms_addr}"
 
     return False, f"Unknown channel: {channel}"
+
+def send_daily_summary():
+    """
+    Compile and send a daily network health summary to all subscribers of the
+    daily_summary alert type. Called by the monitor loop at approximately 8:00 AM.
+    Covers the previous 24 hours.
+    """
+    if not config.ALERTS_ENABLED:
+        log.info("Daily summary suppressed (alerts disabled)")
+        return
+
+    try:
+        uptime   = database.get_uptime_stats()       # {'1h':x, '24h':x, '7d':x, '30d':x}
+        resets   = database.get_reset_count_today()  # int
+        latest   = database.get_latest_health()      # dict or None
+    except Exception as e:
+        log.error("Daily summary: failed to fetch stats", error=str(e))
+        return
+
+    uptime_24h = uptime.get("24h", 0)
+    uptime_7d  = uptime.get("7d",  0)
+
+    # Build a concise HTML summary table
+    status_color = "#4caf50" if uptime_24h >= 99 else ("#ff9800" if uptime_24h >= 95 else "#f44336")
+    latency_str  = f"{latest['latency_ms']} ms" if latest and latest.get("latency_ms") else "—"
+    loss_str     = f"{latest['packet_loss']}%" if latest and latest.get("packet_loss") is not None else "—"
+
+    message = (
+        f"<strong>24h uptime:</strong> "
+        f"<span style='color:{status_color};font-weight:700;'>{uptime_24h}%</span>"
+        f"&nbsp;&nbsp;|&nbsp;&nbsp;"
+        f"<strong>7d uptime:</strong> {uptime_7d}%"
+        f"<br><br>"
+        f"<strong>Auto-resets (today):</strong> {resets}"
+        f"<br>"
+        f"<strong>Current latency:</strong> {latency_str}"
+        f"&nbsp;&nbsp;|&nbsp;&nbsp;"
+        f"<strong>Packet loss:</strong> {loss_str}"
+    )
+
+    send_alert("daily_summary", message)
+    log.info("Daily summary sent", uptime_24h=uptime_24h, resets=resets)
+
 
 def _strip_html(text):
     clean = re.sub(r'<[^>]+>', ' ', text)

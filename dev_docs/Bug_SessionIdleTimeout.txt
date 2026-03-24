@@ -1,0 +1,102 @@
+BUG: Session Idle Timeout Not Enforcing Logout
+===============================================
+Type: Bug
+Date: 2026-03-20
+Session: 22
+Outcome: Complete — confirmed working after three packages and user logout/login
+
+
+BACKGROUND
+----------
+NetWatch has role-based session timeouts. Admin is set to 60 minutes (UI minimum).
+The timeout is activity-based — real user interactions reset the idle clock.
+Auto-refresh polling should not count as activity. The user reported remaining
+logged in after 40+ minutes of inactivity. Three separate compounding bugs were
+found and fixed in sequence.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Attempt 1 — v3.3.57: @auth.login_required on session routes
+  /api/session/status and /api/session/ping both had @auth.login_required.
+  When the session expires, get_current_user() calls logout_user() and returns
+  a guest dict. login_required sees is_guest=True and returns a Flask redirect
+  to /login instead of JSON. The client JS fetch() gets a redirect response,
+  .then(r => r.json()) fails or returns garbage, catch(() => {}) swallows it
+  silently, remainingSecs never reaches 0, redirect never fires.
+  Fix: removed @auth.login_required from both routes. Unauthenticated requests
+  return {"remaining": 0} directly. Client JS handles the redirect.
+  Result: correct, but timeout still not enforcing — further bugs present.
+
+Attempt 2 — v3.3.58: session routes missing from _POLLING_PATHS
+  /api/session/status was not in _POLLING_PATHS. The before_request hook
+  update_last_activity() ran on every /api/session/status call, resetting
+  last_activity every 30 seconds (the checkRemaining() interval). The session
+  never went idle.
+  Fix: added /api/session/status and /api/session/ping to _POLLING_PATHS.
+  Result: correct for those two routes, but timeout still not enforcing —
+  every other auto-refreshing page also resetting last_activity.
+
+Root cause of continued failure after v3.3.58:
+  The dashboard auto-refreshes every 10 seconds, calling /api/status,
+  /api/uptime_stats, /api/speedtest_avg, /api/reset_count, /api/preferences/
+  dashboard, /api/config/network — none of which were in _POLLING_PATHS.
+  The logs page and metrics page also poll regularly. update_last_activity()
+  was resetting last_activity on every one of these calls. The blocklist
+  approach is fundamentally broken: any polling endpoint not explicitly added
+  to _POLLING_PATHS silently keeps the session alive indefinitely.
+
+False failure after v3.3.59:
+  User tested and reported still logged in after 40 minutes. Root cause: the
+  old session cookie (created before the fix) carried a stale last_activity
+  timestamp. The new code read it correctly but the cookie itself had been
+  refreshed by the old broken code for hours. Logging out and back in created
+  a fresh session and the timeout worked correctly.
+
+
+WHAT WORKED
+-----------
+v3.3.59 — Removed update_last_activity() from before_request entirely.
+
+The blocklist (_POLLING_PATHS) approach is permanently abandoned. Any new
+polling endpoint added in the future would silently break idle timeout without
+a corresponding _POLLING_PATHS update — a maintenance trap.
+
+Correct architecture: last_activity is updated ONLY by /api/session/ping,
+which is called by client JS on real user events:
+  mousedown, keydown, touchstart, scroll, wheel
+
+This means:
+- Active user → events fire → ping → last_activity resets → stays logged in
+- Idle user → no events → ping doesn't fire → clock counts down → logout
+
+Files changed: webapp.py
+Changes in webapp.py:
+  1. Removed _POLLING_PATHS frozenset and update_last_activity() before_request
+     hook entirely. Replaced with a comment explaining the architecture decision.
+  2. /api/session/ping: removed @auth.login_required, added user_id check,
+     returns {"remaining": 0} when session expired instead of redirecting.
+  3. /api/session/status: removed @auth.login_required, added user_id check
+     and get_current_user() call to trigger server-side expiry check, returns
+     {"remaining": 0} when expired instead of redirecting.
+  4. Added PERMANENT_SESSION_LIFETIME = timedelta(days=2) to session config
+     block as a hard ceiling on browser cookie lifetime (Flask default is 31 days).
+  5. SESSION_COOKIE_SECURE = True consolidated into the session config block
+     (was previously set elsewhere, confirmed no duplicate).
+
+Packages: v3.3.57 (login_required fix), v3.3.58 (POLLING_PATHS fix),
+          v3.3.59 (before_request removal — the working fix)
+
+Verified: user set Admin timeout to 15 minutes, walked away, was redirected to
+login page. Confirmed active use does not trigger premature logout.
+
+IMPORTANT: After installing this fix, users must log out and back in to get a
+clean session. Old cookies carry stale last_activity timestamps from the broken
+code. The fix works correctly on new sessions only.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- The minimum selectable timeout in the UI is 15 minutes (predetermined options:
+  15 min, 1 hour, 8 hours, 24 hours, Never). No option to set shorter durations
+  for testing. Not a bug — 15 minutes is the intended minimum.

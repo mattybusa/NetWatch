@@ -17,15 +17,17 @@
 set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-NETWATCH_DIR="$HOME/netwatch"
-BACKUP_DIR="$HOME/backups"
+# Derive NETWATCH_DIR from script location -- do not use $HOME (resolves to
+# /nonexistent for netwatch-svc which has no home directory).
+NETWATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
+BACKUP_DIR="/home/mboynton/backups"
 GPG_RECIPIENT="mattybusa@gmail.com"   # Must match imported public key
 MAX_EMAIL_SIZE_MB=20                   # Alert if backup exceeds this size
 
 # Load email settings from config.py
 GMAIL_USER=$(python3 -c "import sys; sys.path.insert(0,'$NETWATCH_DIR'); import config; print(config.GMAIL_USER)" 2>/dev/null || echo "")
 GMAIL_PASS=$(python3 -c "import sys; sys.path.insert(0,'$NETWATCH_DIR'); import config; print(config.GMAIL_APP_PASSWORD)" 2>/dev/null || echo "")
-ALERT_EMAIL=$(python3 -c "import sys; sys.path.insert(0,'$NETWATCH_DIR'); import config; print(config.ALERT_EMAIL)" 2>/dev/null || echo "$GMAIL_USER")
+ALERT_EMAIL=$(python3 -c "import sys; sys.path.insert(0,'$NETWATCH_DIR'); import config; print(config.ALERT_TO)" 2>/dev/null || echo "$GMAIL_USER")
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 DO_EMAIL=false
@@ -176,6 +178,7 @@ log "Compressed archive: ${TAR_SIZE}MB"
 log "Encrypting with GPG public key..."
 ENCRYPTED_FILE="${TAR_FILE}.gpg"
 gpg --batch --yes --trust-model always \
+    --homedir /home/mboynton/netwatch/.gnupg \
     --recipient "$GPG_RECIPIENT" \
     --output "$ENCRYPTED_FILE" \
     --encrypt "$TAR_FILE"
@@ -186,8 +189,9 @@ rm -f "$TAR_FILE"
 FINAL_SIZE=$(du -m "$ENCRYPTED_FILE" | cut -f1)
 log "Encrypted backup: ${FINAL_SIZE}MB → $ENCRYPTED_FILE"
 
-# 7. Keep only last 7 local backups
-ls -t "$BACKUP_DIR"/netwatch_backup_*.tar.gz.gpg 2>/dev/null | tail -n +8 | xargs rm -f 2>/dev/null || true
+# 7. Keep only last N local backups (FULL_BACKUP_RETENTION from config.py, default 7)
+KEEP_FULL=$(python3 -c "import sys; sys.path.insert(0,'$NETWATCH_DIR'); import config; print(getattr(config, 'FULL_BACKUP_RETENTION', 7))" 2>/dev/null || echo 7)
+ls -t "$BACKUP_DIR"/netwatch_backup_*.tar.gz.gpg 2>/dev/null | tail -n +$((KEEP_FULL + 1)) | xargs rm -f 2>/dev/null || true
 
 # 8. Email if requested
 if $DO_EMAIL; then
@@ -207,6 +211,11 @@ This alert will repeat on every scheduled backup run until resolved."
     fi
     log "Emailing backup..."
     send_backup_email "$ENCRYPTED_FILE" "$FINAL_SIZE"
+    if [[ $? -eq 0 ]]; then
+        "$NETWATCH_DIR/venv/bin/python3" "$NETWATCH_DIR/backup_notify.py" OK full "$(basename $ENCRYPTED_FILE)" "$ALERT_EMAIL"
+    else
+        "$NETWATCH_DIR/venv/bin/python3" "$NETWATCH_DIR/backup_notify.py" FAIL full "$(basename $ENCRYPTED_FILE)" "$ALERT_EMAIL" "Email send failed"
+    fi
 fi
 
 log "Backup complete: $(basename $ENCRYPTED_FILE)"

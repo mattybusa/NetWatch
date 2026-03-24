@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetWatch — Verification</title>
+  <link rel="stylesheet" href="/static/themes.css">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <style>
+    body { display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+    .mfa-wrap { width:100%; max-width:400px; padding:24px; }
+    .mfa-brand { text-align:center; margin-bottom:28px; font-family:var(--font-mono); letter-spacing:3px; color:var(--accent); font-size:1.2rem; font-weight:700; }
+    .mfa-title { font-size:1rem; font-weight:700; color:var(--text-primary); margin-bottom:4px; }
+    .mfa-sub   { font-size:0.82rem; color:var(--text-muted); margin-bottom:20px; }
+    .f-label { display:block; font-size:0.7rem; color:var(--text-label); text-transform:uppercase; letter-spacing:1px; margin-bottom:5px; margin-top:14px; }
+    .f-input { width:100%; background:var(--bg-input); border:1px solid var(--border-color); border-radius:6px; padding:10px 12px; color:var(--text-primary); font-family:var(--font-mono); font-size:1.1rem; outline:none; transition:border-color 0.2s; box-sizing:border-box; letter-spacing:3px; text-align:center; }
+    .f-input:focus { border-color:var(--border-focus); }
+    .submit-btn { width:100%; margin-top:20px; padding:11px; background:var(--accent); color:#000; border:none; border-radius:6px; font-size:0.9rem; font-weight:700; cursor:pointer; transition:opacity 0.2s; font-family:var(--font-body); }
+    .submit-btn:hover { opacity:0.85; }
+    .error-msg { margin-top:12px; padding:10px 14px; border-radius:6px; background:var(--fail-glow); border:1px solid var(--fail); color:var(--text-primary); font-size:0.83rem; }
+    .info-msg  { margin-top:12px; padding:10px 14px; border-radius:6px; background:var(--ok-glow); border:1px solid var(--ok); color:var(--text-primary); font-size:0.83rem; }
+    .alt-row   { display:flex; gap:8px; flex-wrap:wrap; margin-top:20px; padding-top:16px; border-top:1px solid var(--border-color); }
+    .alt-btn   { flex:1; min-width:120px; padding:8px 10px; background:var(--bg-input); border:1px solid var(--border-color); border-radius:6px; color:var(--text-muted); font-size:0.78rem; cursor:pointer; text-align:center; transition:border-color 0.15s, color 0.15s; font-family:var(--font-body); }
+    .alt-btn:hover { border-color:var(--accent); color:var(--accent); }
+    .alt-btn.active { border-color:var(--accent); color:var(--accent); background:var(--bg-hover); }
+    .back-link { display:block; text-align:center; margin-top:18px; font-size:0.78rem; color:var(--text-muted); }
+    .back-link a { color:var(--accent); text-decoration:none; }
+    .panel { display:none; }
+    .panel.active { display:block; }
+    .code-hint { font-size:0.75rem; color:var(--text-muted); margin-top:6px; text-align:center; }
+  </style>
+</head>
+<body class="theme-dark-blue">
+<div class="mfa-wrap">
+  <div class="mfa-brand"><i class="bi bi-shield-lock"></i> NETWATCH</div>
+  <div class="nw-card p-4">
+
+    {% if mode == 'totp' or mode == 'mfa' %}
+    <!-- ── TOTP panel ── -->
+    <div class="mfa-title">Two-Factor Authentication</div>
+    <div class="mfa-sub">Enter the 6-digit code from your authenticator app.</div>
+
+    {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
+    {% if code_sent %}
+      <div class="info-msg"><i class="bi bi-check-circle"></i> Code sent via {{ code_sent }}.</div>
+    {% endif %}
+    {% if send_error %}
+      <div class="error-msg">{{ send_error }}</div>
+    {% endif %}
+
+    <form method="POST" action="/mfa" id="form-totp">
+      <label class="f-label">Authenticator Code</label>
+      <input class="f-input" type="text" name="code" inputmode="numeric" pattern="[0-9]{6}"
+             maxlength="6" placeholder="000000" autofocus autocomplete="one-time-code">
+      <div class="code-hint">6-digit code · resets every 30 seconds</div>
+      <input type="hidden" name="action" value="verify_totp">
+      <button type="submit" class="submit-btn"><i class="bi bi-shield-check"></i> Verify</button>
+    </form>
+
+    {% elif mode == 'backup' %}
+    <!-- ── Backup code panel ── -->
+    <div class="mfa-title">Use a Backup Code</div>
+    <div class="mfa-sub">Enter one of your saved backup codes. Each code can only be used once.</div>
+
+    {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
+
+    <form method="POST" action="/mfa">
+      <label class="f-label">Backup Code</label>
+      <input class="f-input" type="text" name="code" placeholder="XXXX-XXXX"
+             autocomplete="off" autofocus style="letter-spacing:2px;">
+      <input type="hidden" name="action" value="verify_backup">
+      <button type="submit" class="submit-btn"><i class="bi bi-key"></i> Verify Backup Code</button>
+    </form>
+
+    {% elif mode == 'email' %}
+    <!-- ── Email code panel ── -->
+    <div class="mfa-title">Email Verification Code</div>
+    <div class="mfa-sub">A 6-digit code has been sent to your verified email address. It expires in {{ mfa_expiry }} minutes.</div>
+
+    {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
+
+    <form method="POST" action="/mfa">
+      <label class="f-label">Email Code</label>
+      <input class="f-input" type="text" name="code" inputmode="numeric" pattern="[0-9]{6}"
+             maxlength="6" placeholder="000000" autofocus autocomplete="one-time-code">
+      <input type="hidden" name="action" value="verify_challenge">
+      <input type="hidden" name="channel" value="email">
+      <button type="submit" class="submit-btn"><i class="bi bi-envelope-check"></i> Verify</button>
+    </form>
+    <form method="POST" action="/mfa/send_code" style="margin-top:10px;">
+      <input type="hidden" name="channel" value="email">
+      <button type="submit" class="alt-btn" style="width:100%;">
+        <i class="bi bi-arrow-repeat"></i> Resend Code
+      </button>
+    </form>
+
+    {% elif mode == 'sms' %}
+    <!-- ── SMS code panel ── -->
+    <div class="mfa-title">SMS Verification Code</div>
+    <div class="mfa-sub">A 6-digit code has been sent to your verified phone number. It expires in {{ mfa_expiry }} minutes.</div>
+
+    {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
+
+    <form method="POST" action="/mfa">
+      <label class="f-label">SMS Code</label>
+      <input class="f-input" type="text" name="code" inputmode="numeric" pattern="[0-9]{6}"
+             maxlength="6" placeholder="000000" autofocus autocomplete="one-time-code">
+      <input type="hidden" name="action" value="verify_challenge">
+      <input type="hidden" name="channel" value="sms">
+      <button type="submit" class="submit-btn"><i class="bi bi-phone"></i> Verify</button>
+    </form>
+    <form method="POST" action="/mfa/send_code" style="margin-top:10px;">
+      <input type="hidden" name="channel" value="sms">
+      <button type="submit" class="alt-btn" style="width:100%;">
+        <i class="bi bi-arrow-repeat"></i> Resend Code
+      </button>
+    </form>
+    {% endif %}
+
+    <!-- ── Fallback options ── -->
+    <div class="alt-row">
+      {% if mode != 'totp' %}
+      <button class="alt-btn" onclick="location.href='/mfa?mode=totp'">
+        <i class="bi bi-phone"></i> Authenticator App
+      </button>
+      {% endif %}
+      {% if mode != 'backup' %}
+      <button class="alt-btn" onclick="location.href='/mfa?mode=backup'">
+        <i class="bi bi-key"></i> Backup Code
+      </button>
+      {% endif %}
+      {% if has_email and mode != 'email' %}
+      <form method="POST" action="/mfa/send_code" style="flex:1;min-width:120px;">
+        <input type="hidden" name="channel" value="email">
+        <button type="submit" class="alt-btn" style="width:100%;">
+          <i class="bi bi-envelope"></i> Email Code
+        </button>
+      </form>
+      {% endif %}
+      {% if has_sms and mode != 'sms' %}
+      <form method="POST" action="/mfa/send_code" style="flex:1;min-width:120px;">
+        <input type="hidden" name="channel" value="sms">
+        <button type="submit" class="alt-btn" style="width:100%;">
+          <i class="bi bi-chat-text"></i> SMS Code
+        </button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="back-link"><a href="/logout">Sign in with a different account</a></div>
+  </div>
+</div>
+</body>
+</html>

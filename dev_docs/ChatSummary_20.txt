@@ -1,0 +1,176 @@
+NETWATCH SESSION SUMMARY
+========================
+Session: 20 | Date: 2026-03-18
+Starting version: v3.3.42 (context doc authoritative; zip label matched)
+Ending version: v3.3.53
+Summary: Full structlog conversion of all remaining modules, gunicorn access log
+  JSON conversion, logs page display fixes, security page event type gaps filled,
+  updater.py context doc backup fix, and patcher.py temp file cleanup fix.
+
+SCOPE NOTE: This session covered 12 distinct arcs. Expanded summaries produced for
+  major items. Minor display fixes grouped in Feature_MinorFixesSession_20.txt.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+v3.3.43 — Structlog conversion of all 13 remaining modules. patcher.py, alerts.py,
+  alert_subscribers.py, auth.py, database.py, certmanager.py, config_validator.py,
+  security_log.py, updater.py, configeditor.py, relay.py, network.py, button.py all
+  converted from plain logging.getLogger() to structlog. All f-string log calls
+  converted to keyword argument format. All log output is now JSON when LOG_FORMAT=json.
+  (see Feature_StructlogFullConversion.txt)
+
+v3.3.44 — Gunicorn HTTP access log converted to structured JSON via a custom
+  StructlogAccessLogger class in gunicorn.conf.py. Access log entries now share the
+  same JSON schema as application logs (service, event, method, path, status, bytes,
+  duration_ms, remote_addr, referer, user_agent, level, timestamp). 5xx responses log
+  at error level, 4xx at warning, 2xx/3xx at info.
+  (see Feature_GunicornAccessLog.txt)
+
+v3.3.45 — Logs page Reset Events tab: type column now shows friendly names.
+  'modem_only' → 'Modem Only', 'router_only' → 'Router/AP Only', 'full_reset' →
+  'Full Reset'. Uses replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()) fallback
+  matching the established alert_settings.html pattern.
+  (see Feature_MinorFixesSession_20.txt — "Reset Type Friendly Names")
+
+v3.3.46 — Logs page Alert History tab: alert type badge now shows friendly names using
+  the same FRIENDLY_LABELS map as alert_settings.html. Generic fallback for unknown types.
+  (see Feature_MinorFixesSession_20.txt — "Alert History Friendly Names")
+
+v3.3.47 — Alert History type badge: added white-space:nowrap to td and span to prevent
+  badge text from wrapping.
+  (see Feature_MinorFixesSession_20.txt — "Alert Badge No-Wrap")
+
+v3.3.50 — Security log page: added 6 missing event types to filter checkboxes and
+  EVENT_META. New: password_reset (🔄 PW Reset), ACCOUNT_LOCKED (🔐 Locked),
+  ACCOUNT_DISABLED (🚫 Acct Disabled), user_created (👤 User Created),
+  user_deleted (🗑️ User Deleted), session_expired (⏱️ Expired). All checked by default.
+  (see Feature_MinorFixesSession_20.txt — "Security Page Missing Event Types")
+
+v3.3.51/v3.3.52 — updater.py: when NetWatch_AI_Context_latest.txt is uploaded via
+  Dev Docs, a dated backup (NetWatch_AI_Context_YYYY-MM-DD_HHMMSS.txt) is now created
+  before overwriting. Matches patcher.py behavior. v3.3.51 put the logic in the wrong
+  function (backup_file); v3.3.52 corrected it to save_dev_doc().
+  (see Feature_MinorFixesSession_20.txt — "Updater Context Doc Backup")
+
+v3.3.53 — patcher.py _syntax_check(): uses tempfile.mkstemp() with explicit cfile
+  argument so py_compile never writes to /tmp/__pycache__/. Both temp files cleaned up
+  in a finally block. PermissionError now reported accurately instead of appearing as a
+  false syntax error. Resolves the accumulating /tmp/__pycache__/ backlog item from
+  Session 10.
+  (see Feature_MinorFixesSession_20.txt — "Patcher Temp File Fix")
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- v3.3.48 and v3.3.49: two additional packages attempting to fix alert badge wrapping
+  (min-width on th, then nowrap on span). v3.3.47 turned out to be sufficient — user
+  confirmed working after installing v3.3.47. v3.3.48 and v3.3.49 were never installed
+  and are discarded.
+
+- v3.3.51 updater.py backup fix: put the dated backup logic in backup_file() which
+  handles the Deployed Files upload path, not save_dev_doc() which handles the Dev Docs
+  upload path. Context doc is always uploaded via Dev Docs. Fix had no effect. Corrected
+  in v3.3.52. Both changes remain in updater.py (belt and suspenders — whichever path
+  is used, a dated backup is created).
+
+- Reset type friendly names — initial attempt (first v3.3.45 build): used "full" as
+  the key but relay.py actually stores "full_reset". Also lacked the generic
+  underscore-to-titlecase fallback. Rebuilt before shipping.
+
+- Alert History friendly names and no-wrap shipped as separate packages (v3.3.46,
+  v3.3.47) when they could have been one. Noted as a missed opportunity — should have
+  checked the full logs.html for all similar patterns before building v3.3.46.
+
+- Gunicorn access log investigation: initially confirmed that patcher [patcher] lines
+  were already JSON after v3.3.43. The remaining plain-text lines were gunicorn's own
+  access log formatter, which bypasses structlog entirely. Correctly identified and
+  fixed with the custom logger class.
+
+- Reset type friendly names: Claude initially concluded (incorrectly) that friendly
+  names had never existed in logs.html. User pushed back twice. Investigation eventually
+  confirmed the reset_type values stored in DB (modem_only, router_only, full_reset) had
+  always been displayed raw. The friendly names the user remembered were from a different
+  page or a detail Claude couldn't locate. Regardless, the fix is correct and confirmed
+  working.
+
+
+DECISIONS MADE
+--------------
+- Both updater.py upload paths (backup_file and save_dev_doc) now create dated backups
+  for the context doc. Belt and suspenders — harmless to have both.
+
+- Alert type "Disabled" (login_disabled) vs "Acct Disabled" (ACCOUNT_DISABLED) kept as
+  two distinct filter labels rather than merging. Distinction explained to user (login
+  attempt on disabled account vs system auto-disabling an account). User accepted.
+
+- Gunicorn's own lifecycle messages ([INFO] Starting gunicorn, Booting worker, etc.)
+  remain plain text — they come from gunicorn's internal error logger, not the access
+  logger we overrode. Not worth chasing; Loki can filter them with | json.
+
+- v3.3.48 and v3.3.49 discarded — user confirmed working at v3.3.47.
+
+- v3.3.46 accidentally installed twice by user, v3.3.47 not installed until later.
+  v3.3.47 confirmed working after install.
+
+- Gotchas.txt updated to mark the patcher /tmp/__pycache__ entry as FIXED in v3.3.53,
+  retaining the historical entry for reference.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [UNVERIFIED] Grafana {host="netwatch-pi"} | json query: user did not confirm whether
+  parse errors are fully resolved after v3.3.44. Gunicorn lifecycle messages (plain text)
+  will still cause parse errors on those specific lines — acceptable or needs filtering.
+
+- The distinction between login_disabled and ACCOUNT_DISABLED label naming may be
+  revisited in a future session if the user finds it confusing in practice.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Structlog full conversion — all modules now emit JSON (v3.3.43)
+- Gunicorn access log JSON conversion (v3.3.44)
+- updater.py context doc backup — dated backup on AI_Context overwrite (v3.3.51/v3.3.52)
+- Fix patcher.py temp file handling (v3.3.53)
+
+Identified and completed within same session:
+- Reset type friendly names in Logs page (v3.3.45)
+- Alert History friendly names in Logs page (v3.3.46)
+- Alert badge no-wrap in Logs page (v3.3.47)
+- Security page missing event types: password_reset, ACCOUNT_LOCKED, ACCOUNT_DISABLED,
+  user_created, user_deleted, session_expired (v3.3.50)
+
+No new backlog items added.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+- Feature_StructlogFullConversion.txt — Full detail on converting all 13 remaining
+  modules to structlog: file-by-file changes, service bindings, verification approach.
+- Feature_GunicornAccessLog.txt — StructlogAccessLogger class design, access log schema,
+  verification from journalctl output.
+- Feature_MinorFixesSession_20.txt — Six minor arcs: Reset Type Friendly Names, Alert
+  History Friendly Names, Alert Badge No-Wrap, Security Page Missing Event Types,
+  Updater Context Doc Backup, Patcher Temp File Fix.
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during session per process:
+
+- UPDATER.PY HAS TWO SEPARATE UPLOAD PATHS — backup_file() vs save_dev_doc() (new) —
+  logic targeting a specific file must go in the correct upload path function. The
+  context doc uses Dev Docs (save_dev_doc), not Deployed Files (backup_file).
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.53
+- All services running normally
+- /tmp/__pycache__ confirmed empty after v3.3.53 install
+- Next task: open — top candidates per backlog:
+    System log viewer (pkg_update.log tail + JSON formatter in Admin)
+    Kiosk display
+    Promtail max_age increase (pipeline stable)

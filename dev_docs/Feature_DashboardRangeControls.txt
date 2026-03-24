@@ -1,0 +1,161 @@
+FEATURE: DASHBOARD TIME-RANGE CONTROLS
+=======================================
+Type: Feature
+Date: 2026-03-14
+Session: 14
+Final outcome: Complete — confirmed working by user after v3.3.36 fix.
+
+
+BACKGROUND
+----------
+The Speedtest dashboard card showed only the most recent speedtest result with no
+way to see averages. The Auto Resets card was hardcoded to "today" (24 hours) with
+no way to see longer time windows. Both cards had no per-user default preferences.
+
+User request: segmented control buttons on each card to switch between time ranges,
+with default preferences persisted per account in My Account.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Initial implementation (v3.3.35) shipped with the controls working on click but
+blank data on page load. See "Self-introduced regression" section below.
+
+
+SELF-INTRODUCED REGRESSION: blank data on page load (v3.3.36)
+--------------------------------------------------------------
+After v3.3.35 installed, the correct button was highlighted on load (prefs loaded
+correctly) but both cards showed "—" / blank values.
+
+Two causes:
+1. refresh() only called updateSpdCard() when spdRange === "latest":
+     if (spdRange === "latest") { updateSpdCard(); }
+   Any saved non-Latest preference caused the speedtest card to never populate on
+   the initial refresh call or on any subsequent auto-refresh tick.
+
+2. The async init IIFE did not await refresh():
+     await loadDashboardPrefs();
+     refresh();          // ← not awaited, but more importantly:
+                         //   ran before loadDashboardPrefs() had set spdRange/rstRange
+                         //   because loadDashboardPrefs itself was awaited but then
+                         //   refresh() fired synchronously before async fetch inside
+                         //   updateRstCard/updateSpdCard resolved
+   The real sequencing issue: refresh() called updateRstCard() which fired its fetch
+   with the default "1" value, not the pref-loaded value, because the pref fetch
+   hadn't resolved yet at the time refresh() was invoked.
+
+Fix: removed the spdRange guard from refresh() (updateSpdCard() called unconditionally);
+changed init to await refresh() so the first data load happens after prefs are set.
+Shipped in v3.3.36.
+
+
+WHAT WORKED
+-----------
+
+FILES MODIFIED
+--------------
+database.py — two new functions:
+  get_speedtest_avg(days=None)
+    SELECT AVG(download_mbps), AVG(upload_mbps), AVG(ping_ms), COUNT(*)
+    FROM speedtest_results [WHERE timestamp >= datetime('now', '-N days')]
+    Returns dict: {download_mbps, upload_mbps, ping_ms, count}
+    All values None if count=0. days=None = all-time.
+    Values rounded: download/upload to 1 decimal, ping to 0 decimals.
+
+  get_reset_count(days=None)
+    SELECT COUNT(*) FROM reset_events WHERE triggered_by='auto'
+    [AND timestamp >= datetime('now', '-N days')]
+    Returns int. days=None = all-time.
+
+webapp.py — two new API routes:
+  GET /api/speedtest_avg?days=1|7|30|all
+    @auth.guest_allowed
+    days param: "1", "7", "30", or "all" (all-time). Defaults to "1".
+    Returns database.get_speedtest_avg(days=None if "all" else int(days)).
+
+  GET /api/reset_count?days=1|7|30|all
+    @auth.guest_allowed
+    days param: "1", "7", "30", or "all". Defaults to "1".
+    Returns {"count": N}.
+
+  Two new dashboard pref routes:
+  GET  /api/preferences/dashboard
+    @auth.guest_allowed
+    Returns {speedtest_range, resets_range}. Guests get hardcoded defaults.
+    Reads from user_prefs keys: dashboard_speedtest_range, dashboard_resets_range.
+
+  POST /api/preferences/dashboard
+    @auth.login_required
+    Accepts {speedtest_range, resets_range}. Validates against:
+      VALID_SPEEDTEST_RANGES = ["latest", "1", "7", "30", "all"]
+      VALID_RESET_RANGES     = ["1", "7", "30", "all"]
+    Writes to user_prefs.
+
+templates/index.html — Speedtest card:
+  Card header: flex row with "Speedtest" label left, button row right.
+  Buttons: Latest / 1D / 7D / 30D / All (data-spd attribute for identification).
+  Active button gets .range-btn-active class. onclick calls setSpdRange(val, btn).
+  setSpdRange() updates spdRange global, toggles active class, calls updateSpdCard().
+  updateSpdCard():
+    spdRange==="latest": fetches /api/status, reads last_speedtest, displays result
+      + "As of [timestamp]" subtitle.
+    spdRange==="1|7|30|all": fetches /api/speedtest_avg?days=N, displays averages
+      + "Avg over [label] · N tests" subtitle. Shows "No data for this range" if
+      count=0.
+  refresh() calls updateSpdCard() unconditionally (not guarded by spdRange).
+
+templates/index.html — Auto Resets card:
+  Card header: flex row with "Auto Resets" label left, button row right.
+  Buttons: 1D / 7D / 30D / All (data-rst attribute).
+  Sublabel element id="resets-sublabel" below the big stat, shows time range label.
+  RST_LABELS = { "1": "today", "7": "past 7 days", "30": "past 30 days",
+                 "all": "all time" }
+  setRstRange() → updateRstCard() → GET /api/reset_count?days=N.
+  Color coding on resets count only applies when rstRange==="1" (today view),
+  matching the original behavior (≥5 = red, ≥3 = yellow).
+  "of 5 maximum" sublabel removed — only meaningful in the 1D context and the
+  new dynamic sublabel replaces it.
+  refresh() calls updateRstCard() on every tick.
+
+templates/index.html — CSS:
+  .range-btn and .range-btn-active injected via a dynamically created <style> tag
+  appended to document.head. Uses CSS variables (--border, --accent, --text-muted,
+  --bg-card) so buttons inherit the active theme automatically without a separate
+  CSS file or themes.css modification.
+
+templates/index.html — init sequence:
+  Async IIFE: await loadDashboardPrefs() → await refresh() → loadNetworkLabels()
+  → setInterval(refresh, 10000).
+  loadDashboardPrefs(): fetches /api/preferences/dashboard, sets spdRange/rstRange,
+  toggles active class on matching buttons via data-spd and data-rst attributes.
+
+templates/preferences.html — Dashboard Preferences card:
+  Inserted between Appearance and Danger Zone.
+  Two pref-card selector groups (uses existing .pref-card / .selected CSS classes):
+    SPEEDTEST CARD: Latest / 1D Avg / 7D Avg / 30D Avg / All Time Avg
+      data-dpspd attribute. onclick calls selectDpSpd(val, el).
+    AUTO RESETS CARD: Today / 7 Days / 30 Days / All Time
+      data-dprst attribute. onclick calls selectDpRst(val, el).
+  "Save Dashboard Preferences" button calls saveDashboardPrefs().
+  saveDashboardPrefs(): POST /api/preferences/dashboard with current _dpSpd/_dpRst.
+  initDashboardPrefs(): GET /api/preferences/dashboard, sets _dpSpd/_dpRst,
+    applies .selected class to matching pref-cards. Called at page init alongside
+    loadIdentity(), loadMySubscription(), initAppearance().
+
+user_prefs keys used:
+  dashboard_speedtest_range — "latest" | "1" | "7" | "30" | "all"
+  dashboard_resets_range    — "1" | "7" | "30" | "all"
+  Default if not set: "latest" for speedtest, "1" for resets.
+
+Shipped in: v3.3.35 (initial), v3.3.36 (blank-data fix)
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Range button clicks are live toggles only — they do not save to prefs automatically.
+  This is intentional (avoid surprise pref saves on casual exploration). To change the
+  default the user must go to My Account → Dashboard Preferences.
+- Color coding on the resets count (red/yellow thresholds) only applies in the 1D
+  view. Other ranges show the count in the OK color regardless of value. This is
+  intentional — the 5-reset-maximum is a daily limit; thresholds don't apply to
+  cumulative counts.

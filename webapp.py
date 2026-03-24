@@ -10,6 +10,7 @@ import json
 import csv
 import io
 import logging
+import structlog
 from datetime import datetime, timedelta
 from flask import (Flask, render_template, jsonify, request,
                    send_file, redirect, url_for, flash, session)
@@ -28,7 +29,7 @@ import alert_subscribers
 import security_log
 import theme_manager
 
-log = logging.getLogger("netwatch.webapp")
+log = structlog.get_logger().bind(service="web")
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
@@ -36,6 +37,11 @@ app.secret_key = config.SECRET_KEY
 # Session cookie settings
 app.config["SESSION_COOKIE_HTTPONLY"] = True   # JS cannot read session cookie
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"  # CSRF protection
+app.config["SESSION_COOKIE_SECURE"]   = True   # HTTPS only
+# Cap browser cookie lifetime at 2 days — idle timeout logic handles normal
+# expiry; this is a hard ceiling so cookies don't persist for Flask's 31-day default.
+from datetime import timedelta
+app.permanent_session_lifetime = timedelta(days=2)
 
 
 @app.after_request
@@ -202,7 +208,7 @@ def setup_apply():
         return jsonify({"status": "ok"})
 
     except Exception as e:
-        log.error(f"Setup apply failed: {e}")
+        log.error("setup_apply_failed", error=str(e))
         return jsonify({"status": "error", "message": str(e)})
 
 
@@ -220,13 +226,13 @@ def init():
     try:
         alert_subscribers.backfill_account_subscribers()
     except Exception as e:
-        log.error(f"Subscriber backfill failed: {e}")
+        log.error("subscriber_backfill_failed", error=str(e))
     # Backfill: ensure every role has alert defaults seeded
     try:
         for role in auth.get_all_roles():
             alert_subscribers.seed_role_alert_defaults(role["id"])
     except Exception as e:
-        log.error(f"Role alert defaults backfill failed: {e}")
+        log.error("role_defaults_backfill_failed", error=str(e))
     if not is_first_run():
         try:
             # Seed owner subscriber from config
@@ -248,16 +254,16 @@ def init():
             if gmail_user:
                 alert_subscribers.seed_owner(owner_username, gmail_user, alert_to or gmail_user)
         except Exception as e:
-            log.error(f"Owner seed failed: {e}")
+            log.error("owner_seed_failed", error=str(e))
         try:
             config_validator.remove_legacy_email_keys()
             config_validator.migrate_email_keys()
             config_validator.cleanup_false_positives()
             notifications = config_validator.validate()
             if notifications:
-                log.info(f"Config validator: {len(notifications)} new setting(s) added")
+                log.info("config_validator_new_keys", count=len(notifications))
         except Exception as e:
-            log.error(f"Config validator failed: {e}")
+            log.error("config_validator_failed", error=str(e))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -301,6 +307,27 @@ def inject_user():
     except Exception:
         pass
 
+    # MFA grace period warning — injected into every page for mandatory roles
+    # Suppressed for the session if the user clicked dismiss (unless expired)
+    mfa_warning = None
+    try:
+        u = auth.get_current_user()
+        if u and not u.get("is_guest") and u.get("role_name") in auth.MFA_MANDATORY_ROLES:
+            mfa_status = auth.get_mfa_status(u["id"])
+            if not mfa_status["enabled"]:
+                if mfa_status["grace_expired"]:
+                    # Expired — always show, cannot dismiss
+                    mfa_warning = {"expired": True, "days_left": 0}
+                elif mfa_status["grace_deadline"] and not session.get("mfa_banner_dismissed"):
+                    try:
+                        deadline    = datetime.fromisoformat(mfa_status["grace_deadline"])
+                        days_left   = max(0, (deadline - datetime.now()).days + 1)
+                        mfa_warning = {"expired": False, "days_left": days_left}
+                    except Exception:
+                        mfa_warning = {"expired": False, "days_left": 0}
+    except Exception:
+        pass
+
     return {
         "current_user":           auth.get_current_user(),
         "config_notifications":   notifications,
@@ -308,6 +335,7 @@ def inject_user():
         "custom_themes":          custom_themes,
         "active_custom_color":    active_custom_color,
         "active_custom_layout":   active_custom_layout,
+        "mfa_warning":            mfa_warning,
     }
 
 
@@ -341,6 +369,14 @@ def api_dismiss_notification(nid):
 @auth.requires_permission("manage_admin")
 def api_dismiss_all_notifications():
     config_validator.dismiss_all_notifications()
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/mfa/dismiss_banner", methods=["POST"])
+@auth.login_required
+def api_mfa_dismiss_banner():
+    """Set a session flag so the MFA grace period banner stays hidden for this session."""
+    session["mfa_banner_dismissed"] = True
     return jsonify({"status": "ok"})
 
 
@@ -399,12 +435,29 @@ def api_alert_type_settings():
 @app.route("/api/alerts/type_settings_user")
 @auth.login_required
 def api_alert_type_settings_user():
-    """Same as type_settings but accessible to all logged-in users for preferences page."""
+    """Same as type_settings but accessible to all logged-in users for preferences page.
+    Includes per-type availability based on the current user's role."""
     settings = alert_subscribers.get_alert_type_settings()
+    user = auth.get_current_user()
+    # Look up the current user's role_id to check per-role availability
+    role_id = None
+    if user.get("id"):
+        import sqlite3 as _sq
+        import database as _db
+        try:
+            _conn = _sq.connect(_db.DB_PATH)
+            row = _conn.execute("SELECT role_id FROM users WHERE id=?", (user["id"],)).fetchone()
+            _conn.close()
+            role_id = row[0] if row else None
+        except Exception:
+            pass
+    all_role_defaults = alert_subscribers.get_all_role_alert_defaults()
+    role_defaults = all_role_defaults.get(role_id, {}) if role_id else {}
     result = {}
     for atype in alert_subscribers.ALERT_TYPES:
         key = atype["key"]
         db_row = settings.get(key, {})
+        rd = role_defaults.get(key, {})
         result[key] = {
             "alert_type":    key,
             "label":         atype["label"],
@@ -412,6 +465,7 @@ def api_alert_type_settings_user():
             "critical":      atype.get("critical", False),
             "email_enabled": db_row.get("email_enabled", int(atype["default_email"])),
             "sms_enabled":   db_row.get("sms_enabled",   int(atype["default_sms"])),
+            "available":     int(rd.get("available", 1)) if rd else 1,
         }
     return jsonify(result)
 
@@ -590,10 +644,33 @@ def login():
             return render_template("login.html",
                 error="Your password reset link has expired. Please request a new one.")
 
+        # ── MFA / grace period handling ────────────────────────────────────────
+        role_name  = user.get("role_name", "")
+        mfa_status = auth.get_mfa_status(user["id"])
+
+        if mfa_status["enabled"]:
+            # MFA is configured — require challenge before completing login
+            session["mfa_pending"]      = user["id"]
+            session["mfa_next_url"]     = next_url or url_for("index")
+            session["mfa_must_change"]  = bool(user.get("must_change_pass"))
+            return redirect(url_for("mfa_challenge"))
+
+        if role_name in auth.MFA_MANDATORY_ROLES and not mfa_status["enabled"]:
+            # Role requires MFA but user hasn't set it up yet
+            if mfa_status["grace_expired"]:
+                # Grace period over — must set up MFA before doing anything else
+                auth.login_user(user)
+                session.pop("_flashes", None)
+                return redirect(url_for("mfa_setup", forced=1))
+            elif not mfa_status["grace_deadline"]:
+                # First login without MFA — set grace deadline
+                auth.set_mfa_grace_deadline(user["id"])
+        # ── End MFA handling ──────────────────────────────────────────────────
+
         auth.login_user(user)
 
         # Clear any flash messages from previous session so they don't show to this user
-        session.pop('_flashes', None)
+        session.pop("_flashes", None)
 
         # Force password change before anything else
         if user.get("must_change_pass"):
@@ -611,6 +688,298 @@ def login():
     return render_template("login.html", username=prefill_username)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MFA ROUTES
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/mfa", methods=["GET", "POST"])
+def mfa_challenge():
+    """
+    Second-factor challenge page. Shown after credentials pass but before
+    login_user() fires. Accepts TOTP code, backup code, or email/SMS OTP.
+    Session must have mfa_pending set — otherwise redirect to login.
+    """
+    user_id = session.get("mfa_pending")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    error   = None
+    mode    = request.args.get("mode", "totp")   # totp | backup | email | sms
+
+    if request.method == "POST":
+        action = request.form.get("action", "verify")
+
+        if action == "verify_totp":
+            code = request.form.get("code", "").strip().replace(" ", "")
+            if auth.verify_totp(user_id, code):
+                return _complete_mfa_login(user_id)
+            error = "Invalid code. Check your authenticator app and try again."
+            mode  = "totp"
+
+        elif action == "verify_backup":
+            code = request.form.get("code", "").strip()
+            if auth.verify_backup_code(user_id, code):
+                return _complete_mfa_login(user_id)
+            error = "Invalid or already-used backup code."
+            mode  = "backup"
+
+        elif action == "verify_challenge":
+            channel = request.form.get("channel", "email")
+            code    = request.form.get("code", "").strip()
+            ok, reason = auth.verify_mfa_challenge_code(user_id, channel, code)
+            if ok:
+                return _complete_mfa_login(user_id)
+            error = reason
+            mode  = channel
+
+        # Note: send_code action is handled directly by /mfa/send_code route
+        # (template forms post there); this branch is a safety fallback only
+
+    # Determine available fallback channels for this user
+    import alert_subscribers as subs_mod
+    sub = subs_mod.get_subscriber_by_user_id(user_id)
+    has_email = bool(sub and sub.get("email_address") and
+                     auth.get_email_verification_status(user_id, sub["email_address"]) == "verified")
+    has_sms   = bool(sub and sub.get("sms_phone") and
+                     auth.get_phone_verification_status(user_id, sub["sms_phone"]) == "verified")
+
+    # Pop flash-style session values so they don't persist on reload
+    code_sent  = session.pop("mfa_code_sent",  None)
+    send_error = session.pop("mfa_send_error", None)
+
+    return render_template("mfa_challenge.html",
+        mode=mode, error=error, has_email=has_email, has_sms=has_sms,
+        mfa_expiry=auth.MFA_CHALLENGE_EXPIRY_MINUTES,
+        code_sent=code_sent, send_error=send_error)
+
+
+@app.route("/mfa/send_code", methods=["GET", "POST"])
+def mfa_send_code():
+    """
+    Send a one-time code via email or SMS for the MFA challenge fallback.
+    Redirects back to /mfa?mode=<channel> with a status message.
+    """
+    user_id = session.get("mfa_pending")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    channel = (request.form.get("channel") or request.args.get("channel", "email"))
+    if channel not in ("email", "sms"):
+        return redirect(url_for("mfa_challenge"))
+
+    ok, plain_code = auth.generate_mfa_challenge_code(user_id, channel)
+    if not ok:
+        session["mfa_send_error"] = plain_code
+        return redirect(url_for("mfa_challenge", mode=channel))
+
+    # Deliver the code via the alert system
+    import alerts
+    import alert_subscribers as subs_mod
+    sub = subs_mod.get_subscriber_by_user_id(user_id)
+    sent = False
+    if channel == "email" and sub and sub.get("email_address"):
+        msg  = (f"Your NetWatch login verification code is: {plain_code}\n\n"
+                f"This code expires in {auth.MFA_CHALLENGE_EXPIRY_MINUTES} minutes. Do not share it.")
+        sent = alerts.send_alert("mfa_code", msg,
+                                 force_email=sub["email_address"],
+                                 subject="🔐  NetWatch: Login Verification Code")
+    elif channel == "sms" and sub:
+        sms_addr = subs_mod.get_sms_address(sub)
+        if sms_addr:
+            sent = alerts._send_one(sms_addr,
+                             f"{alerts._site_name()}: MFA CODE",
+                             f"Your login code: {plain_code} (expires in {auth.MFA_CHALLENGE_EXPIRY_MINUTES} min)",
+                             f"Your login code: {plain_code} (expires in {auth.MFA_CHALLENGE_EXPIRY_MINUTES} min)")
+
+    if sent:
+        session["mfa_code_sent"] = channel
+    else:
+        session["mfa_send_error"] = f"Failed to send code via {channel}. Try another method."
+
+    return redirect(url_for("mfa_challenge", mode=channel))
+
+
+def _complete_mfa_login(user_id):
+    """
+    Internal helper: called when MFA challenge passes.
+    Loads the full user record, calls login_user(), clears mfa_pending,
+    and redirects to the intended destination.
+    """
+    next_url     = session.pop("mfa_next_url", None) or url_for("index")
+    must_change  = session.pop("mfa_must_change", False)
+    session.pop("mfa_pending", None)
+    session.pop("mfa_code_sent", None)
+    session.pop("mfa_send_error", None)
+
+    user = auth.get_user_by_id(user_id)
+    if not user:
+        return redirect(url_for("login"))
+
+    auth.login_user(user)
+    session.pop("_flashes", None)
+
+    if must_change:
+        import config as _cfg
+        timeout_mins = getattr(_cfg, "FORCED_CHANGE_TIMEOUT_MINUTES", 10)
+        from datetime import timedelta
+        deadline = (datetime.now() + timedelta(minutes=timeout_mins)).isoformat()
+        session["forced_change_deadline"]   = deadline
+        session["must_change_pass_pending"] = True
+        return redirect(url_for("change_password", forced=1))
+
+    return redirect(next_url)
+
+
+@app.route("/account/mfa/setup", methods=["GET", "POST"])
+@auth.login_required
+def mfa_setup():
+    """
+    MFA setup page. GET: shows QR code for scanning.
+    Pending secret is stored in session only — never written to DB until confirmed.
+    POST (action=confirm): verifies code, writes secret to DB, enables MFA.
+    POST (action=cancel): clears session secret, existing DB secret untouched.
+    """
+    user    = auth.get_current_user()
+    forced  = request.args.get("forced", "0") == "1"
+    error   = None
+
+    # Forced setup just completed — redirect to dashboard
+    if request.args.get("forced_done") == "1":
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        action = request.form.get("action", "confirm")
+
+        if action == "confirm":
+            code           = request.form.get("totp_code", "").strip().replace(" ", "")
+            pending_secret = session.get("mfa_setup_secret")
+            ok, result     = auth.confirm_mfa_setup(user["id"], code, pending_secret)
+            if not ok:
+                # Re-render with same session secret — never touch the DB secret
+                if pending_secret:
+                    _, uri  = auth.get_mfa_setup_uri_from_secret(pending_secret, user["username"])
+                    qr_data = _mfa_qr_base64(uri)
+                else:
+                    qr_data = None
+                return render_template("mfa_setup.html",
+                    secret=pending_secret, qr_data=qr_data, error=result, forced=forced)
+            # Success — clear pending secret and show backup codes
+            session.pop("mfa_setup_secret", None)
+            backup_codes = result
+            return render_template("mfa_setup_complete.html",
+                backup_codes=backup_codes, forced=forced)
+
+        elif action == "cancel" and not forced:
+            session.pop("mfa_setup_secret", None)
+            return redirect(url_for("preferences"))
+
+    # GET — use session-stored pending secret if present; generate new only if
+    # explicitly requested (?new=1) or none exists in session yet.
+    # Never read mfa_secret from DB here — that is the live confirmed secret.
+    pending_secret = session.get("mfa_setup_secret")
+    if not pending_secret or request.args.get("new") == "1":
+        secret, uri = auth.setup_mfa(user["id"])
+        session["mfa_setup_secret"] = secret
+    else:
+        secret = pending_secret
+        _, uri = auth.get_mfa_setup_uri_from_secret(secret, user["username"])
+    if not secret:
+        return redirect(url_for("preferences"))
+    qr_data = _mfa_qr_base64(uri)
+    return render_template("mfa_setup.html",
+        secret=secret, qr_data=qr_data, error=error, forced=forced)
+
+
+@app.route("/account/mfa/setup/confirm", methods=["POST"])
+@auth.login_required
+def mfa_setup_confirm():
+    """Confirm TOTP code during setup — called from mfa_setup.html form."""
+    user           = auth.get_current_user()
+    forced         = request.form.get("forced", "0") == "1"
+    code           = request.form.get("totp_code", "").strip().replace(" ", "")
+    pending_secret = session.get("mfa_setup_secret")
+
+    ok, result = auth.confirm_mfa_setup(user["id"], code, pending_secret)
+    if not ok:
+        if pending_secret:
+            _, uri  = auth.get_mfa_setup_uri_from_secret(pending_secret, user["username"])
+            qr_data = _mfa_qr_base64(uri)
+        else:
+            qr_data = None
+        return render_template("mfa_setup.html",
+            secret=pending_secret, qr_data=qr_data, error=result, forced=forced)
+
+    session.pop("mfa_setup_secret", None)
+    backup_codes = result
+    return render_template("mfa_setup_complete.html",
+        backup_codes=backup_codes, forced=forced)
+
+
+@app.route("/account/mfa/disable", methods=["POST"])
+@auth.login_required
+def mfa_disable():
+    """
+    Disable MFA for the current user. Requires current password for confirmation.
+    Sets a grace deadline if role requires MFA, so the enforcement banner shows.
+    """
+    user     = auth.get_current_user()
+    password = request.form.get("password", "")
+    verified = auth.authenticate(user["username"], password)
+    if not verified or not verified.get("id"):
+        return jsonify({"status": "error", "message": "Incorrect password"}), 403
+
+    auth.disable_mfa(user["id"])
+
+    # If role requires MFA, set grace deadline so banner appears on next page load
+    if user["role_name"] in auth.MFA_MANDATORY_ROLES:
+        auth.set_mfa_grace_deadline(user["id"])
+
+    log.info("MFA disabled by user", username=user["username"])
+    return jsonify({"status": "ok"})
+
+
+@app.route("/account/mfa/backup_codes/regenerate", methods=["POST"])
+@auth.login_required
+def mfa_regenerate_backup_codes():
+    """Regenerate all backup codes for the current user. Returns new codes as JSON."""
+    user     = auth.get_current_user()
+    password = request.form.get("password", "")
+    verified = auth.authenticate(user["username"], password)
+    if not verified or not verified.get("id"):
+        return jsonify({"status": "error", "message": "Incorrect password"}), 403
+
+    codes = auth.regenerate_backup_codes(user["id"])
+    return jsonify({"status": "ok", "codes": codes})
+
+
+@app.route("/api/admin/mfa_reset/<int:target_user_id>", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_users")
+def api_admin_mfa_reset(target_user_id):
+    """Admin: reset MFA for a user (e.g. locked out). Sets fresh grace deadline."""
+    auth.admin_reset_mfa(target_user_id)
+    log.info("Admin MFA reset", admin=auth.get_current_user()["username"],
+             target_user_id=target_user_id)
+    return jsonify({"status": "ok"})
+
+
+def _mfa_qr_base64(uri):
+    """Generate a QR code SVG from an otpauth URI and return as a base64 data URL.
+    Uses the pure-Python SVG factory so Pillow is not required."""
+    import qrcode
+    import qrcode.image.svg
+    import io, base64
+    factory = qrcode.image.svg.SvgPathImage
+    qr  = qrcode.QRCode(image_factory=factory, box_size=6, border=2)
+    qr.add_data(uri)
+    qr.make(fit=True)
+    img = qr.make_image()
+    buf = io.BytesIO()
+    img.save(buf)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/svg+xml;base64,{b64}"
+
+
 @app.before_request
 def enforce_forced_change_deadline():
     """
@@ -619,7 +988,8 @@ def enforce_forced_change_deadline():
     Exempts the change_password, login, logout, and static routes.
     """
     exempt = {"change_password", "login", "logout", "forgot_password",
-              "static", "first_run_wizard"}
+              "static", "first_run_wizard",
+              "mfa_challenge", "mfa_send_code", "mfa_setup", "mfa_setup_confirm"}
     if request.endpoint in exempt or request.endpoint is None:
         return
 
@@ -650,31 +1020,11 @@ def enforce_forced_change_deadline():
         return redirect(url_for("login"))
 
 
-# Auto-refresh polling paths that must NOT count as user activity
-_POLLING_PATHS = frozenset({
-    "/api/metrics", "/api/alerts/status", "/api/network/status",
-    "/api/speedtest/latest", "/api/monitor/status", "/api/monitor/history",
-    "/api/dashboard/stats", "/api/events/recent",
-})
-
-@app.before_request
-def update_last_activity():
-    """Reset idle-timeout clock on real user requests. Excludes polling endpoints."""
-    from flask import session as _sess
-    if not _sess.get("user_id"):
-        return
-    path = request.path
-    if path.startswith("/static"):
-        return
-    base = path.rstrip("/") or "/"
-    if base in _POLLING_PATHS:
-        return
-    for p in _POLLING_PATHS:
-        if base.startswith(p):
-            return
-    from datetime import datetime as _dt
-    _sess["last_activity"] = _dt.now().isoformat()
-    _sess.modified = True
+# last_activity is updated only via /api/session/ping (called on real user events:
+# mousedown, keydown, touchstart, scroll, wheel). Auto-refresh polling on any page
+# must NOT update last_activity — doing so from before_request would require
+# maintaining a complete blocklist of every polling endpoint, which is fragile.
+# The ping-only approach means idle time is measured from the last real interaction.
 
 
 @app.route("/logout")
@@ -727,7 +1077,7 @@ def forgot_password():
                                   force_email=email, subscriber_id=sub_id)
                 channels_sent.append(f"email ({email[:3]}***)")
             except Exception as e:
-                log.error(f"Failed to send reset email: {e}")
+                log.error("password_reset_email_failed", error=str(e))
 
         if sms_address:
             try:
@@ -742,7 +1092,7 @@ def forgot_password():
                 if ok_sms:
                     channels_sent.append(f"SMS ({sms_address[:6]}***)")
             except Exception as e:
-                log.error(f"Failed to send reset SMS: {e}")
+                log.error("password_reset_sms_failed", error=str(e))
 
         import security_log as seclog
         seclog.record("PASSWORD_RESET_REQUESTED", username=username,
@@ -782,7 +1132,7 @@ def api_request_email_verification():
             f"Enter this code in the NetWatch My Account page. It expires in 24 hours.",
             force_email=email, subscriber_id=sub_id)
     except Exception as e:
-        log.error(f"Failed to send verification email: {e}")
+        log.error("verification_email_failed", error=str(e))
         return jsonify({"status": "error", "message": "Failed to send email. Check email config."})
 
     return jsonify({"status": "ok", "message": f"Verification code sent to {email}"})
@@ -805,7 +1155,7 @@ def api_confirm_email_verification():
     standalone = alert_subscribers.find_standalone_by_email(email)
     if standalone:
         alert_subscribers.merge_standalone_into_account(user["id"], standalone["id"])
-        log.info(f"Merged standalone subscriber {standalone['id']} into account {user['username']} on email verify")
+        log.info("subscriber_merged_on_verify", subscriber_id=standalone['id'], username=user['username'])
 
     return jsonify({"status": "ok", "message": "Email verified successfully"})
 
@@ -952,9 +1302,10 @@ def security_log_page():
 @auth.login_required
 @auth.requires_permission("manage_admin")
 def api_security_events():
-    limit = int(request.args.get("limit", 100))
+    limit       = int(request.args.get("limit", 100))
     event_types = request.args.getlist("type") or None
-    return jsonify(security_log.get_events(limit=limit, event_types=event_types))
+    since       = request.args.get("since") or None
+    return jsonify(security_log.get_events(limit=limit, event_types=event_types, since=since))
 
 
 @app.route("/api/security/recent_failures")
@@ -976,7 +1327,10 @@ def controls():
 @auth.login_required
 @auth.requires_permission("manage_admin")
 def admin():
-    return render_template("admin.html")
+    return render_template("admin.html",
+        keep_health_days=getattr(config, "KEEP_HEALTH_DAYS", 30),
+        keep_reset_days=getattr(config, "KEEP_RESET_DAYS", 90),
+    )
 
 
 @app.route("/admin/users")
@@ -989,7 +1343,24 @@ def admin_users():
 @app.route("/preferences")
 @auth.login_required
 def preferences():
-    return render_template("preferences.html")
+    user       = auth.get_current_user()
+    mfa_status = auth.get_mfa_status(user["id"])
+
+    # Calculate days remaining in grace period
+    mfa_grace_days_left = None
+    if mfa_status["grace_deadline"] and not mfa_status["enabled"]:
+        try:
+            from datetime import timedelta
+            deadline = datetime.fromisoformat(mfa_status["grace_deadline"])
+            remaining = (deadline - datetime.now()).days + 1
+            mfa_grace_days_left = max(0, remaining)
+        except Exception:
+            mfa_grace_days_left = 0
+
+    return render_template("preferences.html",
+        mfa_status=mfa_status,
+        mfa_grace_days_left=mfa_grace_days_left,
+        current_user=user)
 
 
 @app.route("/api/preferences", methods=["POST"])
@@ -1065,6 +1436,42 @@ def api_set_custom_layout():
         if not t.get("layout"):
             return jsonify({"status": "error", "message": "That theme has no layout"})
     database.set_user_pref(user["id"], "custom_layout", name if name else None)
+    return jsonify({"status": "ok"})
+
+
+# ── Dashboard preference routes ───────────────────────────────────────────────
+
+VALID_SPEEDTEST_RANGES = ["latest", "1", "7", "30", "all"]
+VALID_RESET_RANGES     = ["1", "7", "30", "all"]
+
+@app.route("/api/preferences/dashboard", methods=["GET"])
+@auth.guest_allowed
+def api_get_dashboard_prefs():
+    """Return the current user's dashboard display preferences."""
+    user = auth.get_current_user()
+    if user["is_guest"]:
+        return jsonify({"speedtest_range": "latest", "resets_range": "1"})
+    spd = database.get_user_pref(user["id"], "dashboard_speedtest_range") or "latest"
+    rst = database.get_user_pref(user["id"], "dashboard_resets_range")    or "1"
+    return jsonify({"speedtest_range": spd, "resets_range": rst})
+
+
+@app.route("/api/preferences/dashboard", methods=["POST"])
+@auth.login_required
+def api_save_dashboard_prefs():
+    """Save the current user's dashboard display preferences."""
+    data  = request.get_json() or {}
+    user  = auth.get_current_user()
+    spd   = data.get("speedtest_range")
+    rst   = data.get("resets_range")
+    if spd and spd not in VALID_SPEEDTEST_RANGES:
+        return jsonify({"status": "error", "message": "Invalid speedtest_range"})
+    if rst and rst not in VALID_RESET_RANGES:
+        return jsonify({"status": "error", "message": "Invalid resets_range"})
+    if spd:
+        database.set_user_pref(user["id"], "dashboard_speedtest_range", spd)
+    if rst:
+        database.set_user_pref(user["id"], "dashboard_resets_range", rst)
     return jsonify({"status": "ok"})
 
 
@@ -1325,23 +1732,27 @@ def api_reset_user_password(user_id):
     new_password = data.get("new_password", "")
     if len(new_password) < 8:
         return jsonify({"status": "error", "message": "Password must be at least 8 characters"})
-    success, error = auth.change_password(user_id, new_password)
+    # force_change defaults to True; admin may uncheck to set a permanent password
+    force_change = bool(data.get("force_change", True))
+    success, error = auth.admin_reset_password(user_id, new_password, force_change=force_change)
     if success:
-        # Flag user to change on next login
-        auth.update_user(user_id, must_change_pass=True)
         return jsonify({"status": "ok"})
     return jsonify({"status": "error", "message": error})
 
 
 @app.route("/api/session/ping", methods=["POST"])
-@auth.login_required
 def api_session_ping():
     """
     Called by client JS on real user interaction to reset idle timer.
     Returns remaining seconds before timeout (or null if no timeout).
+    Returns remaining=0 if session has expired — client JS redirects to login.
+    No @auth.login_required: must return JSON even when session is expired,
+    not a redirect, so the client can handle expiry correctly.
     """
     from flask import session as _sess
     from datetime import datetime as _dt
+    if not _sess.get("user_id"):
+        return jsonify({"status": "expired", "remaining": 0})
     _sess["last_activity"] = _dt.now().isoformat()
     _sess.modified = True
     minutes = _sess.get("session_minutes", 480)
@@ -1351,11 +1762,21 @@ def api_session_ping():
 
 
 @app.route("/api/session/status")
-@auth.login_required
 def api_session_status():
-    """Return seconds remaining in current session for client-side countdown."""
+    """
+    Return seconds remaining in current session for client-side countdown.
+    Returns remaining=0 if session has expired — client JS redirects to login.
+    No @auth.login_required: must return JSON even when session is expired,
+    not a redirect, so the client can handle expiry correctly.
+    """
     from flask import session as _sess
     from datetime import datetime as _dt
+    if not _sess.get("user_id"):
+        return jsonify({"remaining": 0})
+    # Call get_current_user() to trigger server-side idle expiry check
+    user = auth.get_current_user()
+    if not user or user.get("is_guest"):
+        return jsonify({"remaining": 0})
     minutes = _sess.get("session_minutes", 480)
     if minutes <= 0:
         return jsonify({"remaining": None})
@@ -1511,7 +1932,7 @@ def api_register():
         must_change_pass=False
     )
     if success:
-        log.info(f"Self-registration: new account '{username}' created")
+        log.info("self_registration", username=username)
         new_user = auth.get_user_by_username(username)
         if new_user:
             alert_subscribers.upsert_subscriber(
@@ -1724,11 +2145,31 @@ def api_speedtest_history():
     return jsonify(database.get_speedtest_history(hours=hours, start=start, end=end))
 
 
+@app.route("/api/speedtest_avg")
+@auth.guest_allowed
+def api_speedtest_avg():
+    """Return average speedtest stats for a time range.
+    Query param: days=1|7|30 or days=all for all-time. Defaults to 1."""
+    days_param = request.args.get("days", "1")
+    days = None if days_param == "all" else int(days_param)
+    return jsonify(database.get_speedtest_avg(days=days))
+
+
 @app.route("/api/reset_history")
 @auth.guest_allowed
 def api_reset_history():
     days = int(request.args.get("days", 30))
     return jsonify(database.get_reset_history(days=days))
+
+
+@app.route("/api/reset_count")
+@auth.guest_allowed
+def api_reset_count():
+    """Return auto-reset count for a time range.
+    Query param: days=1|7|30 or days=all for all-time. Defaults to 1."""
+    days_param = request.args.get("days", "1")
+    days = None if days_param == "all" else int(days_param)
+    return jsonify({"count": database.get_reset_count(days=days)})
 
 
 @app.route("/api/alerts")
@@ -1919,6 +2360,13 @@ def admin_db_stats():
     return jsonify(database.get_db_stats())
 
 
+@app.route("/api/system_health")
+@auth.guest_allowed
+def api_system_health():
+    """Return monitor heartbeat age and disk stats for the dashboard system health card."""
+    return jsonify(database.get_system_health_stats())
+
+
 @app.route("/api/admin/export_health")
 @auth.login_required
 @auth.requires_permission("manage_admin")
@@ -1979,7 +2427,7 @@ def admin_backup_full():
             capture_output=True, text=True, timeout=120
         )
         if result.returncode != 0:
-            log.error(f"Backup failed: {result.stderr}")
+            log.error("backup_failed", stderr=result.stderr)
             return jsonify({"status": "error", "message": result.stderr or "Backup failed"})
         # Find the most recent backup file
         files = sorted(glob.glob(f"{backup_dir}/netwatch_backup_*.tar.gz.gpg"))
@@ -2065,7 +2513,7 @@ def admin_export_code():
     import zipfile, io
     from datetime import datetime
 
-    EXCLUDE_DIRS  = {"__pycache__", "venv", "certs", "logs", "data", "backups", "snapshots"}
+    EXCLUDE_DIRS  = {"__pycache__", "venv", "certs", "logs", "data", "backups", "snapshots", ".gnupg"}
     EXCLUDE_EXTS  = {".pyc", ".bak", ".gpg", ".gz"}
     # Exclude DB files by prefix regardless of extension variant
     EXCLUDE_PREFIXES = {"netwatch.db"}
@@ -2184,11 +2632,11 @@ def admin_generate_update_pkg():
         shutil.rmtree(staging)
 
         size_mb = round(os.path.getsize(final_zip) / 1024 / 1024, 1)
-        log.info(f"Update package generated: {final_zip} ({size_mb}MB)")
+        log.info("update_package_generated", path=final_zip, size_mb=size_mb)
         return jsonify({"status": "ok", "filename": os.path.basename(final_zip), "size_mb": size_mb})
 
     except Exception as e:
-        log.error(f"Update package generation failed: {e}")
+        log.error("update_package_failed", error=str(e))
         return jsonify({"status": "error", "message": str(e)})
 
 
@@ -2284,11 +2732,11 @@ def admin_generate_distrib():
         shutil.rmtree(staging)
 
         size_mb = round(os.path.getsize(final_zip) / 1024 / 1024, 1)
-        log.info(f"Distributable generated: {final_zip} ({size_mb}MB)")
+        log.info("distributable_generated", path=final_zip, size_mb=size_mb)
         return jsonify({"status": "ok", "filename": os.path.basename(final_zip), "size_mb": size_mb})
 
     except Exception as e:
-        log.error(f"Distributable generation failed: {e}")
+        log.error("distributable_failed", error=str(e))
         return jsonify({"status": "error", "message": str(e)})
 
 
@@ -2448,6 +2896,37 @@ def admin_pkg_update_schedule():
         return jsonify({"status": "error", "message": str(e)})
 
 
+@app.route("/api/admin/pkg_update_log")
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def admin_pkg_update_log():
+    """Return the last N lines of pkg_update.log.
+    Query param: lines (int, default 50, max 500).
+    Returns {status, lines: [str], last_modified: str|null}."""
+    log_path = os.path.join(NETWATCH_DIR, "pkg_update.log")
+    try:
+        n = min(int(request.args.get("lines", 50)), 500)
+    except (ValueError, TypeError):
+        n = 50
+    if not os.path.exists(log_path):
+        return jsonify({"status": "ok", "lines": [], "last_modified": None,
+                        "message": "pkg_update.log does not exist yet. "
+                                   "It will be created after the first scheduled run."})
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+        last_n = [l.rstrip("\n") for l in all_lines[-n:]]
+        mtime = os.path.getmtime(log_path)
+        last_modified = datetime.utcfromtimestamp(mtime).strftime("%Y-%m-%d %H:%M UTC")
+        return jsonify({"status": "ok", "lines": last_n,
+                        "last_modified": last_modified})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/admin/backup_db")
+@auth.login_required
+@auth.requires_permission("manage_admin")
 def admin_backup_db():
     """Download a complete backup of the NetWatch database."""
     import shutil, tempfile
@@ -2464,6 +2943,42 @@ def admin_backup_db():
     filename = f"netwatch_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.db"
     return send_file(tmp.name, mimetype="application/octet-stream",
                      as_attachment=True, download_name=filename)
+
+
+@app.route("/api/admin/backup_db_now", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def admin_backup_db_now():
+    """Run backup_db.sh and return filename/size — does not stream a download.
+
+    Used by the Backup Manager "Backup DB Now" button. Distinct from the
+    legacy /api/admin/backup_db GET route which streams an on-the-fly snapshot.
+    """
+    import subprocess, glob as _glob
+    backup_script = os.path.join(NETWATCH_DIR, "backup_db.sh")
+    backup_dir    = os.path.join(os.path.dirname(NETWATCH_DIR), "backups")
+    if not os.path.exists(backup_script):
+        return jsonify({"status": "error", "message": "backup_db.sh not found"})
+    try:
+        result = subprocess.run(
+            ["bash", backup_script],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode != 0:
+            log.error("backup_db_failed", stderr=result.stderr)
+            return jsonify({"status": "error", "message": result.stderr or "Backup failed"})
+        files = sorted(_glob.glob(f"{backup_dir}/netwatch_db_*.db.gpg"))
+        if not files:
+            return jsonify({"status": "error", "message": "Backup script ran but no output file found"})
+        latest = files[-1]
+        size_mb = round(os.path.getsize(latest) / (1024 * 1024), 1)
+        log.info("backup_db_created", filename=os.path.basename(latest))
+        return jsonify({"status": "ok", "filename": os.path.basename(latest), "size_mb": size_mb})
+    except subprocess.TimeoutExpired:
+        return jsonify({"status": "error", "message": "Backup timed out"}), 500
+    except Exception as e:
+        log.error("backup_db_failed", error=str(e))
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/api/admin/restore_db", methods=["POST"])
@@ -2505,13 +3020,100 @@ def admin_restore_db():
         src.close()
         dst.close()
         os.unlink(tmp.name)
-        log.info("Database restored from upload")
+        log.info("database_restored")
         return jsonify({"status": "ok", "message": "Database restored successfully. Previous database saved as netwatch.db.pre_restore"})
     except Exception as e:
         # Rollback
         shutil.copy2(bak_path, db_path)
         os.unlink(tmp.name)
         return jsonify({"status": "error", "message": f"Restore failed: {e}"})
+
+
+@app.route("/api/admin/backup_list")
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def admin_backup_list():
+    """List all backup files stored locally on the Pi.
+
+    Returns two lists — db_backups (netwatch_db_*.db.gpg) and
+    full_backups (netwatch_backup_*.tar.gz.gpg) — each sorted newest first.
+    Each entry includes filename, size_mb, and timestamp (parsed from filename).
+    """
+    import glob as _glob
+    backup_dir = os.path.join(os.path.dirname(NETWATCH_DIR), "backups")
+
+    def _file_info(path):
+        fname = os.path.basename(path)
+        size_mb = round(os.path.getsize(path) / (1024 * 1024), 1)
+        return {"filename": fname, "size_mb": size_mb}
+
+    db_files   = sorted(_glob.glob(os.path.join(backup_dir, "netwatch_db_*.db.gpg")), reverse=True)
+    full_files = sorted(_glob.glob(os.path.join(backup_dir, "netwatch_backup_*.tar.gz.gpg")), reverse=True)
+
+    return jsonify({
+        "status":       "ok",
+        "backup_dir":   backup_dir,
+        "db_backups":   [_file_info(f) for f in db_files],
+        "full_backups": [_file_info(f) for f in full_files],
+    })
+
+
+@app.route("/api/admin/backup_download")
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def admin_backup_download():
+    """Download a stored backup file by filename.
+
+    Filename is validated to only allow known backup patterns and
+    blocks path traversal. Serves the file as an attachment.
+    """
+    filename = request.args.get("filename", "")
+    backup_dir = os.path.join(os.path.dirname(NETWATCH_DIR), "backups")
+
+    # Validate filename — only allow our known backup patterns, no path separators
+    is_db   = filename.startswith("netwatch_db_")   and filename.endswith(".db.gpg")
+    is_full = filename.startswith("netwatch_backup_") and filename.endswith(".tar.gz.gpg")
+    if not (is_db or is_full) or ".." in filename or "/" in filename or "\\" in filename:
+        return jsonify({"status": "error", "message": "Invalid filename"}), 400
+
+    filepath = os.path.join(backup_dir, filename)
+    if not os.path.isfile(filepath):
+        return jsonify({"status": "error", "message": "File not found"}), 404
+
+    log.info("backup_downloaded", filename=filename)
+    return send_file(filepath, as_attachment=True, download_name=filename)
+
+
+@app.route("/api/admin/backup_delete", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def admin_backup_delete():
+    """Delete a stored backup file by filename.
+
+    Filename is validated to only allow known backup patterns and
+    blocks path traversal.
+    """
+    data     = request.get_json() or {}
+    filename = data.get("filename", "")
+    backup_dir = os.path.join(os.path.dirname(NETWATCH_DIR), "backups")
+
+    # Validate filename — only allow our known backup patterns, no path separators
+    is_db   = filename.startswith("netwatch_db_")   and filename.endswith(".db.gpg")
+    is_full = filename.startswith("netwatch_backup_") and filename.endswith(".tar.gz.gpg")
+    if not (is_db or is_full) or ".." in filename or "/" in filename or "\\" in filename:
+        return jsonify({"status": "error", "message": "Invalid filename"}), 400
+
+    filepath = os.path.join(backup_dir, filename)
+    if not os.path.isfile(filepath):
+        return jsonify({"status": "error", "message": "File not found"}), 404
+
+    try:
+        os.unlink(filepath)
+        log.info("backup_deleted", filename=filename)
+        return jsonify({"status": "ok", "message": f"Deleted {filename}"})
+    except Exception as e:
+        log.error("backup_delete_failed", filename=filename, error=str(e))
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2655,7 +3257,7 @@ def admin_export_code_full():
 
     # dev_docs excluded from walk and handled separately below to avoid double-inclusion
     # (os.walk descends into dev_docs/ as a NETWATCH_DIR subdirectory without this exclusion)
-    EXCLUDE_DIRS     = {"__pycache__", "venv", "certs", "logs", "data", "backups", "snapshots", "dev_docs"}
+    EXCLUDE_DIRS     = {"__pycache__", "venv", "certs", "logs", "data", "backups", "snapshots", "dev_docs", ".gnupg"}
     EXCLUDE_EXTS     = {".pyc", ".bak", ".gpg", ".gz", ".zip", ".tar"}
     EXCLUDE_PREFIXES = {"netwatch.db"}
     EXCLUDE_FILES    = {"config.py", "gunicorn.ctl"}
@@ -2698,13 +3300,15 @@ def admin_export_code_full():
 @auth.login_required
 @auth.requires_permission("manage_admin")
 def config_editor():
-    sections         = configeditor.get_sections()
-    values           = configeditor.read_config()
-    fields_json      = json.dumps(configeditor.FIELDS)
-    unconfigured_keys = config_validator.get_unconfigured_keys()
+    sections              = configeditor.get_sections()
+    values                = configeditor.read_config()
+    fields_json           = json.dumps(configeditor.FIELDS)
+    unconfigured_keys     = config_validator.get_unconfigured_keys()
+    pending_notifications = config_validator.get_pending_notifications()
     return render_template("config_editor.html", sections=sections,
                            values=values, fields_json=fields_json,
-                           unconfigured_keys=unconfigured_keys)
+                           unconfigured_keys=unconfigured_keys,
+                           pending_notifications=pending_notifications)
 
 
 @app.route("/api/config/save", methods=["POST"])
@@ -2820,6 +3424,49 @@ def api_changelog_update(entry_id):
     return jsonify({"status": "ok" if ok else "error"})
 
 
+def _build_changelog_palette():
+    """Build a palette override dict for changelog HTML generation when the user
+    has a custom color scheme active. Maps .nwtheme CSS variable names to the
+    palette keys used by generate_release_notes_html / generate_combined_changelog_html.
+    Returns None if no custom color scheme is active or if loading fails."""
+    try:
+        user = auth.get_current_user()
+        if not user or user["is_guest"]:
+            return None
+        scheme_name = database.get_user_pref(user["id"], "custom_color_scheme")
+        if not scheme_name:
+            return None
+        t = theme_manager.get_theme(scheme_name)
+        if not t:
+            return None
+        cs = t.get("color_scheme", {})
+        if not cs:
+            return None
+        # Map CSS variable names to patcher palette keys
+        mapping = {
+            "--bg-page":      "bg_page",
+            "--bg-card":      "bg_card",
+            "--bg-input":     "bg_input",
+            "--border-color": "border",
+            "--accent":       "accent",
+            "--text-primary": "text_primary",
+            "--text-muted":   "text_muted",
+            "--text-label":   "text_label",
+            "--ok":           "ok",
+            "--warn":         "warn",
+            "--fail":         "fail",
+            "--font-body":    "font",
+            "--font-mono":    "font_mono",
+        }
+        palette = {}
+        for css_var, palette_key in mapping.items():
+            if css_var in cs:
+                palette[palette_key] = cs[css_var]
+        return palette if palette else None
+    except Exception:
+        return None
+
+
 @app.route("/admin/patch/changelog")
 @auth.login_required
 @auth.requires_permission("manage_admin")
@@ -2830,7 +3477,8 @@ def changelog_full():
         entries   = patcher.get_changelog(limit=9999)
         site_name = getattr(config, "SITE_NAME", "NetWatch") or "NetWatch"
         theme     = _sess.get("theme", "dark-blue")
-        html      = patcher.generate_combined_changelog_html(entries, site_name=site_name, theme=theme)
+        custom_palette = _build_changelog_palette()
+        html      = patcher.generate_combined_changelog_html(entries, site_name=site_name, theme=theme, custom_palette=custom_palette)
         return html, 200, {"Content-Type": "text/html; charset=utf-8"}
     except Exception as e:
         return f"Error generating changelog: {e}", 500
@@ -2848,10 +3496,11 @@ def changelog_release_notes(entry_id):
     if not entry:
         return "Release notes not found.", 404
     try:
-        html = patcher.generate_release_notes_html(entry, site_name=site_name, theme=theme)
+        custom_palette = _build_changelog_palette()
+        html = patcher.generate_release_notes_html(entry, site_name=site_name, theme=theme, custom_palette=custom_palette)
         return _Resp(html, mimetype="text/html")
     except Exception as e:
-        log.error(f"Release notes failed: {e}")
+        log.error("release_notes_failed", error=str(e))
         return f"Error generating release notes: {e}", 500
 
 
