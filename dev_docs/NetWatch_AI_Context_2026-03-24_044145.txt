@@ -23,10 +23,10 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.3.92
+- **Pi version:** v3.3.90
 - **Pi path:** `/home/mboynton/netwatch/`
-- **Canonical matches Pi at v3.3.92**
-- **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push.
+- **Canonical matches Pi at v3.3.90**
+- **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (infrastructure works; session-start automation via Claude in Chrome was abandoned Session 13 — see mBase Strategy section)
 - **ops-pi (formerly gitea-pi):** 192.168.100.230 | https://ops-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos (both private, MIT)
 - **ops-pi services:** Gitea 1.25.5 (port 3000 HTTPS), Prometheus 3.5.1 (port 9090), Loki 3.5.1 (port 3100), Grafana (port 3001), Node Exporter 1.9.0 (port 9100) — all running
 - **NetWatch Pi:** Node Exporter 1.9.0 running (port 9100), Prometheus scraping confirmed. Promtail 3.5.1 running (systemd service), shipping journal logs to Loki on ops-pi.
@@ -650,21 +650,32 @@ SCOPE CHANGES (Session 15):
 
 ### Git, Version Control, and CI/CD — Open Discussion Items
 
-**Current state (Session 30):** Git is active. Remote origin points to
-https://ops-pi.home:3000/mboynton/netwatch.git. Full codebase (including dev_docs)
-committed at v3.3.90. patcher.py auto-commits and pushes on every successful package
-install from v3.3.91 onward. Commit message format: "vX.X.X (Session N): description".
-.git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push.
-Setup procedure documented in SystemSetup.txt Section 1.9.
+**Current state:** Git is initialized in ~/netwatch/ with remote origin at
+https://gitea-pi.home:3000/mboynton/netwatch.git. The Gitea Pi (192.168.100.230)
+is running with repos for both netwatch and mbase. Credentials stored passwordless.
+Both repos exist (private, MIT license).
+
+**What failed:** Sessions 11-13 attempted to use Gitea as the session-start
+source — Claude fetching context docs directly from Gitea via Claude in Chrome
+instead of the user uploading a zip. This was repeatedly blocked by browser
+extension security filters (session keyword filter, JWT token filter on dotted
+filenames) and sessions were shut down. The infrastructure works; the automated
+session-start workflow does not. Session 13 rolled back to the zip upload method.
 
 **Three open discussions needed (not blocking current work, but important):**
 
-1. **Sharing and publishing:** What open source or commercial distribution looks
+1. **Version control and change tracking:** How to use git properly for NetWatch
+   and mBase going forward — commit discipline, branching, what belongs in git
+   (code + dev_docs? or code only?). The zip package workflow is fine for
+   *deploying* to the Pi; git solves *version control and change history*.
+   These are two different problems and both need to be solved correctly.
+
+2. **Sharing and publishing:** What open source or commercial distribution looks
    like for these projects. GitHub vs self-hosted Gitea. Licensing decisions.
    README and documentation requirements. How mBase gets versioned independently
    from projects built on it.
 
-2. **Session workflow improvement:** Whether there is a better way to get Claude
+3. **Session workflow improvement:** Whether there is a better way to get Claude
    context at session start that doesn't require the manual zip upload. The Gitea
    direct-fetch approach is the right idea but the Claude in Chrome method hit
    too many security filters. Other approaches (GitHub public repo + web_fetch,
@@ -677,69 +688,7 @@ a new plan that addresses the filter problems documented in Gotchas.txt.**
 **Note: Gitea is now hosted on ops-pi (192.168.100.230), not gitea-pi. All
 references to gitea-pi.home should be updated to ops-pi.home.**
 
-## Backlog (as of v3.3.91, updated Session 30)
-
-**Security**
-- ✅ SESSION_COOKIE_SECURE = True — shipped v3.3.34.
-- ✅ MFA: TOTP primary + email/SMS/backup code fallbacks. Admin/Operator mandatory
-  (7-day grace). Monitor optional. SHIPPED v3.3.86, closeout v3.3.87.
-- ✅ MFA verification codes redacted from alert history: _redact_sensitive() in database.py
-  now strips email-format and SMS-format MFA codes at write time. SHIPPED v3.3.88.
-- ✅ Role-based alert permissions: new Alerts tab in Users & Roles with Available/Email/SMS
-  per alert type per role. available=0 purges user overrides immediately and enforces at
-  send time in get_active_recipients(). Replaces hardcoded ALLOWED_GROUPS in preferences.html
-  with data-driven check from type_settings_user API. SHIPPED v3.3.89.
-- Security audit: review attack surface for package installer and deployed files uploader
-  (malicious package injection, path traversal, code execution). Broader auth/session/
-  physical/remote access hardening review. Goal: confidence before distributing to others.
-
-**UI**
-- ✅ All UI backlog items complete as of v3.3.85.
-
-**Features**
-- Kiosk display — DESCOPED: user plans to use KioskPi or similar external tool.
-  Not part of NetWatch going forward.
-- ✅ Git integration: auto-commit and push to Gitea on every package install.
-  Post-install git push row in Package Installer UI with retry on failure.
-  SHIPPED v3.3.91 (Session 30).
-- Package storage + push (design together with: distributable installer, update package
-  installer — these form a cohesive distribution story. Git is now the foundation.)
-
-**Observability Stack (ops-pi)**
-- ✅ All observability stack items complete as of Session 19.
-- TLS for Grafana/Prometheus/Loki on ops-pi: currently HTTP only on LAN.
-  Low priority until external access is needed.
-
-**Infrastructure**
-- SSD migration (hardware ordered — for NetWatch Pi)
-- ✅ All other infrastructure items complete.
-- GAP-8: Git setup not in install.sh — manual procedure documented in SystemSetup.txt.
-  Wizard candidate for future distributable.
-
-**Testing**
-- Full system backup — needs SD cards
-- Distributable installer — needs second Pi / SD cards (design with package storage,
-  update installer as a cohesive distribution story)
-- Update package installer (design with above)
-- ✅ Rollback DB restore verified working (confirmed Session 9)
-- ✅ Verify GPG decrypt of encrypted backup file locally on Windows, then full restore
-  flow end-to-end: decrypt → upload decrypted file → restore via UI. CONFIRMED Session 28.
-
-**Documentation**
-- User PDF
-- Admin guide PDF
-- Developer reference
-- Changelog PDF retroactive
-- NetWatch brochure
-
-**mBase & Architecture (active design work — see mBase Strategy section)**
-- Work through all PENDING DISCUSSION items in Audit_Findings.txt (9 decisions needed)
-- Decide git strategy: commit discipline, what goes in git, branching approach ✅ DECIDED Session 30
-- Decide sharing/publishing approach: GitHub vs Gitea, licensing, README requirements
-- Decide session workflow improvement: better session-start method for multi-repo future
-- Blueprint refactor design brief (required for module system — biggest structural change)
-- Module system design brief (most consequential decision; propagates to all future projects)
-- mBase directory/repo setup on Pi (separate dir in /home/mboynton/mbase/ to start)
+## Backlog (as of v3.3.90, updated Session 29)
 
 **Security**
 - ✅ SESSION_COOKIE_SECURE = True — shipped v3.3.34.

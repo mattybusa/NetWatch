@@ -98,6 +98,24 @@
       <div class="nw-label mb-3" id="result-title">Applying...</div>
       <div id="result-steps"></div>
     </div>
+
+    <!-- Git push result row — only shown when git is configured -->
+    <div id="git-push-row" style="display:none;" class="nw-card p-3 mb-3">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div style="font-size:1.1rem;" id="git-push-icon">⟳</div>
+        <div style="flex:1;">
+          <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);" id="git-push-label">
+            Pushing to Gitea...
+          </div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px;" id="git-push-detail"></div>
+        </div>
+        <button id="git-retry-btn" class="nw-btn" style="display:none;font-size:0.78rem;padding:4px 12px;"
+                onclick="retryGitPush()">
+          ↺ Retry Push
+        </button>
+      </div>
+    </div>
+
     <button class="nw-btn" onclick="resetUI()">Install Another Package</button>
   </div>
 
@@ -342,6 +360,9 @@ async function applyPackage() {
 
   // Service restart feedback
   if (data.success) {
+    // Start git push polling regardless of restart type
+    pollGitStatus();
+
     const dataStr = JSON.stringify(data);
     const webRestart     = dataStr.includes("netwatch-web");
     const monitorRestart = dataStr.includes("netwatch-monitor");
@@ -411,14 +432,95 @@ async function applyPackage() {
   loadHistory();
 }
 
+// ── Git push feedback ─────────────────────────────────────────────────────────
+function showGitRow(state, error) {
+  // state: true=ok, false=failed, null=not configured (hide row)
+  const row    = document.getElementById("git-push-row");
+  const icon   = document.getElementById("git-push-icon");
+  const label  = document.getElementById("git-push-label");
+  const detail = document.getElementById("git-push-detail");
+  const retry  = document.getElementById("git-retry-btn");
+
+  if (state === null) {
+    row.style.display = "none";
+    return;
+  }
+
+  row.style.display = "block";
+  if (state === true) {
+    icon.textContent  = "✓";
+    icon.style.color  = "var(--ok)";
+    label.textContent = "Pushed to Gitea";
+    label.style.color = "var(--ok)";
+    detail.textContent = "";
+    retry.style.display = "none";
+  } else {
+    icon.textContent  = "✗";
+    icon.style.color  = "var(--fail)";
+    label.textContent = "Git push failed";
+    label.style.color = "var(--fail)";
+    detail.textContent = error || "Unknown error — check network and credentials";
+    retry.style.display = "inline-block";
+  }
+}
+
+async function pollGitStatus() {
+  // Poll after a brief delay to let the push complete (it runs async relative to the response)
+  await new Promise(r => setTimeout(r, 2000));
+  try {
+    const res  = await fetch("/api/patch/git_status");
+    const data = await res.json();
+    if (!data.configured) { return; }  // git not set up — hide row
+    const last = data.last;
+    if (!last || last.git_push === null || last.git_push === undefined) {
+      // Push hasn't completed yet — poll once more
+      await new Promise(r => setTimeout(r, 3000));
+      const res2  = await fetch("/api/patch/git_status");
+      const data2 = await res2.json();
+      const last2 = data2.last;
+      if (last2) showGitRow(last2.git_push === "ok", last2.git_push_error);
+      return;
+    }
+    showGitRow(last.git_push === "ok", last.git_push_error);
+  } catch (e) {
+    // Network error during poll — don't show the row at all
+  }
+}
+
+async function retryGitPush() {
+  const icon   = document.getElementById("git-push-icon");
+  const label  = document.getElementById("git-push-label");
+  const detail = document.getElementById("git-push-detail");
+  const retry  = document.getElementById("git-retry-btn");
+
+  icon.textContent  = "⟳";
+  icon.style.color  = "var(--text-muted)";
+  label.textContent = "Retrying push...";
+  label.style.color = "var(--text-muted)";
+  detail.textContent = "";
+  retry.style.display = "none";
+  retry.disabled = true;
+
+  try {
+    const res  = await fetch("/api/patch/git_retry", { method: "POST" });
+    const data = await res.json();
+    showGitRow(data.success === true, data.error);
+  } catch (e) {
+    showGitRow(false, "Request failed — check server logs");
+  } finally {
+    retry.disabled = false;
+  }
+}
+
 // ── Reset ─────────────────────────────────────────────────────────────────────
 function resetUI() {
   currentFile  = null;
   previewData  = null;
-  document.getElementById("pkg-input").value        = "";
+  document.getElementById("pkg-input").value             = "";
   document.getElementById("preview-panel").style.display = "none";
   document.getElementById("result-panel").style.display  = "none";
   document.getElementById("validating").style.display    = "none";
+  document.getElementById("git-push-row").style.display  = "none";
 }
 
 // ── History ───────────────────────────────────────────────────────────────────

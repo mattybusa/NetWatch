@@ -165,6 +165,66 @@ GPG KEY REPLACEMENT (when generating a new key pair):
   verify the exact format after enabling if journald capture is needed.
   SESSION: 19
 
+1.9 GIT VERSION CONTROL
+------------------------
+Git is initialized in ~/netwatch/ with remote origin pointing to Gitea on ops-pi.
+patcher.py automatically commits and pushes on every successful package install.
+All git operations run as netwatch-svc.
+
+[MANUAL-ONCE] Initial setup (performed Session 30):
+
+  a) Create Gitea repo: ops-pi.home:3000 → mboynton/netwatch (private, empty)
+
+  b) Create Gitea PAT: Settings → Applications → Generate Token
+     Name: netwatch-pi | Permissions: Repository read+write
+     NOTE: Copy token immediately — shown only once.
+
+  c) Fix .git directory ownership (git refuses to operate on repos owned by
+     a different user):
+       sudo chown -R netwatch-svc:netwatch-svc /home/mboynton/netwatch/.git
+
+  d) Configure git identity for netwatch-svc (use full absolute path — tilde
+     expands to /nonexistent for netwatch-svc which has no home directory):
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch config \
+         user.name "NetWatch Pi"
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch config \
+         user.email "NetWatch.Prime@gmail.com"
+
+  e) Embed PAT in remote URL (passwordless push):
+       git -C ~/netwatch remote set-url origin \
+         https://mboynton:<PAT>@ops-pi.home:3000/mboynton/netwatch.git
+
+  f) Initial commit and force push (force required because Gitea initialized
+     with a README):
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch add -A
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch commit \
+         -m "v3.3.90: Initial commit — full codebase at Session 29 closeout"
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch push \
+         --force origin main
+
+  g) Update .gitignore to exclude .gnupg/, pkg_update.log, gunicorn.ctl
+     then remove already-tracked files from index:
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch rm --cached -r .gnupg/
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch rm --cached pkg_update.log
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch add .gitignore
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch commit \
+         -m "v3.3.90: Fix .gitignore — exclude .gnupg, pkg_update.log, gunicorn.ctl"
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch push origin main
+
+[ONGOING] After v3.3.91 installed: patcher.py handles all commits automatically.
+  No manual git steps needed after this. Each package install produces a commit
+  with message: "vX.X.X (Session N): description from manifest"
+
+[GAP-8] Git setup not in install.sh — entire section above is manual.
+  Wizard candidate: prompt for Gitea URL, repo name, PAT; configure automatically.
+  Low priority until distributable story is designed.
+
+CURRENT STATE (as of Session 30):
+  Remote: https://mboynton:<PAT>@ops-pi.home:3000/mboynton/netwatch.git
+  Branch: main
+  .git owned by: netwatch-svc:netwatch-svc
+  Auto-push: active from v3.3.91 onward
+
 ================================================================================
 SECTION 2: NETWATCH PI — OBSERVABILITY (PROMTAIL)
 ================================================================================

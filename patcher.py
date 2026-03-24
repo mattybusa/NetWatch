@@ -541,23 +541,51 @@ def apply_package(zip_bytes, applied_by="web"):
             })
 
     # ── Log to DB ─────────────────────────────────────────────────────────────
+    pkg_version  = manifest.get("version", "unknown")
+    pkg_session  = str(manifest["session"]) if "session" in manifest else None
+    pkg_desc     = manifest.get("description", "")
+
     _log_patch(
-        package_version=manifest.get("version", "unknown"),
-        description=manifest.get("description", ""),
+        package_version=pkg_version,
+        description=pkg_desc,
         applied_by=applied_by,
         success=not had_error,
         steps_total=len(actions),
         steps_ok=sum(1 for r in results if r["status"] == "ok"),
         step_results=results + restart_results,
-        session=str(manifest["session"]) if "session" in manifest else None
+        session=pkg_session
     )
 
+    # ── Git push — only on successful installs ─────────────────────────────────
+    git_result = {"success": None, "output": "", "error": None}  # default: not configured
+    if not had_error:
+        git_result = _git_push(pkg_version, pkg_session, pkg_desc)
+        # Persist git state for retry support (get the id of the row we just inserted)
+        try:
+            _ensure_patch_log_table()
+            conn = sqlite3.connect(DB_PATH)
+            row = conn.execute(
+                "SELECT id FROM patch_log ORDER BY timestamp DESC LIMIT 1"
+            ).fetchone()
+            conn.close()
+            if row:
+                _save_git_state(row[0], git_result, pkg_version, pkg_session, pkg_desc)
+        except Exception as e:
+            log.error("Failed to persist git state after install", error=str(e))
+        if git_result["success"] is False:
+            log.warning("Git push failed after package install",
+                        version=pkg_version, error=git_result.get("error"))
+        elif git_result["success"] is True:
+            log.info("Git push successful", version=pkg_version)
+
     return {
-        "success":           not had_error,
-        "results":           results,
-        "restart_results":   restart_results,
+        "success":            not had_error,
+        "results":            results,
+        "restart_results":    restart_results,
         "rollback_available": len(backed_up) > 0,
-        "backed_up_files":   [b[0] for b in backed_up],
+        "backed_up_files":    [b[0] for b in backed_up],
+        "git_push":           git_result.get("success"),   # True, False, or None (not configured)
+        "git_push_error":     git_result.get("error"),
         "message": (
             f"Package applied successfully — {len(results)} steps, "
             f"{len(restart_queue)} service(s) restarted."
@@ -942,17 +970,201 @@ def _ensure_patch_log_table():
             steps_ok          INTEGER DEFAULT 0,
             admin_notes       TEXT DEFAULT NULL,
             step_results_json TEXT DEFAULT NULL,
-            session           TEXT DEFAULT NULL
+            session           TEXT DEFAULT NULL,
+            git_push          TEXT DEFAULT NULL,  -- 'ok', 'failed', 'skipped', NULL=not yet attempted
+            git_push_error    TEXT DEFAULT NULL,  -- error message when git_push='failed'
+            git_version       TEXT DEFAULT NULL,  -- version used in commit message
+            git_session       TEXT DEFAULT NULL,  -- session number used in commit message
+            git_description   TEXT DEFAULT NULL   -- description used in commit message (for retry)
         )
     """)
-    for col, defval in [("admin_notes", "NULL"), ("step_results_json", "NULL"),
-                        ("session", "NULL")]:
+    for col, defval in [
+        ("admin_notes",       "NULL"),
+        ("step_results_json", "NULL"),
+        ("session",           "NULL"),
+        ("git_push",          "NULL"),
+        ("git_push_error",    "NULL"),
+        ("git_version",       "NULL"),
+        ("git_session",       "NULL"),
+        ("git_description",   "NULL"),
+    ]:
         try:
             conn.execute(f"ALTER TABLE patch_log ADD COLUMN {col} TEXT DEFAULT {defval}")
         except Exception:
             pass
     conn.commit()
     conn.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GIT PUSH — post-install commit and push to Gitea
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _is_git_configured():
+    """
+    Return True if git is initialised in NETWATCH_DIR and a remote origin exists.
+    Used to skip git push silently when git is not set up (fresh installs,
+    distributable deployments without Gitea).
+    """
+    try:
+        # Check git repo exists
+        result = subprocess.run(
+            ["git", "-C", NETWATCH_DIR, "rev-parse", "--git-dir"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return False
+        # Check remote origin exists
+        result = subprocess.run(
+            ["git", "-C", NETWATCH_DIR, "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=5
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _git_push(version, session, description):
+    """
+    Stage all changes, commit with a descriptive message, and push to origin.
+
+    Commit message format: "vX.X.X (Session N): description"
+    If session is None: "vX.X.X: description"
+
+    Returns:
+        dict with keys:
+          success (bool)
+          output  (str) — combined stdout/stderr from git commands
+          error   (str|None) — human-readable failure reason
+    """
+    if not _is_git_configured():
+        return {"success": None, "output": "", "error": None}  # None = not configured, skip silently
+
+    # Build commit message
+    if session:
+        msg = f"v{version} (Session {session}): {description}"
+    else:
+        msg = f"v{version}: {description}"
+
+    output_lines = []
+
+    try:
+        # Stage everything
+        r = subprocess.run(
+            ["git", "-C", NETWATCH_DIR, "add", "-A"],
+            capture_output=True, text=True, timeout=30
+        )
+        output_lines.append(f"git add: {r.stdout.strip() or 'ok'}")
+        if r.returncode != 0:
+            return {"success": False, "output": "\n".join(output_lines),
+                    "error": f"git add failed: {r.stderr.strip()}"}
+
+        # Commit — if nothing changed (e.g. doc-only with no actual file diffs)
+        # git commit exits 1 with "nothing to commit" — treat as success
+        r = subprocess.run(
+            ["git", "-C", NETWATCH_DIR, "commit", "-m", msg],
+            capture_output=True, text=True, timeout=30
+        )
+        commit_out = (r.stdout + r.stderr).strip()
+        output_lines.append(f"git commit: {commit_out}")
+        if r.returncode != 0 and "nothing to commit" not in commit_out:
+            return {"success": False, "output": "\n".join(output_lines),
+                    "error": f"git commit failed: {r.stderr.strip()}"}
+
+        # Push
+        r = subprocess.run(
+            ["git", "-C", NETWATCH_DIR, "push", "origin", "main"],
+            capture_output=True, text=True, timeout=60
+        )
+        push_out = (r.stdout + r.stderr).strip()
+        output_lines.append(f"git push: {push_out}")
+        if r.returncode != 0:
+            return {"success": False, "output": "\n".join(output_lines),
+                    "error": f"git push failed: {r.stderr.strip() or 'check network and credentials'}"}
+
+        return {"success": True, "output": "\n".join(output_lines), "error": None}
+
+    except subprocess.TimeoutExpired:
+        return {"success": False, "output": "\n".join(output_lines),
+                "error": "git operation timed out — check network connectivity to Gitea"}
+    except Exception as e:
+        return {"success": False, "output": "\n".join(output_lines), "error": str(e)}
+
+
+def _save_git_state(patch_log_id, git_result, version, session, description):
+    """
+    Persist git push result into patch_log for retry support.
+    git_push values: 'ok', 'failed', 'skipped' (not configured)
+    """
+    try:
+        _ensure_patch_log_table()
+        success = git_result.get("success")
+        if success is None:
+            status = "skipped"
+        elif success:
+            status = "ok"
+        else:
+            status = "failed"
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""
+            UPDATE patch_log
+            SET git_push=?, git_push_error=?, git_version=?, git_session=?, git_description=?
+            WHERE id=?
+        """, (status, git_result.get("error"), version, session, description, patch_log_id))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.error("Failed to save git state", error=str(e))
+
+
+def get_last_git_state():
+    """
+    Return the git push state for the most recent package install.
+    Used by the UI to show the push result row and retry button.
+
+    Returns dict with keys: id, git_push, git_push_error, git_version,
+    git_session, git_description, package_version — or None if no history.
+    """
+    try:
+        _ensure_patch_log_table()
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("""
+            SELECT id, git_push, git_push_error, git_version, git_session,
+                   git_description, package_version
+            FROM patch_log
+            ORDER BY timestamp DESC LIMIT 1
+        """).fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        log.error("Failed to read git state", error=str(e))
+        return None
+
+
+def retry_git_push():
+    """
+    Retry the git push for the most recent package install.
+    Called from the UI retry button without reinstalling anything.
+
+    Returns same shape as _git_push().
+    """
+    state = get_last_git_state()
+    if not state:
+        return {"success": False, "output": "", "error": "No recent install found to retry"}
+
+    version     = state.get("git_version") or state.get("package_version") or "unknown"
+    session     = state.get("git_session")
+    description = state.get("git_description") or ""
+
+    result = _git_push(version, session, description)
+    _save_git_state(state["id"], result, version, session, description)
+    return result
+
+
+def get_git_configured():
+    """Public wrapper — lets webapp.py check git status for UI decisions."""
+    return _is_git_configured()
 
 
 def get_changelog(limit=200):

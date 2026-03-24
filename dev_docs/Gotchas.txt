@@ -675,8 +675,19 @@ but which may be arbitrarily old.
 
 ---
 
-2026-03-21 | v3.3.81
-SHELL SCRIPTS CALLING PYTHON HELPERS THAT IMPORT NETWATCH MODULES MUST USE VENV
+2026-03-24 | v3.3.91 (Session 30)
+GIT REPO OWNED BY WRONG USER BLOCKS ALL git OPERATIONS AS netwatch-svc
+When git was initialized in ~/netwatch/ as mboynton, the .git directory and all
+its contents were owned by mboynton. Running git commands as netwatch-svc (which
+patcher.py does) fails with "fatal: not in a git directory" — git's safe directory
+check refuses to operate on repos owned by a different user, even with the -C flag.
+Fix: sudo chown -R netwatch-svc:netwatch-svc /home/mboynton/netwatch/.git
+After this, all git operations as netwatch-svc work correctly.
+Also: "sudo -u netwatch-svc git -C ~/netwatch" fails because ~ expands to
+/nonexistent for netwatch-svc. Always use the full absolute path:
+  sudo -u netwatch-svc git -C /home/mboynton/netwatch <command>
+Or for config: sudo -u netwatch-svc git -C /home/mboynton/netwatch config ...
+Do NOT use --global (netwatch-svc has no home dir, --global has nowhere to write).
 Shell scripts (backup.sh, backup_db.sh, pkg_update.sh) use bare python3 for simple
 one-liners that only import config (stdlib-compatible). Any Python helper that imports
 NetWatch modules (alert_subscribers, alerts, database, etc.) must use the venv Python:

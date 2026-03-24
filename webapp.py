@@ -3392,6 +3392,26 @@ def api_patch_apply():
     return jsonify(result)
 
 
+@app.route("/api/patch/git_status")
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def api_patch_git_status():
+    """Return git push state for the most recent install, plus whether git is configured."""
+    return jsonify({
+        "configured": patcher.get_git_configured(),
+        "last":       patcher.get_last_git_state(),
+    })
+
+
+@app.route("/api/patch/git_retry", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def api_patch_git_retry():
+    """Retry the git push for the most recent install without reinstalling."""
+    result = patcher.retry_git_push()
+    return jsonify(result)
+
+
 @app.route("/api/patch/history")
 @auth.login_required
 @auth.requires_permission("manage_admin")

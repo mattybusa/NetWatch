@@ -1,0 +1,192 @@
+NETWATCH CHAT SUMMARY — SESSION 30
+====================================
+Date: 2026-03-24
+Starting version: v3.3.90 | Ending version: v3.3.91
+Summary: Backlog review, git strategy decision, full git infrastructure setup on
+  the Pi, and git integration shipped in patcher.py with Package Installer UI feedback.
+
+SCOPE NOTE: One major feature arc (git integration) plus significant planning
+  discussion and manual Pi infrastructure work. No expanded summary required —
+  all detail captured here.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+BACKLOG REVIEW AND ARCHITECTURAL DISCUSSION:
+  User reviewed backlog and reached the following conclusions:
+  - NetWatch is functionally complete as a product.
+  - Security audit: important but belongs at the mBase transition boundary,
+    not as isolated NetWatch work.
+  - Kiosk display: DESCOPED. User will use KioskPi or similar external tool.
+    Not part of NetWatch going forward.
+  - Package storage + push, distributable installer, update package installer,
+    and git strategy are a cohesive distribution story — all four go together.
+  - Documentation: cannot be finalized until "final version of NetWatch" is declared.
+  - Remaining backlog is almost entirely mBase and architecture.
+  - Conclusion: solving git solves the foundation for all of the above.
+
+GIT STRATEGY DECIDED:
+  - Auto-commit on every successful package install (every package — completeness
+    over cleanliness)
+  - dev_docs included in git (session history, Gotchas, context docs — useful for
+    mBase future, no secrets in these files)
+  - No session workflow automation (zip upload stays — reliable, filter problems
+    in Sessions 11-13 not worth retrying)
+  - No Gitea Issues automation (backlog stays in context doc — no split-tracking risk)
+  - Phase 1 only: git + auto-push + UI feedback. Webhook auto-deploy deferred.
+
+PI GIT INFRASTRUCTURE SETUP (manual, one-time, Session 30):
+  All steps documented in SystemSetup.txt Section 1.9.
+
+  1. Created fresh mboynton/netwatch repo on Gitea (ops-pi.home:3000, private).
+     Gitea initialized with default README (no empty-repo option available).
+
+  2. Created Gitea PAT "netwatch-pi" with repository read+write, no expiration.
+
+  3. Updated remote URL to ops-pi.home with PAT embedded:
+       git -C ~/netwatch remote set-url origin \
+         https://mboynton:<PAT>@ops-pi.home:3000/mboynton/netwatch.git
+
+  4. Fixed .git directory ownership (was mboynton, needed netwatch-svc):
+       sudo chown -R netwatch-svc:netwatch-svc /home/mboynton/netwatch/.git
+     Root cause: git's safe directory check refuses to operate on repos owned
+     by a different user. "fatal: not in a git directory" was the symptom.
+     Also discovered: --global fails for netwatch-svc (no home dir); must use
+     repo local config with full absolute path.
+
+  5. Configured git identity for netwatch-svc:
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch config \
+         user.name "NetWatch Pi"
+       sudo -u netwatch-svc git -C /home/mboynton/netwatch config \
+         user.email "NetWatch.Prime@gmail.com"
+
+  6. Initial commit and force push (force required to overwrite Gitea README):
+     126 files, 31,356 insertions — full codebase + all dev_docs at v3.3.90.
+
+  7. Updated .gitignore to exclude:
+       .gnupg/          (GPG keyring — security, binary noise)
+       pkg_update.log   (runtime log — changes constantly)
+       gunicorn.ctl     (Unix socket — already in gitignore rationale from v3.2.94)
+     Removed already-tracked .gnupg/ and pkg_update.log from git index.
+     Cleanup commit pushed.
+
+v3.3.91 — GIT INTEGRATION (patcher.py, webapp.py, patch_manager.html):
+  patcher.py:
+  - _is_git_configured(): checks for .git dir and remote origin; returns False
+    if git not set up (enables graceful skip on distributable installs).
+  - _git_push(version, session, description): stages all, commits with message
+    "vX.X.X (Session N): description", pushes to origin main. Handles timeout
+    (60s for push), "nothing to commit" treated as success, errors returned cleanly.
+  - _save_git_state(patch_log_id, git_result, ...): persists push result to
+    patch_log table (git_push, git_push_error, git_version, git_session,
+    git_description columns — added via ALTER TABLE migration).
+  - get_last_git_state(): returns most recent install's git push state for UI.
+  - retry_git_push(): reruns push for most recent install without reinstalling.
+  - get_git_configured(): public wrapper for webapp.py UI decisions.
+  - _ensure_patch_log_table(): updated with 5 new git columns (safe ALTER TABLE).
+  - apply_package(): calls _git_push() after successful install; stores result;
+    returns git_push and git_push_error in response dict.
+
+  webapp.py:
+  - GET /api/patch/git_status: returns {configured, last} for UI polling.
+  - POST /api/patch/git_retry: triggers retry_git_push(), returns result.
+
+  patch_manager.html:
+  - New git push result card below install result panel (hidden when git not configured).
+  - Shows ✓ Pushed to Gitea (green) or ✗ Push failed with error detail (red).
+  - Retry button appears only on failure — calls /api/patch/git_retry, polls result.
+  - pollGitStatus() called after successful install; polls twice with delay to
+    allow async push to complete before reading DB state.
+  - resetUI() clears git row on "Install Another Package".
+
+  NOTE: v3.3.91 itself showed no git push row — expected. preload_app=True in
+  gunicorn means the old in-memory patcher ran the install. From v3.3.92 onward
+  every install will auto-push and show the row.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- "sudo -u netwatch-svc git -C ~/netwatch config ..." failed with "fatal: not in
+  a git directory". Root cause: tilde expands to /nonexistent for netwatch-svc.
+  Fixed by using full absolute path /home/mboynton/netwatch.
+
+- "sudo -u netwatch-svc git config --global ..." failed with "could not lock config
+  file /nonexistent/.gitconfig". Root cause: netwatch-svc has no home directory.
+  Fixed by using repo-local config (no --global flag, full path via -C).
+
+- .gnupg/ and pkg_update.log committed in initial push before .gitignore was updated.
+  Cleaned up in a follow-on commit. No security risk (.gnupg contains only public
+  key material; pkg_update.log contains no secrets).
+
+
+DECISIONS MADE
+--------------
+- Every package commits — completeness over cleanliness. Future Matt will appreciate
+  the complete history.
+- dev_docs in git. AI session files are documentation, not secrets. Full history
+  is useful for mBase extraction.
+- No Gitea Issues automation. Backlog in context doc is sufficient; split tracking
+  introduces sync risk with minimal gain.
+- No session workflow automation. Zip upload is reliable; filter problems from
+  Sessions 11-13 not worth revisiting without a fundamentally different approach.
+- PAT embedded in remote URL as the credential mechanism. Simpler than credential
+  store for a service account with no home directory.
+- Kiosk display permanently descoped from NetWatch.
+- Git commit format: "vX.X.X (Session N): description" — pulls all three fields
+  from manifest.json which patcher already reads.
+- git_push failure is non-blocking — install success is independent of push success.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING VERIFICATION] git auto-push not yet verified live. v3.3.91 install did
+  not trigger it (old in-memory patcher). First real test is the next package install.
+  First action next session: install any package and verify push row appears.
+
+- [PENDING] Sharing/publishing discussion: GitHub vs Gitea, licensing, README
+  requirements. Not blocking anything currently.
+
+- [PENDING] Distribution story design: package storage, distributable installer,
+  update package installer. Git is now the foundation; design can proceed.
+
+- [PENDING] 9 PENDING DISCUSSION items in Audit_Findings.txt still open.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Git integration: auto-commit and push on every package install (v3.3.91)
+- Git strategy decision (version control approach decided and implemented)
+- Kiosk display: DESCOPED (removed from backlog)
+
+Added this session:
+- GAP-8 in SystemSetup.txt: git setup not in install.sh, wizard candidate
+
+Closed / reclassified:
+- "Decide git strategy" mBase item: DECIDED and IMPLEMENTED this session
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+None. All detail captured in this base summary.
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during session per process:
+
+- GIT REPO OWNED BY WRONG USER BLOCKS ALL git OPERATIONS AS netwatch-svc (new) —
+  .git owned by mboynton; netwatch-svc sees "fatal: not in a git directory".
+  Fix: sudo chown -R netwatch-svc:netwatch-svc /home/mboynton/netwatch/.git
+  Also: tilde expands to /nonexistent for netwatch-svc; always use full absolute
+  path. --global also fails (no home dir); use repo-local config only.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.91
+- Git: active, auto-push working from next install onward
+- Gitea repo: ops-pi.home:3000/mboynton/netwatch — current at v3.3.90 + cleanup
+- Next task: verify auto-push on first package install next session, then
+  distribution story design or security audit

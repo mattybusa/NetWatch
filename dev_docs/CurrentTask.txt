@@ -1,30 +1,40 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-23 | Session 29 closed | v3.3.89
+Updated: 2026-03-24 | Session 30 closed | v3.3.91
 
-STATUS: Session 29 complete and closed out.
+STATUS: Session 30 complete and closed out.
 
-SESSION 29 SUMMARY
+SESSION 30 SUMMARY
 ------------------
-- v3.3.88: MFA verification codes redacted from alert history. _redact_sensitive()
-  in database.py now strips both email-format and SMS-format codes at write time.
-- v3.3.89: Role-based alert permissions. New Alerts tab in Users & Roles with
-  Available/Email/SMS controls per alert type per role. Standalone subscriber
-  defaults via sentinel role_id=0. My Account now data-driven instead of hardcoded
-  ALLOWED_GROUPS. Grid compressed vertically.
+- Backlog review and architectural discussion: NetWatch is functionally complete.
+  Remaining work is distribution story, security audit, docs, and mBase.
+- Kiosk display descoped: user will use KioskPi or similar external tool.
+- Git strategy decided: auto-commit on every package install, dev_docs included,
+  completeness over cleanliness, no session workflow automation (zip stays).
+- Pi git infrastructure set up manually:
+    - Fresh mboynton/netwatch repo created on Gitea (ops-pi.home:3000)
+    - Gitea PAT created (netwatch-pi, repository read+write, no expiration)
+    - .git directory ownership changed to netwatch-svc
+    - git identity configured for netwatch-svc (user/email under repo local config)
+    - PAT embedded in remote URL for passwordless push
+    - Full codebase committed and force-pushed at v3.3.90
+    - .gitignore updated: .gnupg/, pkg_update.log, gunicorn.ctl excluded
+    - Cleanup commit pushed (removed accidentally committed GPG keyring files)
+- v3.3.91: Git integration shipped — patcher.py auto-commits and pushes on every
+  successful package install. Post-install git push row in Package Installer UI
+  with retry button on failure. Gracefully skipped when git not configured.
 
 NEXT SESSION
 ------------
 Open candidates:
-  1. Security audit (attack surface review -- package installer, auth/session hardening)
-  2. Kiosk display (operational quick-glance status view, scope narrowed)
-  3. Package storage + distribution story (design together with distributable
-     installer, update package installer, git strategy -- cohesive design unit)
+  1. Verify git auto-push works on next package install (first real test of v3.3.91)
+  2. Security audit (attack surface review — package installer, auth/session hardening)
+  3. Distribution story design: package storage + push, distributable installer,
+     update package installer (cohesive design unit, git is now the foundation)
+  4. Sharing/publishing discussion: GitHub vs Gitea, licensing, README requirements
 
-See NetWatch_AI_Context_latest.txt backlog section for full list.
-
-POST-INSTALL NOTE
------------------
-After installing v3.3.89, all role_alert_defaults rows will have available=1 (the
-migration default). Configure the Alerts tab to restrict types per role as desired --
-nothing changes for existing users until you explicitly save.
+FIRST ACTION NEXT SESSION
+--------------------------
+Install any small package (even a doc-only update) to verify the git auto-push
+works correctly and the push row appears in the Package Installer UI.
+If it fails, check: netwatch-svc git config, PAT validity, network to ops-pi.
