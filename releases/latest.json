@@ -1,0 +1,10 @@
+{
+  "version": "3.3.95",
+  "description": "Fresh install fixes, git integration, role-based alert permissions, MFA.",
+  "package_url": "",
+  "changelog_url": "",
+  "package_sha256": "",
+  "min_version": "",
+  "critical": false,
+  "released": "2026-03-25"
+}
