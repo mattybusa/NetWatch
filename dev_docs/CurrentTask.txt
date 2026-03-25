@@ -1,40 +1,49 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-24 | Session 30 closed | v3.3.91
+Updated: 2026-03-25 | Session 31 closed | v3.3.94
 
-STATUS: Session 30 complete and closed out.
+STATUS: Session 31 complete and closed out.
 
-SESSION 30 SUMMARY
+SESSION 31 SUMMARY
 ------------------
-- Backlog review and architectural discussion: NetWatch is functionally complete.
-  Remaining work is distribution story, security audit, docs, and mBase.
-- Kiosk display descoped: user will use KioskPi or similar external tool.
-- Git strategy decided: auto-commit on every package install, dev_docs included,
-  completeness over cleanliness, no session workflow automation (zip stays).
-- Pi git infrastructure set up manually:
-    - Fresh mboynton/netwatch repo created on Gitea (ops-pi.home:3000)
-    - Gitea PAT created (netwatch-pi, repository read+write, no expiration)
-    - .git directory ownership changed to netwatch-svc
-    - git identity configured for netwatch-svc (user/email under repo local config)
-    - PAT embedded in remote URL for passwordless push
-    - Full codebase committed and force-pushed at v3.3.90
-    - .gitignore updated: .gnupg/, pkg_update.log, gunicorn.ctl excluded
-    - Cleanup commit pushed (removed accidentally committed GPG keyring files)
-- v3.3.91: Git integration shipped — patcher.py auto-commits and pushes on every
-  successful package install. Post-install git push row in Package Installer UI
-  with retry button on failure. Gracefully skipped when git not configured.
+- Distribution story discussion: full design brief for update checker, installer,
+  GitHub setup, manifest format, auto-install option, permission model.
+- Decisions: Model C (user-initiated update with notification), SHA-256 checksum
+  verification, UPDATE_CHECK_URL config key, system_update alert type,
+  human-friendly release changelogs separate from patcher release notes.
+- Fresh install testing on second Pi (192.168.100.15, nwadmin):
+  - Ran install.sh end-to-end, found and fixed all gaps:
+    1. Missing build deps: python3-dev, swig, liblgpio-dev
+    2. netwatch-svc not in gpio group (monitor crashed on GPIO init)
+    3. Bootstrap config.py needed for services to start (chicken-and-egg with wizard)
+    4. Database init must run as netwatch-svc after config.py exists
+    5. TLS cert generation: multiple pipefail/permission/heredoc issues resolved
+    6. WLAN_IP grep pipeline fails with pipefail when WiFi has no inet address
+    7. Multi-line sudo -u openssl commands misparse on Pi -- use single line
+    8. Temp file owned by nwadmin can't be deleted by netwatch-svc
+    9. backfill_account_subscribers() missing created_at -- fails on fresh install
+    10. Wizard restart uses combined systemctl command -- not in sudoers exact match
+  - v3.3.94 shipped: alert_subscribers.py created_at fix, webapp.py wizard restart fix,
+    updated install.sh with all gaps fixed.
+- Fresh install confirmed working end-to-end: wizard fires, admin account created,
+  login works, dashboard loads.
+- User articulated final vision for distributable installer: PC-side app (netwatch-setup.exe)
+  that handles Pi imaging, pre-configuration, SSH-based install, no command line required.
+  This is the proper "distributable installer" backlog item, now clearly scoped.
 
 NEXT SESSION
 ------------
 Open candidates:
-  1. Verify git auto-push works on next package install (first real test of v3.3.91)
-  2. Security audit (attack surface review — package installer, auth/session hardening)
-  3. Distribution story design: package storage + push, distributable installer,
-     update package installer (cohesive design unit, git is now the foundation)
-  4. Sharing/publishing discussion: GitHub vs Gitea, licensing, README requirements
+  1. GitHub account setup + Gitea mirror (prerequisite for update checker)
+  2. Update checker design and implementation (manifest URL, daily poll, notification banner)
+  3. Update installer (download + checksum verify + patcher)
+  4. Distributable installer design brief (PC-side wizard -- major new feature)
+  5. Security audit (pre-distribution)
+  6. Documentation (User PDF, Admin guide)
 
-FIRST ACTION NEXT SESSION
---------------------------
-Install any small package (even a doc-only update) to verify the git auto-push
-works correctly and the push row appears in the Package Installer UI.
-If it fails, check: netwatch-svc git config, PAT validity, network to ops-pi.
+NOTE ON FRESH INSTALL STATE
+----------------------------
+Test Pi (192.168.100.15) is running v3.3.94 from the fresh install test.
+It is a test system -- not production. Production Pi (192.168.100.10) is at v3.3.94.
+Test Pi has nwadmin as the installing user, netwatch-svc as the service account.
+GPG backup encryption is NOT configured on the test Pi (GAP-4 still manual).

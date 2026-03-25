@@ -697,3 +697,91 @@ venv-only packages. pkg_update_alert.py works because alerts.py is its only impo
 and alerts.py's dependencies are all in the venv -- but the call must still use venv
 python3. Always use "$NETWATCH_DIR/venv/bin/python3" for any helper that goes beyond
 stdlib + config.
+
+2026-03-25 | Session 31 (install.sh testing)
+FRESH INSTALL REQUIRES python3-dev, swig, liblgpio-dev FOR GPIO PACKAGES
+RPi.GPIO and lgpio are compiled from source during pip install. On a fresh
+Raspberry Pi OS, the required build dependencies are not installed by default:
+- python3-dev: provides Python.h headers required by RPi.GPIO
+- swig: required to compile lgpio Python bindings
+- liblgpio-dev: provides the lgpio system library that lgpio links against
+Without these, pip install fails with build errors. All three must be in the
+apt-get block of install.sh before the pip install step.
+
+---
+
+2026-03-25 | Session 31 (install.sh testing)
+SET -EUO PIPEFAIL CATCHES GREP EXIT CODE 1 IN PIPELINES
+When using set -euo pipefail, any pipeline where grep finds no matches exits
+with code 1, which aborts the script. Commands like:
+  WLAN_IP=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' ...)
+will abort the script if wlan0 has no inet address (e.g. WiFi not configured).
+Fix: append || true to the full pipeline to suppress the non-zero exit:
+  WLAN_IP=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' ... || true)
+
+---
+
+2026-03-25 | Session 31 (install.sh testing)
+SUDO -U WITH MULTI-LINE BACKSLASH COMMANDS CAN MISPARSE ON PI
+When running a multi-line command with backslash continuation via sudo -u,
+the Pi shell can misparse the continuation causing "command not found" errors
+on what appears to be mid-command text. For example:
+  sudo -u netwatch-svc openssl x509 -req \
+      -extfile "$EXT_FILE"
+may cause "op: command not found" as if "-extfile" was split incorrectly.
+Fix: put the entire sudo -u command on a single line when the command is
+complex. This is particularly important for openssl commands with many flags.
+
+---
+
+2026-03-25 | Session 31 (install.sh testing)
+TEMP FILES CREATED BY INSTALLER USER CANNOT BE DELETED BY SERVICE ACCOUNT
+If install.sh creates a temp file with mktemp (owned by the installing user,
+e.g. nwadmin), then tries to delete it via sudo -u netwatch-svc rm, the
+deletion fails with "Operation not permitted". The service account cannot
+remove files it does not own. Fix: delete temp files as the installing user
+(without sudo -u), and only use sudo -u for files owned by the service account.
+
+---
+
+2026-03-25 | Session 31 (install.sh testing)
+WIZARD RESTART COMMAND MUST USE SEPARATE SYSTEMCTL CALLS
+The setup wizard (webapp.py setup_apply) restarted both services with:
+  sudo systemctl restart netwatch-monitor netwatch-web
+Sudoers entries use exact string matching. The combined two-service form is
+not in sudoers (only individual service restarts are). The command was silently
+rejected, leaving the wizard looping because config was updated but services
+never reloaded. Fix: use two separate systemctl restart commands:
+  sudo systemctl restart netwatch-monitor && sudo systemctl restart netwatch-web
+Rule: never combine multiple services in one systemctl command when running
+as netwatch-svc -- sudoers only allows the exact single-service forms.
+
+---
+
+2026-03-25 | Session 31 (install.sh testing)
+BACKFILL_ACCOUNT_SUBSCRIBERS MISSING CREATED_AT ON FRESH INSTALL
+alert_subscribers.backfill_account_subscribers() INSERT was missing created_at
+from both the column list and VALUES. The alert_subscribers table has
+created_at TEXT NOT NULL, so the INSERT fails with:
+  NOT NULL constraint failed: alert_subscribers.created_at
+This error is silent on production (subscriber records already exist) but
+crashes on a fresh install when backfill runs against a newly created admin
+account. Fix: add created_at to the INSERT column list and use datetime('now')
+as the value. Shipped in v3.3.94.
+
+---
+
+2026-03-25 | Session 31 (closeout packaging)
+DELETE OUTPUT ZIP BEFORE REBUILDING -- zip UPDATES NOT REPLACES
+The zip command updates an existing archive rather than replacing it. If a package
+zip is rebuilt without first deleting the old file, files from the previous build
+remain in the zip alongside the new files. This causes patcher's _find_in_zip()
+basename match to find the wrong copy (e.g. a file at zip root instead of
+dev_docs/) and place it in the wrong location on the Pi.
+Rule: always delete the output zip before rebuilding:
+  rm -f output.zip
+  cd /package_dir && zip -r ../output.zip .
+This is in the process doc packaging rules but worth repeating: never zip without
+first confirming the output file does not already exist.
+
+---

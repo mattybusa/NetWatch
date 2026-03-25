@@ -1,0 +1,188 @@
+NETWATCH CHAT SUMMARY — SESSION 31
+=====================================
+Date: 2026-03-25
+Starting version: v3.3.93 (git push status column in changelog, post-closeout)
+Ending version: v3.3.94
+Session focus: Distribution story design, fresh install testing on second Pi,
+  fixing all install.sh gaps, end-to-end install confirmed working.
+
+SCOPE NOTE: Two major arcs — (1) distribution story discussion and design, and
+(2) live fresh install testing with iterative fixes. One package shipped (v3.3.94).
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+ARC 1 — Distribution story design discussion
+
+Full design brief produced for the NetWatch update/distribution story:
+
+- Distribution models evaluated: Model A (centralized push), Model B (manual pull),
+  Model C (user-initiated with notification). Model C selected — NetWatch polls a
+  manifest URL, shows notification banner, user initiates install.
+
+- Manifest format designed: releases/latest.json on GitHub with version, description,
+  package_url, changelog_url, package_sha256, min_version, critical flag.
+
+- Update checker: runs in monitor service, polls daily with jitter, fails silently
+  on network errors. Writes available version to DB. Web service shows notification.
+
+- Update installer: downloads zip from manifest package_url, verifies SHA-256 checksum,
+  passes to existing patcher.apply_package(). Identical path to manual Package Installer.
+
+- Permission model: Admin and Operator see notification banner. Only Admin can install
+  (manage_users permission). Auto-install option as config key (UPDATE_AUTO_INSTALL,
+  default False).
+
+- system_update alert type: subscribable per normal role-based alert system. Sent when
+  auto-install applies an update. Defaults to Admin only.
+
+- Human-friendly release changelogs: separate from patcher per-package release notes.
+  Patcher changelog = development record for Matt. Release notes = user-facing summary
+  consolidating multiple packages into one human-readable description.
+
+- UPDATE_CHECK_URL config key: defaults to GitHub manifest URL, blank = disabled.
+  First-run wizard asks opt-in question. Config Editor allows changes later.
+
+- GitHub strategy: public repo (unadvertised), Gitea → GitHub mirror (automatic).
+  Security audit before promotion. MIT license already in place.
+
+- Distributable installer vision clarified: user wants a PC-side application
+  (netwatch-setup.exe) that handles Pi imaging, SD card pre-configuration, SSH-based
+  install initiation, and Pi-side wizard — no SSH knowledge required. This is the
+  proper scope of the "distributable installer" backlog item. Design brief required
+  before any code. Separate from install.sh.
+
+ARC 2 — Fresh install testing on second Pi
+
+Test Pi: Raspberry Pi 3B+, static IP 192.168.100.15 (eth0) / 192.168.110.15 (wlan0),
+hostname netwatch2, user nwadmin. Raspberry Pi OS Lite 64-bit fresh flash.
+
+Ran install.sh iteratively, finding and fixing 10 gaps:
+
+GAP 1 — Missing build dependencies:
+RPi.GPIO and lgpio compile from source. python3-dev, swig, liblgpio-dev required.
+Without them, pip install fails with build errors. Added to apt-get block.
+
+GAP 2 — netwatch-svc not in gpio group:
+Monitor crashed immediately with "No access to /dev/mem". gpio group exists on Pi
+but netwatch-svc was not a member. Added usermod -aG gpio netwatch-svc to install.sh.
+
+GAP 3 — No config.py on fresh install:
+Services crash with ModuleNotFoundError: No module named 'config'. Bootstrap config.py
+created by install.sh with all schema defaults and placeholder SECRET_KEY. Wizard fires
+when SECRET_KEY equals placeholder — correct flow preserved.
+
+GAP 4 — Database init running before config.py and as wrong user:
+Original db init ran as nwadmin using bare python3 before config.py existed. Both wrong.
+Fixed: runs after config.py created, as netwatch-svc, using venv python3.
+
+GAP 5-8 — TLS cert generation (multiple issues):
+Entire cert generation block was new code added this session. Multiple issues found:
+- Heredoc in install.sh for SAN ext file fails silently on Pi (known gotcha)
+  Fixed: replaced with printf statements
+- WLAN_IP pipeline (grep exits 1 when no match) aborted script with pipefail
+  Fixed: appended || true to pipeline
+- Multi-line sudo -u openssl commands misparsed on Pi ("op: command not found")
+  Fixed: put all openssl commands on single lines
+- Temp file owned by nwadmin, deleted via sudo -u netwatch-svc — permission denied
+  Fixed: delete EXT_FILE as nwadmin, CSR as netwatch-svc separately
+- CA cert partial state from previous failed run caused signing to fail
+  Fixed: clean up any partial cert state at start of cert block
+
+GAP 9 — backfill_account_subscribers() missing created_at:
+On fresh install, backfill runs against newly created admin account. INSERT was missing
+created_at (TEXT NOT NULL). Failed with NOT NULL constraint error. Silent on production
+(subscriber records already exist). Fixed in alert_subscribers.py. SHIPPED v3.3.94.
+
+GAP 10 — Wizard restart using combined systemctl command:
+setup_apply() in webapp.py restarted both services with:
+  sudo systemctl restart netwatch-monitor netwatch-web
+Sudoers exact string matching rejected this (only individual service forms allowed).
+Services never restarted, wizard looped back to step 1. Fixed to two separate commands.
+SHIPPED v3.3.94.
+
+v3.3.94 shipped to production Pi with:
+- alert_subscribers.py: created_at added to backfill INSERT
+- webapp.py: wizard restart uses two separate systemctl commands
+- install.sh: all gaps fixed (GAPs 1-10 above)
+Git push confirmed working on production.
+
+Fresh install confirmed working end-to-end:
+wizard fires → admin account created → login works → dashboard loads ✅
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+Multiple install.sh iterations (approx 8 full cleanup/run cycles) before all gaps
+were found and fixed. Each iteration found the next gap. This is the correct approach
+(test-driven gap discovery) but time-consuming.
+
+ERR trap (trap 'echo "FAILED at line $LINENO"' ERR) was the key diagnostic tool
+that finally identified the WLAN_IP grep/pipefail issue at line 354.
+
+
+DECISIONS MADE
+--------------
+- Distribution model: Model C (user-initiated update with notification banner).
+- Bootstrap config.py uses placeholder SECRET_KEY so wizard fires correctly.
+- Distributable installer is a PC-side application, not just install.sh improvements.
+  Design brief required before any code.
+- GitHub: public repo, unadvertised initially. Security audit before promotion.
+- Gitea → GitHub mirror: automatic, no workflow change.
+- UPDATE_CHECK_URL as config key, wizard opt-in, Config Editor changeable later.
+- system_update as subscribable alert type, defaults to Admin only.
+- Human-friendly release changelogs separate from patcher per-package notes.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] GitHub account not yet created. Needed before update checker work.
+- [PENDING] Gitea → GitHub mirror not yet configured.
+- [PENDING] Update checker and installer not yet built.
+- [PENDING] Distributable installer (PC-side) design brief not yet written.
+- [PENDING] GPG keyring for netwatch-svc not set up on test Pi (GAP-4 still manual).
+- [PENDING] Browser CA certificate install still manual (expected, documented).
+- [PENDING] Config Editor gaps not surfaced to new users via wizard.
+  Current wizard only covers: network targets, admin account, email. All other
+  config keys require user to find the Config Editor. Future wizard improvement.
+- [PENDING] Security audit before public distribution.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Fresh install testing and fixes (v3.3.94)
+- Git auto-push verification (confirmed working Sessions 30/31)
+
+Added this session:
+- Distributable installer (PC-side): netwatch-setup.exe design — see backlog
+- Update checker: manifest polling, notification banner
+- Update installer: download + checksum + patcher integration
+
+No items removed from backlog.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+None. All detail captured in this base summary.
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during session per process:
+- FRESH INSTALL REQUIRES python3-dev, swig, liblgpio-dev FOR GPIO PACKAGES
+- SET -EUO PIPEFAIL CATCHES GREP EXIT CODE 1 IN PIPELINES
+- SUDO -U WITH MULTI-LINE BACKSLASH COMMANDS CAN MISPARSE ON PI
+- TEMP FILES CREATED BY INSTALLER USER CANNOT BE DELETED BY SERVICE ACCOUNT
+- WIZARD RESTART COMMAND MUST USE SEPARATE SYSTEMCTL CALLS
+- BACKFILL_ACCOUNT_SUBSCRIBERS MISSING CREATED_AT ON FRESH INSTALL
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.94
+- Git: confirmed working, auto-push on every package install
+- Fresh install: confirmed working end-to-end on test Pi
+- Test Pi (192.168.100.15): running v3.3.94, healthy
+- Next task: GitHub setup + Gitea mirror, then update checker/installer

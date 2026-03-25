@@ -221,6 +221,22 @@ These rules were learned the hard way. Violating them costs hours.
 - Build zips from INSIDE the package directory: cd /package_dir && zip -r output.zip .
   Never zip from outside — files must be at zip root or manifest won't be found.
 
+- DELETE THE OUTPUT ZIP BEFORE REBUILDING. zip updates existing archives rather than
+  replacing them. If the zip already exists, old files remain alongside new ones.
+  patcher._find_in_zip() matches by basename and finds the root-level duplicate first,
+  placing the file in the wrong location (netwatch root instead of dev_docs/).
+  Always: rm -f output.zip BEFORE running zip.
+
+- dev_docs/ files MUST be inside a dev_docs/ subdirectory IN THE ZIP, not at zip root.
+  If the file is at zip root, _find_in_zip() finds it there first and it lands in
+  ~/netwatch/ root on the Pi instead of ~/netwatch/dev_docs/.
+  Correct structure:
+    manifest.json             <- at zip root
+    dev_docs/Gotchas.txt      <- inside dev_docs/ subdirectory
+  Wrong structure:
+    manifest.json
+    Gotchas.txt               <- WRONG: lands in ~/netwatch/ not ~/netwatch/dev_docs/
+
 - manifest.json actions and path resolution:
     .html files     -> templates/
     .css/.js files  -> static/
