@@ -771,6 +771,21 @@ as the value. Shipped in v3.3.94.
 
 ---
 
+2026-03-25 | Session 32 (GitHub setup)
+GIT ADD FAILS AFTER CREATING FILES AS mboynton -- .git/objects OWNERSHIP DRIFT
+When files are created in ~/netwatch/ as mboynton (e.g. mkdir, cat, touch), then
+git add is run as netwatch-svc, git creates new object subdirectories under
+.git/objects/ owned by mboynton. netwatch-svc cannot write to these and git add
+fails with "insufficient permission for adding an object to repository database".
+The chown -R fix restores ownership but the real pattern to follow is:
+- Always run git operations as netwatch-svc (sudo -u netwatch-svc git -C /home/mboynton/netwatch ...)
+- If files were created as mboynton, fix ownership before git add:
+    sudo chown -R netwatch-svc:netwatch-svc /home/mboynton/netwatch/.git
+- For the releases/ directory specifically: create it and its files as netwatch-svc
+  or fix ownership before committing.
+
+---
+
 2026-03-25 | Session 31 (closeout packaging)
 DELETE OUTPUT ZIP BEFORE REBUILDING -- zip UPDATES NOT REPLACES
 The zip command updates an existing archive rather than replacing it. If a package

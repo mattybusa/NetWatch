@@ -1,49 +1,53 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-25 | Session 31 closed | v3.3.94
+Updated: 2026-03-25 | Session 32 closed | v3.3.95
 
-STATUS: Session 31 complete and closed out.
+STATUS: Session 32 complete and closed out.
 
-SESSION 31 SUMMARY
+SESSION 32 SUMMARY
 ------------------
-- Distribution story discussion: full design brief for update checker, installer,
-  GitHub setup, manifest format, auto-install option, permission model.
-- Decisions: Model C (user-initiated update with notification), SHA-256 checksum
-  verification, UPDATE_CHECK_URL config key, system_update alert type,
-  human-friendly release changelogs separate from patcher release notes.
-- Fresh install testing on second Pi (192.168.100.15, nwadmin):
-  - Ran install.sh end-to-end, found and fixed all gaps:
-    1. Missing build deps: python3-dev, swig, liblgpio-dev
-    2. netwatch-svc not in gpio group (monitor crashed on GPIO init)
-    3. Bootstrap config.py needed for services to start (chicken-and-egg with wizard)
-    4. Database init must run as netwatch-svc after config.py exists
-    5. TLS cert generation: multiple pipefail/permission/heredoc issues resolved
-    6. WLAN_IP grep pipeline fails with pipefail when WiFi has no inet address
-    7. Multi-line sudo -u openssl commands misparse on Pi -- use single line
-    8. Temp file owned by nwadmin can't be deleted by netwatch-svc
-    9. backfill_account_subscribers() missing created_at -- fails on fresh install
-    10. Wizard restart uses combined systemctl command -- not in sudoers exact match
-  - v3.3.94 shipped: alert_subscribers.py created_at fix, webapp.py wizard restart fix,
-    updated install.sh with all gaps fixed.
-- Fresh install confirmed working end-to-end: wizard fires, admin account created,
-  login works, dashboard loads.
-- User articulated final vision for distributable installer: PC-side app (netwatch-setup.exe)
-  that handles Pi imaging, pre-configuration, SSH-based install, no command line required.
-  This is the proper "distributable installer" backlog item, now clearly scoped.
+GitHub infrastructure set up:
+- Account: mattybusa
+- Public repo: github.com/mattybusa/NetWatch
+- PAT: netwatch-pi (repo-scoped, Contents read+write, no expiration)
+- github remote added to Pi (PAT embedded in URL, same pattern as Gitea)
+- Full codebase + history pushed
+- releases/latest.json placeholder committed to both remotes
+- Manifest URL confirmed live:
+  https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json
+- Release workflow: manual push to github remote when ready to publish
 
 NEXT SESSION
 ------------
-Open candidates:
-  1. GitHub account setup + Gitea mirror (prerequisite for update checker)
-  2. Update checker design and implementation (manifest URL, daily poll, notification banner)
-  3. Update installer (download + checksum verify + patcher)
-  4. Distributable installer design brief (PC-side wizard -- major new feature)
-  5. Security audit (pre-distribution)
-  6. Documentation (User PDF, Admin guide)
+Primary candidate:
+  Update checker — monitor service polls releases/latest.json daily (with jitter),
+  compares version to installed version, writes available version to DB,
+  web service reads DB and shows notification banner to Admin/Operator users.
 
-NOTE ON FRESH INSTALL STATE
-----------------------------
-Test Pi (192.168.100.15) is running v3.3.94 from the fresh install test.
-It is a test system -- not production. Production Pi (192.168.100.10) is at v3.3.94.
-Test Pi has nwadmin as the installing user, netwatch-svc as the service account.
-GPG backup encryption is NOT configured on the test Pi (GAP-4 still manual).
+  Design decisions already made (Session 31):
+  - Model C: user-initiated update with notification, no auto-install by default
+  - UPDATE_CHECK_URL config key (defaults to manifest URL, blank = disabled)
+  - First-run wizard asks opt-in question
+  - system_update alert type (subscribable, Admin only by default)
+  - Notification banner visible to Admin + Operator (manage_admin permission)
+  - Only Admin can install (manage_users permission)
+  - Fails silently on network errors
+
+  Work required:
+  - New config key: UPDATE_CHECK_URL (config_schema.py)
+  - Monitor service: daily poll with jitter, version comparison, DB write
+  - New DB table or user_pref for available_version
+  - webapp.py: API endpoint to read available version
+  - Notification banner in base.html or dashboard
+  - Design brief still required before code (new feature norm)
+
+Other open candidates:
+  - Update installer (download + sha256 + patcher) — follows update checker
+  - Security audit (pre-distribution)
+  - Distributable installer design brief (PC-side netwatch-setup.exe)
+  - Documentation (User PDF, Admin guide)
+
+NOTE
+----
+releases/ directory not in install.sh yet. Low priority — update checker can
+create it on first run, or add to install.sh when update checker is built.

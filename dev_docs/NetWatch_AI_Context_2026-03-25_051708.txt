@@ -23,11 +23,10 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.3.95
+- **Pi version:** v3.3.94
 - **Pi path:** `/home/mboynton/netwatch/`
-- **Canonical matches Pi at v3.3.95**
+- **Canonical matches Pi at v3.3.94**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.
-- **GitHub:** Public repo at https://github.com/mattybusa/NetWatch. Remote named `github` on Pi (PAT embedded). Manual push workflow — push to github remote when ready to publish a release. Manifest URL: https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json (live). releases/latest.json committed to both remotes. Session 32.
 - **ops-pi (formerly gitea-pi):** 192.168.100.230 | https://ops-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos (both private, MIT)
 - **ops-pi services:** Gitea 1.25.5 (port 3000 HTTPS), Prometheus 3.5.1 (port 9090), Loki 3.5.1 (port 3100), Grafana (port 3001), Node Exporter 1.9.0 (port 9100) — all running
 - **NetWatch Pi:** Node Exporter 1.9.0 running (port 9100), Prometheus scraping confirmed. Promtail 3.5.1 running (systemd service), shipping journal logs to Loki on ops-pi.
@@ -678,7 +677,7 @@ a new plan that addresses the filter problems documented in Gotchas.txt.**
 **Note: Gitea is now hosted on ops-pi (192.168.100.230), not gitea-pi. All
 references to gitea-pi.home should be updated to ops-pi.home.**
 
-## Backlog (as of v3.3.95, updated Session 32)
+## Backlog (as of v3.3.94, updated Session 31)
 
 **Security**
 - ✅ SESSION_COOKIE_SECURE = True — shipped v3.3.34.
@@ -708,13 +707,9 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   admin account created via wizard. Fixed: missing build deps (python3-dev, swig,
   liblgpio-dev), gpio group, backfill created_at, wizard restart command.
   SHIPPED v3.3.94 (Session 31).
-- ✅ GitHub setup: public repo at github.com/mattybusa/NetWatch. `github` remote on Pi.
-  releases/latest.json live at raw.githubusercontent.com. Manual push workflow.
-  DONE Session 32.
-- Update checker: manifest polling, notification banner (prerequisite: GitHub ✅)
-- Update installer: download + checksum verify + patcher
-- Decide sharing/publishing approach: GitHub public (unadvertised) ✅ DECIDED Session 31.
-  Security audit before promotion/advertising.
+- Package storage + push (design together with: distributable installer, update package
+  installer — these form a cohesive distribution story. Git is now the foundation.)
+- Distributable installer (PC-side): Python/PyInstaller desktop app (netwatch-setup.exe)
   that guides user through Pi imaging, pre-configures SD card, detects Pi boot,
   initiates install over SSH automatically. No SSH knowledge required from user.
   Vision: Raspberry Pi Imager extended to cover full NetWatch install. Design brief
@@ -750,7 +745,7 @@ references to gitea-pi.home should be updated to ops-pi.home.**
 **mBase & Architecture (active design work — see mBase Strategy section)**
 - Work through all PENDING DISCUSSION items in Audit_Findings.txt (9 decisions needed)
 - Decide git strategy: commit discipline, what goes in git, branching approach ✅ DECIDED Session 30
-- Decide sharing/publishing approach: GitHub vs Gitea, licensing, README requirements ✅ DECIDED Session 31/32 (GitHub public unadvertised, MIT already in place, manual push on release)
+- Decide sharing/publishing approach: GitHub vs Gitea, licensing, README requirements
 - Decide session workflow improvement: better session-start method for multi-repo future
 - Blueprint refactor design brief (required for module system — biggest structural change)
 - Module system design brief (most consequential decision; propagates to all future projects)

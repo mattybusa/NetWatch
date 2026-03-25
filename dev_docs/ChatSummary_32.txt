@@ -1,0 +1,118 @@
+NETWATCH CHAT SUMMARY — SESSION 32
+=====================================
+Date: 2026-03-25
+Starting version: v3.3.95 | Ending version: v3.3.95 (no code changes)
+Session focus: GitHub account setup, public repo creation, initial push,
+  releases/latest.json manifest placeholder committed to both remotes.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+GITHUB INFRASTRUCTURE SETUP (manual, one-time, Session 32):
+
+1. GitHub account confirmed: mattybusa (existing account, not new).
+
+2. Created public repo: github.com/mattybusa/NetWatch
+   - MIT license already in place from existing codebase
+   - Initialized empty (no README) to allow full history push
+
+3. Created GitHub PAT "netwatch-pi":
+   - Repository-scoped to NetWatch only
+   - Contents: read + write
+   - No expiration
+
+4. Added github remote on Pi:
+     sudo -u netwatch-svc git -C /home/mboynton/netwatch remote add github \
+       https://mattybusa:<PAT>@github.com/mattybusa/NetWatch.git
+
+5. Initial push: full codebase + all dev_docs + complete commit history pushed
+   to github remote successfully.
+
+6. Created releases/ directory and releases/latest.json placeholder:
+   {
+     "version": "3.3.95",
+     "description": "...",
+     "package_url": "",
+     "changelog_url": "",
+     "package_sha256": "",
+     "min_version": "",
+     "critical": false,
+     "released": "2026-03-25"
+   }
+   Committed and pushed to both origin (Gitea) and github remotes.
+
+7. Manifest URL confirmed live:
+   https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json
+
+RELEASE WORKFLOW DECIDED:
+  Manual push — when ready to publish a release to the world:
+  1. Update releases/latest.json (version, description, package_url, sha256, etc.)
+  2. git commit + push origin main (auto-push via patcher already handles this for
+     normal packages; releases/latest.json updates are manual)
+  3. git push github main (manual step)
+  No auto-mirror. GitHub only sees what you deliberately push.
+  This keeps development commits internal to Gitea during active development.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+First attempt at git add/commit as mboynton failed:
+  "error: insufficient permission for adding an object to repository database .git/objects"
+Root cause: releases/ directory created as mboynton; git add as netwatch-svc tried to
+write new objects to .git/objects dirs owned by mboynton. Fixed by running all git
+operations as netwatch-svc with full absolute path.
+
+
+DECISIONS MADE
+--------------
+- Manual push workflow for GitHub (Option B). No auto-mirror.
+  Rationale: development commits stay internal. GitHub tells a clean release story.
+  Revisit auto-mirror or tag-based mirror when update checker is built and first
+  real public release is ready.
+- GitHub is the distribution host for releases/latest.json and future package zips.
+- Manifest URL: https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] Update checker not yet built (next logical step).
+- [PENDING] Update installer not yet built.
+- [PENDING] GitHub PAT stored only in the git remote URL on the Pi — same pattern
+  as Gitea PAT. Not in any config file. Fine for now.
+- [PENDING] Security audit before publicly advertising the repo.
+- [PENDING] releases/ directory not yet in install.sh — new installs won't have it.
+  Low priority until update checker is built (checker can create it).
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- GitHub setup: public repo, PAT, github remote, initial push, manifest placeholder
+
+Decisions made:
+- Sharing/publishing approach: DECIDED (GitHub public, unadvertised, manual push)
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+None. All detail captured in this base summary.
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during session:
+- GIT ADD FAILS AFTER CREATING FILES AS mboynton -- .git/objects OWNERSHIP DRIFT
+  When files created as mboynton, git add as netwatch-svc fails with permission error.
+  Fix: sudo chown -R netwatch-svc:netwatch-svc /home/mboynton/netwatch/.git, then
+  run all git operations as netwatch-svc with full absolute path.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.95 (no change this session)
+- GitHub: live at github.com/mattybusa/NetWatch
+- Manifest URL: https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json
+- Both remotes current at same commit
+- Next task: Update checker (monitor service polls manifest daily, writes to DB,
+  web shows notification banner)
