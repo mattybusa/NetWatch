@@ -318,8 +318,8 @@ def backfill_account_subscribers():
                     (user_id, username, first_name, last_name,
                      email_address, email_enabled,
                      sms_phone, sms_carrier, sms_custom_domain, sms_enabled,
-                     alert_overrides, is_owner)
-                VALUES (?, ?, ?, ?, '', 0, '', '', '', 0, '{}', 0)
+                     alert_overrides, created_at, is_owner)
+                VALUES (?, ?, ?, ?, '', 0, '', '', '', 0, '{}', datetime('now'), 0)
             """, (u["id"], u["username"] or "", u["first_name"] or "", u["last_name"] or ""))
             seeded += 1
 

@@ -200,9 +200,9 @@ def setup_apply():
                 if admin_role:
                     auth.create_user(admin_user, admin_pass, admin_role["id"], must_change_pass=False)
 
-        # Restart services
+        # Restart services (two separate commands -- sudoers requires exact match)
         subprocess.Popen(["bash", "-c",
-            "sleep 1 && sudo systemctl restart netwatch-monitor netwatch-web"],
+            "sleep 1 && sudo systemctl restart netwatch-monitor && sleep 2 && sudo systemctl restart netwatch-web"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         return jsonify({"status": "ok"})
