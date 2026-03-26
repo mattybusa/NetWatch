@@ -23,7 +23,7 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.3.96
+- **Pi version:** v3.3.95
 - **Pi path:** `/home/mboynton/netwatch/`
 - **Canonical matches Pi at v3.3.95**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.
@@ -158,15 +158,11 @@ database.get_db_stats()
 # User prefs
 database.get_user_pref(user_id, "pref_key")        # returns value str or None
 database.set_user_pref(user_id, "pref_key", value)  # value=str to set; value=None to DELETE the row
-
-# System settings (inter-service key-value, not tied to any user)
-database.get_system_setting("key", default=None)    # returns value str or default
-database.set_system_setting("key", value)           # upsert; value=None clears to ""
 ```
 
 ### Database schema — where to find it
 All table definitions are in the source files with inline column comments. Read the relevant file before working with any table.
-- `database.py` — `network_health`, `reset_events`, `speedtest_results`, `alerts`, `user_prefs`, `system_settings`
+- `database.py` — `network_health`, `reset_events`, `speedtest_results`, `alerts`, `user_prefs`
 - `auth.py` — `roles`, `users`, `email_verifications`, `phone_verifications`
 - `alert_subscribers.py` — `alert_type_settings`, `alert_subscribers`, `role_alert_defaults`, `alert_deliveries`
 - `patcher.py` — `patch_log`
@@ -715,12 +711,8 @@ references to gitea-pi.home should be updated to ops-pi.home.**
 - ✅ GitHub setup: public repo at github.com/mattybusa/NetWatch. `github` remote on Pi.
   releases/latest.json live at raw.githubusercontent.com. Manual push workflow.
   DONE Session 32.
-- ✅ Update checker: monitor service polls releases/latest.json daily (with jitter),
-  compares version to installed, writes to system_settings DB table. Web service
-  shows dismissible notification banner (Admin/Operator). Always shown on /admin/patch
-  regardless of dismiss state. system_update alert type added to ALERT_TYPES.
-  MIGRATIONS.md created in repo root (empty shell). SHIPPED v3.3.96 (Session 33).
-- Update installer: download + checksum verify + MIGRATIONS.md apply + patcher
+- Update checker: manifest polling, notification banner (prerequisite: GitHub ✅)
+- Update installer: download + checksum verify + patcher
 - Decide sharing/publishing approach: GitHub public (unadvertised) ✅ DECIDED Session 31.
   Security audit before promotion/advertising.
   that guides user through Pi imaging, pre-configures SD card, detects Pi boot,

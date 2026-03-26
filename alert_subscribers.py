@@ -45,7 +45,8 @@ ALERT_TYPES = [
     {"key": "lockout_changed",   "label": "Lockout Mode Changed", "group": "security",    "default_email": False, "default_sms": False, "critical": False},
     {"key": "security_event",    "label": "Security Event",       "group": "security",    "default_email": False, "default_sms": False, "critical": False},
     # ── Maintenance alerts ──────────────────────────────────────────────────────
-    {"key": "pkg_update",        "label": "Pi Package Update",    "group": "maintenance", "default_email": False, "default_sms": False, "critical": False},
+    {"key": "pkg_update",      "label": "Pi Package Update",    "group": "maintenance", "default_email": False, "default_sms": False, "critical": False},
+    {"key": "system_update",   "label": "NetWatch Update",      "group": "maintenance", "default_email": False, "default_sms": False, "critical": False},
 
     # Audit-only types — logged to delivery history but never shown in subscription UI
     {"key": "mfa_code",         "label": "MFA Verification Code", "group": "system",      "default_email": False, "default_sms": False, "critical": False},

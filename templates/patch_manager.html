@@ -15,6 +15,31 @@
     All modified files are backed up automatically.
   </p>
 
+  {% if update_always %}
+  <!-- ── Update Available Card ── -->
+  <div class="nw-card p-4 mb-4" style="border:1px solid #1e78c8;background:rgba(30,120,200,0.07);">
+    <div style="display:flex;align-items:flex-start;gap:14px;">
+      <i class="bi bi-arrow-up-circle-fill" style="color:#1e78c8;font-size:1.4rem;flex-shrink:0;margin-top:2px;"></i>
+      <div style="flex:1;">
+        <div style="font-size:0.95rem;font-weight:700;color:#1e78c8;margin-bottom:4px;">
+          NetWatch v{{ update_always.version }} is available
+        </div>
+        {% if update_always.description %}
+        <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:10px;">
+          {{ update_always.description }}
+        </div>
+        {% endif %}
+        <div style="font-size:0.8rem;color:var(--text-muted);">
+          Download the update package from the link in the notification email or from the
+          <a href="https://github.com/mattybusa/NetWatch/releases" target="_blank"
+             style="color:#1e78c8;text-decoration:underline;">NetWatch releases page ↗</a>,
+          then drop it in the upload zone below to install.
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- ── Upload Zone ── -->
   <div id="drop-zone" class="nw-card"
        style="padding:48px; text-align:center; cursor:pointer;

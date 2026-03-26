@@ -92,6 +92,17 @@ def init_db():
         )
     """)
 
+    # System-level key-value store for inter-service state (not tied to any user).
+    # Used by the update checker (monitor writes, web reads) and any future
+    # system-level state that needs to survive service restarts.
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS system_settings (
+            key        TEXT PRIMARY KEY,
+            value      TEXT,
+            updated_at TEXT    -- ISO 8601 UTC timestamp of last write
+        )
+    """)
+
     conn.commit()
     conn.close()
     log.info("Database initialized", path=DB_PATH)
@@ -557,3 +568,43 @@ def set_user_pref(user_id, key, value):
         conn.close()
     except Exception as e:
         log.error("set_user_pref failed", error=str(e))
+
+
+# ── System settings (inter-service key-value store) ───────────────────────────
+
+def get_system_setting(key, default=None):
+    """
+    Read a system-level setting by key. Returns default if not found.
+    Used for state shared between the monitor and web services (e.g. update checker).
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row  = conn.execute(
+            "SELECT value FROM system_settings WHERE key=?", (key,)
+        ).fetchone()
+        conn.close()
+        return row[0] if row else default
+    except Exception as e:
+        log.error("get_system_setting failed", key=key, error=str(e))
+        return default
+
+
+def set_system_setting(key, value):
+    """
+    Write a system-level setting. Creates or replaces the row.
+    Pass value=None to clear the setting (row is kept, value set to empty string).
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            """INSERT INTO system_settings (key, value, updated_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(key) DO UPDATE SET
+                   value      = excluded.value,
+                   updated_at = excluded.updated_at""",
+            (key, value if value is not None else "")
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.error("set_system_setting failed", key=key, error=str(e))

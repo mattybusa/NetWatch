@@ -328,6 +328,23 @@ def inject_user():
     except Exception:
         pass
 
+    # Update availability — injected into every page for the notification banner.
+    # Only fetched for logged-in manage_admin users to avoid unnecessary DB reads.
+    update_available = None
+    try:
+        u = auth.get_current_user()
+        if u and not u.get("is_guest") and u.get("manage_admin"):
+            avail_ver = database.get_system_setting("update_available_version", "")
+            if avail_ver:
+                dismissed = database.get_system_setting("update_dismissed_version", "")
+                if avail_ver != dismissed:
+                    update_available = {
+                        "version":     avail_ver,
+                        "description": database.get_system_setting("update_available_description", ""),
+                    }
+    except Exception:
+        pass
+
     return {
         "current_user":           auth.get_current_user(),
         "config_notifications":   notifications,
@@ -336,6 +353,7 @@ def inject_user():
         "active_custom_color":    active_custom_color,
         "active_custom_layout":   active_custom_layout,
         "mfa_warning":            mfa_warning,
+        "update_available":       update_available,
     }
 
 
@@ -3359,6 +3377,43 @@ def api_config_export():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# UPDATE CHECKER
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/update/status")
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def api_update_status():
+    """Return current update availability from system_settings."""
+    avail_ver   = database.get_system_setting("update_available_version", "")
+    dismissed   = database.get_system_setting("update_dismissed_version", "")
+    last_checked = database.get_system_setting("update_last_checked", "")
+    return jsonify({
+        "available_version": avail_ver,
+        "description":       database.get_system_setting("update_available_description", ""),
+        "dismissed_version": dismissed,
+        "last_checked":      last_checked,
+        "update_pending":    bool(avail_ver and avail_ver != dismissed),
+    })
+
+
+@app.route("/api/update/dismiss", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def api_update_dismiss():
+    """
+    Dismiss the update banner for the currently available version.
+    The banner will reappear if a newer version becomes available.
+    The banner always shows on /admin/patch regardless of dismiss state.
+    """
+    avail_ver = database.get_system_setting("update_available_version", "")
+    if avail_ver:
+        database.set_system_setting("update_dismissed_version", avail_ver)
+        log.info("update_banner_dismissed", version=avail_ver,
+                 user=auth.get_current_user().get("username"))
+    return jsonify({"status": "ok"})
+
+
 # PACKAGE INSTALLER (PATCHER)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -3366,7 +3421,17 @@ def api_config_export():
 @auth.login_required
 @auth.requires_permission("manage_admin")
 def patch_manager():
-    return render_template("patch_manager.html")
+    # On the Package Installer page, always show the update banner if an update
+    # exists — even if the user previously dismissed it. This ensures they don't
+    # forget an available update while browsing packages.
+    avail_ver = database.get_system_setting("update_available_version", "")
+    update_always = None
+    if avail_ver:
+        update_always = {
+            "version":     avail_ver,
+            "description": database.get_system_setting("update_available_description", ""),
+        }
+    return render_template("patch_manager.html", update_always=update_always)
 
 
 @app.route("/api/patch/preview", methods=["POST"])

@@ -16,6 +16,7 @@ import signal
 import sys
 import os
 import logging
+import random
 from datetime import datetime, time as dt_time
 
 # -- Set up logging before importing anything else ----------------------------
@@ -76,6 +77,10 @@ import network
 import monitor
 import button
 import alerts
+try:
+    import requests as _requests
+except ImportError:
+    _requests = None
 
 
 # ==============================================================================
@@ -137,6 +142,11 @@ def main():
     # Track when to send daily summary
     last_summary_date = None
 
+    # Track when to run update check. Jitter (0–3600s) spreads check times
+    # across installs so all Pis don't hit GitHub at the same second each day.
+    last_update_check_date = None
+    update_check_jitter_s  = random.randint(0, 3600)
+
     log.info("monitor_loop_started")
 
     while True:
@@ -175,6 +185,17 @@ def main():
                     config.ALERTS_ENABLED):
                 alerts.send_daily_summary()
                 last_summary_date = now.date()
+
+            # -- Daily update check -------------------------------------------
+            # Poll UPDATE_CHECK_URL once per day (with jitter) to detect new
+            # versions. Writes result to system_settings so the web service
+            # can show a notification banner. Fails silently on any error.
+            _check_for_updates(now, last_update_check_date, update_check_jitter_s)
+            if now.date() != last_update_check_date:
+                # Only advance the date tracker once the jitter window has passed
+                elapsed_today_s = now.hour * 3600 + now.minute * 60 + now.second
+                if elapsed_today_s >= update_check_jitter_s:
+                    last_update_check_date = now.date()
 
             # -- Check for web-triggered commands -----------------------------
             _check_pending_command(state, net_monitor)
@@ -243,6 +264,76 @@ def _check_pending_command(state, net_monitor):
             pass
     except Exception as e:
         log.error("web_command_error", error=str(e))
+
+
+# ==============================================================================
+# UPDATE CHECKER
+# ==============================================================================
+
+def _check_for_updates(now, last_check_date, jitter_s):
+    """
+    Poll UPDATE_CHECK_URL once per day (after the jitter offset) to check
+    whether a newer version of NetWatch is available.
+
+    Reads releases/latest.json from GitHub (or whatever URL is configured),
+    compares the available version to the installed version, and writes the
+    result to system_settings so the web service can show a notification banner.
+
+    Fails silently on any network or parsing error — never crashes the monitor.
+
+    Args:
+        now:             datetime.now() from the current loop iteration
+        last_check_date: date of the last completed check (or None)
+        jitter_s:        random offset in seconds (0-3600) so all installs
+                         don't hit the manifest URL at the same time each day
+    """
+    check_url = getattr(config, "UPDATE_CHECK_URL", "").strip()
+    if not check_url:
+        return  # Disabled
+
+    if _requests is None:
+        return  # requests library not available
+
+    # Run once per day, after the jitter offset has elapsed
+    elapsed_today_s = now.hour * 3600 + now.minute * 60 + now.second
+    if now.date() == last_check_date or elapsed_today_s < jitter_s:
+        return
+
+    try:
+        from packaging import version as pkg_version
+
+        resp = _requests.get(check_url, timeout=10)
+        resp.raise_for_status()
+        manifest = resp.json()
+
+        available_ver = manifest.get("version", "").strip()
+        description   = manifest.get("description", "").strip()
+
+        # Read installed version from VERSION file (same source patcher uses)
+        version_file = os.path.join(NETWATCH_DIR, "VERSION")
+        try:
+            with open(version_file) as f:
+                installed_ver = f.read().strip()
+        except FileNotFoundError:
+            installed_ver = "0.0.0"
+
+        if available_ver and pkg_version.parse(available_ver) > pkg_version.parse(installed_ver):
+            database.set_system_setting("update_available_version",    available_ver)
+            database.set_system_setting("update_available_description", description)
+            log.info("update_available",
+                     installed=installed_ver,
+                     available=available_ver)
+        else:
+            # Current or check produced no usable version — clear any stale banner
+            database.set_system_setting("update_available_version",    "")
+            database.set_system_setting("update_available_description", "")
+            log.info("update_check_current", installed=installed_ver, available=available_ver)
+
+        database.set_system_setting("update_last_checked", now.strftime("%Y-%m-%d %H:%M:%S"))
+
+    except Exception as e:
+        # Fail silently — network errors, timeouts, bad JSON, anything
+        log.warning("update_check_failed", error=str(e))
 
 
 # ==============================================================================

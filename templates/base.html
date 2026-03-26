@@ -478,6 +478,33 @@
     </div>
     {% endif %}
 
+    {% if update_available %}
+    <div id="update-notify-banner" style="
+        background: rgba(30,120,200,0.10);
+        border: 1px solid #1e78c8;
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 18px;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;">
+      <i class="bi bi-arrow-up-circle" style="color:#1e78c8;font-size:1.1rem;margin-top:2px;flex-shrink:0;"></i>
+      <div style="flex:1;">
+        <div style="font-size:0.85rem;font-weight:600;color:#1e78c8;margin-bottom:4px;">
+          NetWatch v{{ update_available.version }} is available
+        </div>
+        <div style="font-size:0.8rem;color:var(--text-secondary);">
+          {% if update_available.description %}{{ update_available.description }} &nbsp;·&nbsp;{% endif %}
+          <a href="/admin/patch" style="color:#1e78c8;text-decoration:underline;">Go to Package Installer →</a>
+        </div>
+      </div>
+      <button onclick="dismissUpdateBanner()" title="Dismiss"
+              style="background:none;border:none;color:#1e78c8;cursor:pointer;font-size:1.1rem;padding:0;flex-shrink:0;">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+    {% endif %}
+
     {% if mfa_warning %}
     <div id="mfa-warn-banner" style="
         background: rgba({% if mfa_warning.expired %}192,57,43{% else %}210,153,34{% endif %},0.12);
@@ -539,6 +566,11 @@ async function dismissAllNotifications() {
 async function dismissMfaBanner() {
   document.getElementById("mfa-warn-banner").style.display = "none";
   await fetch("/api/mfa/dismiss_banner", { method: "POST" });
+}
+
+async function dismissUpdateBanner() {
+  document.getElementById("update-notify-banner").style.display = "none";
+  await fetch("/api/update/dismiss", { method: "POST" });
 }
 
 function toggleGuestMenu() {

@@ -631,6 +631,18 @@ CONFIG_SCHEMA = [
         "max":         65535,
         "ui_hidden":   False,
     },
+    {
+        "key":         "UPDATE_CHECK_URL",
+        "default":     "https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json",
+        "required":    False,
+        "group":       "system",
+        "section":     "System",
+        "label":       "Update Check URL",
+        "description": "URL of the update manifest JSON. NetWatch polls this daily to check for new versions. Leave blank to disable update checking.",
+        "sensitive":   False,
+        "type":        "str",
+        "ui_hidden":   False,
+    },
 ]
 
 # Quick lookup by key
