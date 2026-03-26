@@ -2679,8 +2679,10 @@ def admin_publish_release():
                             "message": "github remote not configured — add it first"}), 400
 
         remote_url = result.stdout.strip()
-        # https://TOKEN@github.com/OWNER/REPO.git
-        m = re.match(r"https://([^@]+)@github\.com/([^/]+)/([^/]+?)(?:\.git)?$", remote_url)
+        # Supports both formats:
+        #   https://TOKEN@github.com/OWNER/REPO.git
+        #   https://USERNAME:TOKEN@github.com/OWNER/REPO.git
+        m = re.match(r"https://(?:[^:@]+:)?([^@]+)@github\.com/([^/]+)/([^/]+?)(?:\.git)?$", remote_url)
         if not m:
             return jsonify({"status": "error",
                             "message": f"Cannot parse github remote URL: {remote_url}"}), 400
