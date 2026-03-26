@@ -2741,9 +2741,25 @@ def admin_publish_release():
         return jsonify({"status": "error", "message": f"Release creation error: {e}",
                         "steps": steps}), 500
 
-    # -- Step 2: Upload zip asset ----------------------------------------------
+    # -- Step 2: Upload zip asset (delete existing if present) ----------------
     zip_filename = os.path.basename(zip_path)
     try:
+        # Check for existing asset with same name and delete it first
+        existing_assets = req_lib.get(
+            f"https://api.github.com/repos/{owner}/{repo}/releases/{release_id}/assets",
+            headers=headers, timeout=15
+        ).json()
+        for asset in existing_assets:
+            if asset.get("name") == zip_filename:
+                del_resp = req_lib.delete(
+                    f"https://api.github.com/repos/{owner}/{repo}/releases/assets/{asset['id']}",
+                    headers=headers, timeout=15
+                )
+                if del_resp.status_code in (204, 200):
+                    steps.append(f"✓ Existing asset deleted: {zip_filename}")
+                else:
+                    steps.append(f"⚠ Could not delete existing asset: {del_resp.status_code}")
+
         with open(zip_path, "rb") as f:
             zip_bytes = f.read()
 
