@@ -1,10 +1,10 @@
 {
-  "version": "3.3.95",
-  "description": "Fresh install fixes, git integration, role-based alert permissions, MFA.",
-  "package_url": "",
+  "version": "3.4.6",
+  "description": "NetWatch v3.4.6 — update checker, release manager, and install improvements.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.6/netwatch-3.4.6.zip",
   "changelog_url": "",
-  "package_sha256": "",
+  "package_sha256": "b89f1946dcd07a372e000385634a473ad2670e6d32357d43b216ae57b3be5d3f",
   "min_version": "",
   "critical": false,
-  "released": "2026-03-25"
+  "released": "2026-03-26"
 }
