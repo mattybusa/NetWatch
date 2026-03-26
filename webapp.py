@@ -2541,7 +2541,8 @@ def admin_export_code():
     EXCLUDE_EXTS  = {".pyc", ".bak", ".gpg", ".gz"}
     # Exclude DB files by prefix regardless of extension variant
     EXCLUDE_PREFIXES = {"netwatch.db"}
-    EXCLUDE_FILES = {"config.py", "gunicorn.ctl"}   # config has credentials; gunicorn.ctl is a runtime socket
+    EXCLUDE_FILES = {"config.py", "gunicorn.ctl",   # config has credentials; gunicorn.ctl is a runtime socket
+                     "pkg_update.log"}               # runtime log — Pi-specific, should not transfer to other installs
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -3666,10 +3667,12 @@ def patch_manager():
         }
     check_url_configured = bool(getattr(config, "UPDATE_CHECK_URL", "").strip())
     last_checked         = database.get_system_setting("update_last_checked", "")
+    git_configured       = patcher.get_git_configured()
     return render_template("patch_manager.html",
                            update_always=update_always,
                            check_url_configured=check_url_configured,
-                           last_checked=last_checked)
+                           last_checked=last_checked,
+                           git_configured=git_configured)
 
 
 @app.route("/api/patch/preview", methods=["POST"])

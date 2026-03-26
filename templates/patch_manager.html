@@ -250,7 +250,7 @@
     <div class="overflow-auto">
       <table class="nw-table">
         <thead><tr>
-          <th>Date</th><th>Version</th><th>Description</th><th>By</th><th>Steps</th><th>Result</th><th>Git</th><th></th>
+          <th>Date</th><th>Version</th><th>Description</th><th>By</th><th>Steps</th><th>Result</th>{% if git_configured %}<th>Git</th>{% endif %}<th></th>
         </tr></thead>
         <tbody id="history-tbody">
           <tr><td colspan="8" style="color:var(--text-muted);text-align:center;">Loading...</td></tr>
@@ -294,7 +294,7 @@
 let currentFile     = null;
 let previewData     = null;
 let isZipPackage    = false;
-
+const GIT_CONFIGURED = {{ 'true' if git_configured else 'false' }};
 // ── Drag/drop ─────────────────────────────────────────────────────────────────
 function onDragOver(e) {
   e.preventDefault();
@@ -464,7 +464,7 @@ async function applyPackage() {
   // Service restart feedback
   if (data.success) {
     // Start git push polling regardless of restart type
-    pollGitStatus();
+    if (GIT_CONFIGURED) pollGitStatus();
 
     const dataStr = JSON.stringify(data);
     const webRestart     = dataStr.includes("netwatch-web");
@@ -658,18 +658,20 @@ async function loadHistory() {
   const tb    = document.getElementById("history-tbody");
 
   if (!rows.length) {
-    tb.innerHTML = `<tr><td colspan="8" style="color:var(--text-muted);text-align:center;">No packages installed yet</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="${GIT_CONFIGURED ? 8 : 7}" style="color:var(--text-muted);text-align:center;">No packages installed yet</td></tr>`;
     return;
   }
 
   tb.innerHTML = rows.map(r => {
-    const gitCell = r.git_push === 'ok'
-      ? `<td style="color:var(--ok);text-align:center;" title="Pushed to Gitea">✓</td>`
-      : r.git_push === 'failed'
-        ? `<td style="color:var(--fail);text-align:center;" title="${(r.git_push_error||'Push failed').replace(/"/g,'&quot;')}">✗</td>`
-        : r.git_push === 'skipped'
-          ? `<td style="color:var(--text-muted);text-align:center;" title="Git not configured">—</td>`
-          : `<td style="color:var(--text-muted);text-align:center;" title="Not recorded">·</td>`;
+    const gitCell = GIT_CONFIGURED
+      ? (r.git_push === 'ok'
+          ? `<td style="color:var(--ok);text-align:center;" title="Pushed to Gitea">✓</td>`
+          : r.git_push === 'failed'
+            ? `<td style="color:var(--fail);text-align:center;" title="${(r.git_push_error||'Push failed').replace(/"/g,'&quot;')}">✗</td>`
+            : r.git_push === 'skipped'
+              ? `<td style="color:var(--text-muted);text-align:center;" title="Git not configured">—</td>`
+              : `<td style="color:var(--text-muted);text-align:center;" title="Not recorded">·</td>`)
+      : '';
     return `
     <tr>
       <td style="white-space:nowrap;color:var(--text-muted);">${new Date(r.timestamp).toLocaleString()}</td>
