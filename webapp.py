@@ -3414,6 +3414,162 @@ def api_update_dismiss():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/update/download", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def api_update_download():
+    """
+    Download the available update package from GitHub and store it locally.
+    Verifies the SHA-256 checksum against the manifest before saving.
+
+    This is step 1 of 2 — download first, install separately.
+    Stores the zip in ~/netwatch/updates/ once verified.
+
+    Returns JSON with success, message, and filename on success.
+    """
+    import hashlib
+    try:
+        import requests as req_lib
+    except ImportError:
+        return jsonify({"success": False, "message": "requests library not available"}), 500
+
+    check_url = getattr(config, "UPDATE_CHECK_URL", "").strip()
+    if not check_url:
+        return jsonify({"success": False, "message": "UPDATE_CHECK_URL is not configured"}), 400
+
+    try:
+        # Fetch the manifest to get package_url and sha256
+        resp = req_lib.get(check_url, timeout=10)
+        resp.raise_for_status()
+        manifest = resp.json()
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Failed to fetch update manifest: {e}"}), 502
+
+    package_url  = manifest.get("package_url", "").strip()
+    expected_sha = manifest.get("package_sha256", "").strip()
+    avail_ver    = manifest.get("version", "").strip()
+
+    if not package_url:
+        return jsonify({"success": False,
+                        "message": "No package URL in manifest — release may not be published yet"}), 400
+    if not expected_sha:
+        return jsonify({"success": False,
+                        "message": "No SHA-256 checksum in manifest — cannot verify download"}), 400
+
+    # Download the package zip
+    try:
+        dl_resp = req_lib.get(package_url, timeout=120)
+        dl_resp.raise_for_status()
+        zip_bytes = dl_resp.content
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Download failed: {e}"}), 502
+
+    # Verify SHA-256
+    actual_sha = hashlib.sha256(zip_bytes).hexdigest()
+    if actual_sha.lower() != expected_sha.lower():
+        return jsonify({
+            "success": False,
+            "message": f"Checksum mismatch — download may be corrupt. Expected {expected_sha[:12]}…, got {actual_sha[:12]}…"
+        }), 400
+
+    # Save to ~/netwatch/updates/
+    updates_dir = os.path.join(NETWATCH_DIR, "updates")
+    os.makedirs(updates_dir, exist_ok=True)
+
+    # Clean filename from version string (e.g. netwatch-3.4.0.zip)
+    safe_ver  = avail_ver.replace("/", "-").replace("..", "")
+    filename  = f"netwatch-{safe_ver}.zip"
+    dest_path = os.path.join(updates_dir, filename)
+
+    with open(dest_path, "wb") as f:
+        f.write(zip_bytes)
+
+    # Record what we downloaded so the install endpoint can find it
+    database.set_system_setting("update_downloaded_version", avail_ver)
+    database.set_system_setting("update_downloaded_file",    dest_path)
+
+    log.info("update_downloaded",
+             version=avail_ver, filename=filename, size_bytes=len(zip_bytes))
+
+    return jsonify({
+        "success":  True,
+        "message":  f"NetWatch v{avail_ver} downloaded and verified ({len(zip_bytes)//1024} KB)",
+        "version":  avail_ver,
+        "filename": filename,
+    })
+
+
+@app.route("/api/update/install", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_users")
+def api_update_install():
+    """
+    Install a previously downloaded update package.
+
+    Step 1: Apply MIGRATIONS.md entries for versions newer than installed.
+    Step 2: Pass the zip to patcher.apply_package() — identical path to
+            manual Package Installer. Gets snapshots, backups, git push, etc.
+    Step 3: Clear update_available_* system settings on success.
+    Step 4: Delete the downloaded zip file.
+
+    Only Admin can install (manage_users permission).
+    """
+    dl_file = database.get_system_setting("update_downloaded_file", "")
+    dl_ver  = database.get_system_setting("update_downloaded_version", "")
+
+    if not dl_file or not os.path.isfile(dl_file):
+        return jsonify({
+            "success": False,
+            "message": "No downloaded update found — download the update first"
+        }), 400
+
+    try:
+        with open(dl_file, "rb") as f:
+            zip_bytes = f.read()
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Could not read update file: {e}"}), 500
+
+    installed_ver = patcher.get_installed_version()
+    user          = auth.get_current_user()
+
+    # ── Step 1: Apply schema migrations ──────────────────────────────────────
+    mig_result = patcher.apply_migrations(zip_bytes, installed_ver)
+    if not mig_result["success"]:
+        return jsonify({
+            "success": False,
+            "message": f"Migration failed: {mig_result['error']}",
+            "migration_result": mig_result,
+        }), 500
+
+    if mig_result["applied"]:
+        log.info("migrations_applied",
+                 versions=mig_result["applied"], user=user.get("username"))
+
+    # ── Step 2: Apply the package via patcher ─────────────────────────────────
+    result = patcher.apply_package(zip_bytes, applied_by=user.get("username", "web"))
+
+    # ── Step 3: Clean up system_settings on success ───────────────────────────
+    if result["success"]:
+        database.set_system_setting("update_available_version",    "")
+        database.set_system_setting("update_available_description","")
+        database.set_system_setting("update_dismissed_version",    "")
+        database.set_system_setting("update_downloaded_version",   "")
+        database.set_system_setting("update_downloaded_file",      "")
+        log.info("update_installed",
+                 version=dl_ver, user=user.get("username"),
+                 migrations_applied=mig_result["applied"])
+
+    # ── Step 4: Delete the downloaded zip (success or failure) ────────────────
+    try:
+        os.remove(dl_file)
+    except Exception:
+        pass  # Non-fatal — stale file in updates/ is harmless
+
+    # Attach migration info to result for the UI
+    result["migration_result"] = mig_result
+    return jsonify(result)
+
+
 # PACKAGE INSTALLER (PATCHER)
 # ══════════════════════════════════════════════════════════════════════════════
 

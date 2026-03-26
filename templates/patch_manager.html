@@ -25,16 +25,76 @@
           NetWatch v{{ update_always.version }} is available
         </div>
         {% if update_always.description %}
-        <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:10px;">
+        <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:12px;">
           {{ update_always.description }}
         </div>
         {% endif %}
-        <div style="font-size:0.8rem;color:var(--text-muted);">
-          Download the update package from the link in the notification email or from the
-          <a href="https://github.com/mattybusa/NetWatch/releases" target="_blank"
-             style="color:#1e78c8;text-decoration:underline;">NetWatch releases page ↗</a>,
-          then drop it in the upload zone below to install.
+
+        <!-- Download step -->
+        <div id="update-download-section">
+          <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:10px;">
+            Download the update package to this Pi, then verify and install it — all from this page.
+            A full backup snapshot is taken automatically before anything changes.
+          </div>
+          <button id="update-download-btn" class="nw-btn nw-btn-primary"
+                  onclick="startUpdateDownload()"
+                  style="background:#1e78c8;border-color:#1e78c8;">
+            ⬇ Download Update
+          </button>
         </div>
+
+        <!-- Download progress (hidden until download starts) -->
+        <div id="update-download-progress" style="display:none;margin-top:10px;">
+          <div style="font-size:0.82rem;color:#1e78c8;margin-bottom:6px;">
+            <span style="display:inline-block;animation:spin 1s linear infinite;">⟳</span>
+            Downloading v{{ update_always.version }}...
+          </div>
+          <div style="font-size:0.78rem;color:var(--text-muted);">
+            Fetching from GitHub and verifying checksum. This may take a minute.
+          </div>
+        </div>
+
+        <!-- Download result / Install step (hidden until download complete) -->
+        <div id="update-install-section" style="display:none;margin-top:10px;">
+          <div id="update-download-result"
+               style="font-size:0.82rem;margin-bottom:12px;padding:8px 12px;
+                      border-radius:6px;background:rgba(76,175,80,0.1);
+                      border:1px solid var(--ok);color:var(--text-primary);">
+          </div>
+          <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:10px;">
+            Package downloaded and verified. Ready to install.
+            A full snapshot will be taken before any files are changed.
+            If something goes wrong, use <strong>Emergency Rollback</strong> to restore.
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <button id="update-install-btn" class="nw-btn nw-btn-primary"
+                    onclick="startUpdateInstall()"
+                    style="background:#1e78c8;border-color:#1e78c8;">
+              ✓ Install Update
+            </button>
+            <span style="font-size:0.75rem;color:var(--text-muted);">
+              Services will restart automatically.
+            </span>
+          </div>
+        </div>
+
+        <!-- Download error (hidden until error) -->
+        <div id="update-download-error" style="display:none;margin-top:10px;
+             padding:8px 12px;border-radius:6px;background:var(--fail-glow);
+             border:1px solid var(--fail);font-size:0.82rem;color:var(--text-primary);">
+        </div>
+
+        <!-- Install progress (hidden until install starts) -->
+        <div id="update-install-progress" style="display:none;margin-top:10px;">
+          <div style="font-size:0.82rem;color:#1e78c8;margin-bottom:4px;">
+            <span style="display:inline-block;animation:spin 1s linear infinite;">⟳</span>
+            Installing update...
+          </div>
+        </div>
+
+        <!-- Install result (hidden until complete) -->
+        <div id="update-install-result" style="display:none;margin-top:10px;"></div>
+
       </div>
     </div>
   </div>
@@ -611,5 +671,151 @@ async function loadHistory() {
 }
 
 loadHistoryLimit().then(() => loadHistory());
+
+// ── Update installer ──────────────────────────────────────────────────────────
+
+async function startUpdateDownload() {
+  // Show progress, hide button and any previous errors
+  document.getElementById("update-download-btn").disabled = true;
+  document.getElementById("update-download-progress").style.display = "block";
+  document.getElementById("update-download-error").style.display    = "none";
+  document.getElementById("update-install-section").style.display   = "none";
+
+  try {
+    const res  = await fetch("/api/update/download", { method: "POST" });
+    const data = await res.json();
+
+    document.getElementById("update-download-progress").style.display = "none";
+
+    if (data.success) {
+      // Show the verified result and reveal the install step
+      document.getElementById("update-download-section").style.display = "none";
+      const resultEl = document.getElementById("update-download-result");
+      resultEl.textContent = data.message;
+      document.getElementById("update-install-section").style.display = "block";
+    } else {
+      // Show error, re-enable download button
+      const errEl = document.getElementById("update-download-error");
+      errEl.textContent = "Download failed: " + (data.message || "Unknown error");
+      errEl.style.display = "block";
+      document.getElementById("update-download-btn").disabled = false;
+    }
+  } catch (e) {
+    document.getElementById("update-download-progress").style.display = "none";
+    const errEl = document.getElementById("update-download-error");
+    errEl.textContent = "Download failed: " + e.message;
+    errEl.style.display = "block";
+    document.getElementById("update-download-btn").disabled = false;
+  }
+}
+
+async function startUpdateInstall() {
+  document.getElementById("update-install-btn").disabled    = true;
+  document.getElementById("update-install-progress").style.display = "block";
+  document.getElementById("update-install-result").style.display   = "none";
+
+  try {
+    const res  = await fetch("/api/update/install", { method: "POST" });
+    const data = await res.json();
+
+    document.getElementById("update-install-progress").style.display = "none";
+
+    const resultEl = document.getElementById("update-install-result");
+    resultEl.style.display = "block";
+
+    const ok    = data.success;
+    const color = ok ? "var(--ok)" : "var(--fail)";
+    const icon  = ok ? "✓" : "✗";
+
+    // Build step list from patcher results
+    let stepsHtml = "";
+    if (data.migration_result && data.migration_result.applied && data.migration_result.applied.length) {
+      stepsHtml += `<div class="step-row">
+        <div class="step-icon">🗄</div>
+        <div class="step-body">
+          <div class="step-main">Schema migrations applied: ${data.migration_result.applied.join(", ")}</div>
+        </div>
+        <div style="color:var(--ok);font-size:0.75rem;">ok</div>
+      </div>`;
+    }
+    if (data.results) {
+      const icons = { ok:"✓", error:"✗", skipped:"—" };
+      const cols  = { ok:"var(--ok)", error:"var(--fail)", skipped:"var(--text-muted)" };
+      stepsHtml += data.results.map(r => `
+        <div class="step-row">
+          <div class="step-icon" style="color:${cols[r.status]||'var(--text-muted)'};">${icons[r.status]||"?"}</div>
+          <div class="step-body"><div class="step-main">${r.message || r.action}</div></div>
+          <div style="color:${cols[r.status]||'var(--text-muted)'};font-size:0.75rem;">${r.status}</div>
+        </div>`).join("");
+    }
+
+    // Rollback notice — only show on failure
+    const rollbackNote = (!ok && data.rollback_available)
+      ? `<div style="margin-top:10px;font-size:0.8rem;color:var(--text-muted);">
+           ⚠ Something went wrong. Your previous version is backed up.
+           Use <strong>Admin → Emergency Rollback</strong> if the system is not responding correctly.
+         </div>`
+      : "";
+
+    resultEl.innerHTML = `
+      <div class="nw-card p-3">
+        <div style="font-size:0.9rem;font-weight:700;color:${color};margin-bottom:10px;">
+          ${icon} ${data.message || (ok ? "Update installed successfully" : "Update failed")}
+        </div>
+        <div>${stepsHtml}</div>
+        ${rollbackNote}
+      </div>`;
+
+    if (ok) {
+      // Web service is restarting — poll until back
+      loadHistory();
+      setTimeout(() => {
+        const notice = document.createElement("div");
+        notice.style.cssText = "color:var(--warn);font-size:0.82rem;margin-top:12px;";
+        notice.textContent   = "⚠ Services restarting — waiting for server...";
+        resultEl.appendChild(notice);
+
+        let elapsed = 0;
+        const MAX_WAIT = 30000;
+        const POLL    = 1500;
+        function poll() {
+          elapsed += POLL;
+          if (elapsed > MAX_WAIT) {
+            notice.textContent = "⚠ Restart taking longer than expected — reloading now...";
+            setTimeout(() => window.location.reload(), 1000);
+            return;
+          }
+          fetch("/api/auth/me", { cache: "no-store" })
+            .then(r => {
+              if (r.ok) {
+                notice.textContent = "✓ Server is back — reloading...";
+                setTimeout(() => window.location.reload(), 800);
+              } else {
+                notice.textContent = `⚠ Restarting... (${Math.round(elapsed/1000)}s)`;
+                setTimeout(poll, POLL);
+              }
+            })
+            .catch(() => {
+              notice.textContent = `⚠ Restarting... (${Math.round(elapsed/1000)}s)`;
+              setTimeout(poll, POLL);
+            });
+        }
+        setTimeout(poll, 2500);
+      }, 500);
+    }
+  } catch (e) {
+    document.getElementById("update-install-progress").style.display = "none";
+    const resultEl = document.getElementById("update-install-result");
+    resultEl.style.display = "block";
+    resultEl.innerHTML = `<div style="padding:10px;border-radius:6px;background:var(--fail-glow);
+        border:1px solid var(--fail);font-size:0.83rem;">
+      ✗ Install request failed: ${e.message}<br>
+      <span style="font-size:0.78rem;color:var(--text-muted);">
+        Check server logs. Use Emergency Rollback if the system is not responding.
+      </span>
+    </div>`;
+    document.getElementById("update-install-btn").disabled = false;
+  }
+}
 </script>
 {% endblock %}

@@ -596,6 +596,131 @@ def apply_package(zip_bytes, applied_by="web"):
     }
 
 
+def parse_migrations(migrations_md):
+    """
+    Parse a MIGRATIONS.md file and return a list of (version_str, [sql, ...])
+    tuples, sorted oldest-first.
+
+    Format expected:
+        ## 3.4.0
+        ALTER TABLE users ADD COLUMN last_seen TEXT;
+        ALTER TABLE network_health ADD COLUMN jitter_ms REAL;
+
+        ## 3.3.96
+        ALTER TABLE system_settings ADD COLUMN updated_at TEXT;
+
+    Rules:
+    - Lines beginning with '##' start a new version block.
+    - Lines beginning with '#' (but not '##') are comments — skipped.
+    - Blank lines are skipped.
+    - SQL statements are collected until the next '##' heading.
+    - Version strings must be parseable by packaging.version.
+
+    Returns list of (version_str, sql_list) tuples, oldest version first.
+    Returns [] if the file has no valid entries.
+    """
+    entries   = []   # list of (version_str, [sql_statements])
+    cur_ver   = None
+    cur_sql   = []
+
+    for raw_line in migrations_md.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("## "):
+            # Save previous block if any
+            if cur_ver and cur_sql:
+                entries.append((cur_ver, cur_sql))
+            cur_ver = line[3:].strip()
+            cur_sql = []
+        elif line.startswith("#"):
+            # Comment line — skip
+            continue
+        elif cur_ver:
+            # SQL statement — accumulate
+            cur_sql.append(line)
+
+    # Capture final block
+    if cur_ver and cur_sql:
+        entries.append((cur_ver, cur_sql))
+
+    # Sort oldest first using packaging.version so the installer applies in order
+    try:
+        entries.sort(key=lambda e: pkg_version.parse(e[0]))
+    except Exception:
+        pass  # If any version string is unparseable, preserve document order
+
+    return entries
+
+
+def apply_migrations(zip_bytes, installed_ver):
+    """
+    Extract MIGRATIONS.md from a release zip, parse it, and apply all SQL
+    statements for versions newer than installed_ver. Skips versions already
+    applied (i.e. <= installed_ver).
+
+    Uses the same _run_sql() as the patcher action handler, which silently
+    swallows duplicate-column and already-exists errors so re-runs are safe.
+
+    Args:
+        zip_bytes:     bytes of the release zip
+        installed_ver: current installed version string (e.g. "3.3.95")
+
+    Returns:
+        dict with keys:
+          success  (bool)
+          applied  (list of version strings whose SQL was run)
+          skipped  (list of version strings already at or below installed)
+          error    (str|None) — set if success=False
+    """
+    applied = []
+    skipped = []
+
+    try:
+        zf    = zipfile.ZipFile(io.BytesIO(zip_bytes))
+        names = zf.namelist()
+
+        # Find MIGRATIONS.md anywhere in the zip
+        mig_name = next(
+            (n for n in names if os.path.basename(n) == "MIGRATIONS.md"), None
+        )
+        if not mig_name:
+            # No migration file — nothing to do, not an error
+            return {"success": True, "applied": [], "skipped": [], "error": None}
+
+        migrations_md = zf.read(mig_name).decode("utf-8")
+        entries = parse_migrations(migrations_md)
+
+        installed = pkg_version.parse(installed_ver)
+
+        for ver_str, sql_list in entries:
+            try:
+                entry_ver = pkg_version.parse(ver_str)
+            except Exception:
+                log.warning("Skipping unparseable migration version", version=ver_str)
+                skipped.append(ver_str)
+                continue
+
+            if entry_ver <= installed:
+                skipped.append(ver_str)
+                continue
+
+            # Apply each SQL statement for this version
+            for sql in sql_list:
+                if not sql.strip():
+                    continue
+                _run_sql(sql)
+                log.info("Migration applied", version=ver_str, sql=sql[:80])
+
+            applied.append(ver_str)
+
+        return {"success": True, "applied": applied, "skipped": skipped, "error": None}
+
+    except Exception as e:
+        log.error("apply_migrations failed", error=str(e))
+        return {"success": False, "applied": applied, "skipped": skipped, "error": str(e)}
+
+
 def get_patch_history(limit=20):
     """Return the patch application history."""
     try:
