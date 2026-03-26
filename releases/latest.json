@@ -1,9 +1,9 @@
 {
   "version": "3.4.6",
-  "description": "NetWatch v3.4.6 — update checker, release manager, and install improvements.",
+  "description": "NetWatch v3.4.6 \u2014 update checker, release manager, and install improvements",
   "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.6/netwatch-3.4.6.zip",
   "changelog_url": "",
-  "package_sha256": "b89f1946dcd07a372e000385634a473ad2670e6d32357d43b216ae57b3be5d3f",
+  "package_sha256": "385d146fac538374d2fb09d35c4e8b8266ae466951a0d4719c3fa84dfba245c6",
   "min_version": "",
   "critical": false,
   "released": "2026-03-26"
