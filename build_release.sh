@@ -44,7 +44,8 @@ set -euo pipefail
 # -- Paths -------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NETWATCH_DIR="$SCRIPT_DIR"
-RELEASES_DIR="$HOME/backups/releases"
+# Use absolute path — $HOME resolves to /nonexistent when running as netwatch-svc
+RELEASES_DIR="/home/mboynton/backups/releases"
 
 # -- Version -----------------------------------------------------------------
 if [[ -n "${1:-}" ]]; then

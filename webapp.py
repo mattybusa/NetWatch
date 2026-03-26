@@ -2819,7 +2819,7 @@ def admin_release_download():
         return jsonify({"status": "error", "message": "Not a development system"}), 403
 
     filename   = request.args.get("file", "")
-    release_dir = os.path.join(os.path.expanduser("~"), "backups", "releases")
+    release_dir = os.path.join(os.path.dirname(NETWATCH_DIR), "backups", "releases")
 
     # Safety: filename must look like a release zip and contain no traversal
     if not filename.startswith("netwatch-") or not filename.endswith(".zip") or ".." in filename:
