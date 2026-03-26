@@ -643,6 +643,18 @@ CONFIG_SCHEMA = [
         "type":        "str",
         "ui_hidden":   False,
     },
+    {
+        "key":         "DEVELOPMENT_SYSTEM",
+        "default":     False,
+        "required":    False,
+        "group":       "system",
+        "section":     "System",
+        "label":       "Development System",
+        "description": "When True, enables the Release Manager in the Admin page for building and publishing releases to GitHub. Never set this on a user install.",
+        "sensitive":   False,
+        "type":        "bool",
+        "ui_hidden":   True,   # Set manually in config.py; never shown in Config Editor
+    },
 ]
 
 # Quick lookup by key

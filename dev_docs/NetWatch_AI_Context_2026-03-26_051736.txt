@@ -23,7 +23,7 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.4.3
+- **Pi version:** v3.4.2
 - **Pi path:** `/home/mboynton/netwatch/`
 - **Canonical matches Pi at v3.3.95**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.
@@ -733,13 +733,6 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   file, includes MIGRATIONS.md and install.sh, outputs zip to ~/backups/releases/,
   prints SHA-256 for latest.json. install.sh updated to exclude dev_docs/ and
   build_release.sh from rsync on fresh installs. SHIPPED v3.4.2 (Session 34).
-- ✅ Release Manager: Admin page card (visible only when DEVELOPMENT_SYSTEM=True in
-  config.py) replacing the old Share NetWatch card. Build Release runs build_release.sh
-  via subprocess, shows log output and SHA-256. Publish to GitHub creates GitHub
-  Release via API, uploads zip asset, updates releases/latest.json, commits and pushes
-  to both Gitea and GitHub remotes automatically. DEVELOPMENT_SYSTEM config key added
-  (ui_hidden=True). Old generate_distrib/generate_update_pkg routes removed.
-  SHIPPED v3.4.3 (Session 34).
 - Decide sharing/publishing approach: GitHub public (unadvertised) ✅ DECIDED Session 31.
   Security audit before promotion/advertising.
   that guides user through Pi imaging, pre-configures SD card, detects Pi boot,

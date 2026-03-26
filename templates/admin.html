@@ -342,47 +342,92 @@
     </div>
   </div>
 
-  <!-- Share NetWatch -->
+  <!-- Release Manager (only shown on development system) -->
+  {% if is_dev_system %}
   <div class="nw-card p-4 mb-4">
-    <div class="nw-collapse-header" onclick="toggleSection('share')">
-      <div class="nw-label" style="margin:0;">Share NetWatch</div>
-      <i class="bi bi-chevron-down nw-chevron" id="chevron-share"></i>
+    <div class="nw-collapse-header" onclick="toggleSection('release')">
+      <div class="nw-label" style="margin:0;">Release Manager</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-release"></i>
     </div>
-    <div id="section-share" class="nw-collapse-body">
+    <div id="section-release" class="nw-collapse-body">
       <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
-        Share NetWatch with others or push updates to existing installations.
+        Build and publish a release to GitHub. The release zip is a complete
+        patcher-compatible artifact — users install it via the update checker.
       </p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-        <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
-          <div style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">
-            <i class="bi bi-box-arrow-up me-1"></i> Fresh Install
-          </div>
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:10px;">
-            For someone new to NetWatch. Blank config, empty database, setup wizard on first visit.
-          </div>
-          <button class="nw-btn nw-btn-primary w-100" onclick="doGenerateDistrib()" id="distrib-btn" style="font-size:0.82rem;">
-            <i class="bi bi-person-plus me-1"></i>New User Package
-          </button>
+
+      <!-- Version input + Build -->
+      <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:160px;">
+          <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px;">
+            Version (leave blank to use VERSION file)
+          </label>
+          <input id="release-version" type="text" class="nw-input"
+                 placeholder="e.g. 1.0.0"
+                 style="font-family:var(--font-mono);font-size:0.85rem;width:100%;">
         </div>
-        <div style="background:var(--bg-input);border-radius:8px;padding:14px;">
-          <div style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">
-            <i class="bi bi-arrow-up-circle me-1"></i> Update Existing
-          </div>
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:10px;">
-            For someone already running NetWatch. Updates all code, preserves their config and data.
-          </div>
-          <button class="nw-btn nw-btn-primary w-100" onclick="doGenerateUpdate()" id="update-pkg-btn" style="font-size:0.82rem;">
-            <i class="bi bi-cloud-arrow-up me-1"></i>Update Package
-          </button>
+        <div style="flex:2;min-width:200px;">
+          <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px;">
+            Description (shown in update banner)
+          </label>
+          <input id="release-description" type="text" class="nw-input"
+                 placeholder="What's in this release?"
+                 style="font-size:0.85rem;width:100%;">
         </div>
+        <button id="release-build-btn" class="nw-btn nw-btn-primary"
+                onclick="doBuildRelease()"
+                style="white-space:nowrap;padding:7px 16px;">
+          🔨 Build Release
+        </button>
       </div>
-      <div style="font-size:0.75rem;color:var(--text-muted);padding:8px 10px;background:var(--bg-input);border-radius:6px;border:1px solid var(--border-color);">
-        <i class="bi bi-shield-check me-1" style="color:var(--ok);"></i>
-        Neither package contains your personal data — IPs, email, passwords, certs, and database are always stripped.
+
+      <!-- Build output -->
+      <div id="release-build-output" style="display:none;margin-bottom:12px;">
+        <pre id="release-build-log"
+             style="font-size:0.72rem;color:var(--text-secondary);
+                    background:var(--bg-input);border-radius:6px;
+                    padding:10px 12px;max-height:160px;overflow-y:auto;
+                    white-space:pre-wrap;margin:0;"></pre>
       </div>
-      <div id="distrib-msg" style="display:none;margin-top:10px;font-size:0.82rem;"></div>
+
+      <!-- Build result + Publish -->
+      <div id="release-result" style="display:none;margin-bottom:12px;
+           padding:10px 14px;border-radius:8px;
+           background:rgba(76,175,80,0.08);border:1px solid var(--ok);">
+        <div style="font-size:0.8rem;font-weight:600;color:var(--ok);margin-bottom:6px;">
+          ✓ Build complete
+        </div>
+        <div style="font-size:0.78rem;color:var(--text-secondary);font-family:var(--font-mono);margin-bottom:8px;">
+          <span id="release-result-version"></span> &nbsp;·&nbsp;
+          <a id="release-download-link" href="#" style="color:var(--accent);">Download zip</a>
+        </div>
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:10px;">
+          SHA-256: <span id="release-sha256" style="font-family:var(--font-mono);"></span>
+        </div>
+        <button id="release-publish-btn" class="nw-btn nw-btn-primary"
+                onclick="doPublishRelease()"
+                style="white-space:nowrap;padding:6px 14px;font-size:0.82rem;">
+          🚀 Publish to GitHub
+        </button>
+        <span style="font-size:0.72rem;color:var(--text-muted);margin-left:10px;">
+          Creates GitHub Release, uploads zip, updates latest.json, pushes to both remotes.
+        </span>
+      </div>
+
+      <!-- Publish progress -->
+      <div id="release-publish-output" style="display:none;">
+        <div id="release-publish-steps"
+             style="font-size:0.78rem;color:var(--text-secondary);
+                    background:var(--bg-input);border-radius:6px;
+                    padding:10px 12px;"></div>
+      </div>
+
+      <!-- Error area -->
+      <div id="release-error" style="display:none;padding:8px 12px;border-radius:6px;
+           background:var(--fail-glow);border:1px solid var(--fail);
+           font-size:0.82rem;color:var(--text-primary);"></div>
     </div>
   </div>
+  {% endif %}
 
   <!-- Theme Manager -->
   <div class="nw-card p-4 mb-4">
@@ -574,56 +619,114 @@ async function loadStats() {
   document.getElementById("st-size").textContent   = data.db_size_kb || "—";
 }
 
-async function doGenerateDistrib() {
-  const btn = document.getElementById("distrib-btn");
-  const msg = document.getElementById("distrib-msg");
-  btn.disabled = true;
-  btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Building...';
-  msg.style.display = "block";
-  msg.style.color = "var(--text-muted)";
-  msg.textContent = "Building new user package — stripping personal data...";
-  try {
-    const res = await fetch("/api/admin/generate_distrib", { method: "POST" }).then(r => r.json());
-    if (res.status === "ok") {
-      window.location.href = "/api/admin/distrib_download?file=" + encodeURIComponent(res.filename);
-      msg.style.color = "var(--ok)";
-      msg.textContent = `Ready: ${res.filename} (${res.size_mb}MB)`;
-    } else {
-      msg.style.color = "var(--fail)";
-      msg.textContent = res.message;
-    }
-  } catch(e) {
-    msg.style.color = "var(--fail)";
-    msg.textContent = "Generation failed — check logs";
-  }
-  btn.disabled = false;
-  btn.innerHTML = '<i class="bi bi-person-plus me-1"></i>New User Package';
 }
 
-async function doGenerateUpdate() {
-  const btn = document.getElementById("update-pkg-btn");
-  const msg = document.getElementById("distrib-msg");
+// ── Release Manager ───────────────────────────────────────────────────────────
+let _releaseData = null;  // holds last successful build result
+
+async function doBuildRelease() {
+  const btn     = document.getElementById("release-build-btn");
+  const log     = document.getElementById("release-build-log");
+  const output  = document.getElementById("release-build-output");
+  const result  = document.getElementById("release-result");
+  const errDiv  = document.getElementById("release-error");
+  const version = document.getElementById("release-version").value.trim();
+
   btn.disabled = true;
-  btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Building...';
-  msg.style.display = "block";
-  msg.style.color = "var(--text-muted)";
-  msg.textContent = "Building update package — preserves recipient config and data...";
+  btn.textContent = "⟳ Building...";
+  output.style.display = "block";
+  result.style.display = "none";
+  errDiv.style.display  = "none";
+  log.textContent = "Running build_release.sh — this may take 10–20 seconds...";
+
   try {
-    const res = await fetch("/api/admin/generate_update_pkg", { method: "POST" }).then(r => r.json());
+    const res = await fetch("/api/admin/build_release", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: version })
+    }).then(r => r.json());
+
+    log.textContent = res.output || "";
+
     if (res.status === "ok") {
-      window.location.href = "/api/admin/distrib_download?file=" + encodeURIComponent(res.filename);
-      msg.style.color = "var(--ok)";
-      msg.textContent = `Ready: ${res.filename} (${res.size_mb}MB)`;
+      _releaseData = res;
+      document.getElementById("release-result-version").textContent =
+        `v${res.version}  ·  ${res.filename}`;
+      document.getElementById("release-sha256").textContent = res.sha256;
+      document.getElementById("release-download-link").href =
+        "/api/admin/release_download?file=" + encodeURIComponent(res.filename);
+
+      // Pre-fill description from input if set
+      const desc = document.getElementById("release-description").value.trim();
+      if (desc) _releaseData.description = desc;
+
+      result.style.display = "block";
     } else {
-      msg.style.color = "var(--fail)";
-      msg.textContent = res.message;
+      errDiv.style.display = "block";
+      errDiv.textContent = res.message || "Build failed — see log above";
     }
   } catch(e) {
-    msg.style.color = "var(--fail)";
-    msg.textContent = "Generation failed — check logs";
+    errDiv.style.display = "block";
+    errDiv.textContent = "Request failed — check server logs";
   }
+
   btn.disabled = false;
-  btn.innerHTML = '<i class="bi bi-cloud-arrow-up me-1"></i>Update Package';
+  btn.textContent = "🔨 Build Release";
+}
+
+async function doPublishRelease() {
+  if (!_releaseData) return;
+
+  const btn      = document.getElementById("release-publish-btn");
+  const steps    = document.getElementById("release-publish-steps");
+  const pubOut   = document.getElementById("release-publish-output");
+  const errDiv   = document.getElementById("release-error");
+
+  const description = document.getElementById("release-description").value.trim()
+    || `NetWatch v${_releaseData.version} release.`;
+
+  btn.disabled = true;
+  btn.textContent = "⟳ Publishing...";
+  pubOut.style.display = "block";
+  errDiv.style.display  = "none";
+  steps.innerHTML = "<span style='color:var(--text-muted)'>Connecting to GitHub...</span>";
+
+  try {
+    const res = await fetch("/api/admin/publish_release", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        version:     _releaseData.version,
+        sha256:      _releaseData.sha256,
+        zip_path:    _releaseData.zip_path,
+        description: description,
+      })
+    }).then(r => r.json());
+
+    if (res.status === "ok") {
+      steps.innerHTML = (res.steps || []).map(s =>
+        `<div style="margin-bottom:4px;">${s}</div>`
+      ).join("") +
+        `<div style="margin-top:8px;font-weight:600;color:var(--ok);">
+          ✓ Published — <a href="${res.asset_url}" target="_blank"
+             style="color:var(--accent);">View on GitHub</a>
+         </div>`;
+      btn.textContent = "✓ Published";
+    } else {
+      steps.innerHTML = (res.steps || []).map(s =>
+        `<div style="margin-bottom:4px;">${s}</div>`
+      ).join("");
+      errDiv.style.display = "block";
+      errDiv.textContent = res.message || "Publish failed";
+      btn.disabled = false;
+      btn.textContent = "🚀 Publish to GitHub";
+    }
+  } catch(e) {
+    errDiv.style.display = "block";
+    errDiv.textContent = "Request failed — check server logs";
+    btn.disabled = false;
+    btn.textContent = "🚀 Publish to GitHub";
+  }
 }
 
 async function doCleanup() {

@@ -360,6 +360,7 @@ def inject_user():
         "active_custom_layout":   active_custom_layout,
         "mfa_warning":            mfa_warning,
         "update_available":       update_available,
+        "is_dev_system":          bool(getattr(config, "DEVELOPMENT_SYSTEM", False)),
     }
 
 
@@ -2566,217 +2567,268 @@ def admin_export_code():
                      as_attachment=True, download_name=download_name)
 
 
-@app.route("/api/admin/generate_update_pkg", methods=["POST"])
+@app.route("/api/admin/build_release", methods=["POST"])
 @auth.login_required
-@auth.requires_permission("manage_admin")
-def admin_generate_update_pkg():
+@auth.requires_permission("manage_users")
+def admin_build_release():
     """
-    Generate an update package — contains all current code but NO config/data.
-    Recipient installs via Package Installer. Their config.py, netwatch.db,
-    and certs/ are left untouched. Config validator runs on restart and adds
-    any new settings with safe defaults, triggering the notification banner.
+    Build a release zip using build_release.sh.
+    Only available when DEVELOPMENT_SYSTEM = True in config.py.
+    Runs the script as netwatch-svc (already the running user), captures output,
+    and returns the zip path, SHA-256, and log output.
     """
-    import shutil, tempfile
+    import subprocess, re
 
-    netwatch_dir = NETWATCH_DIR
-    output_dir   = os.path.join(os.path.dirname(NETWATCH_DIR), "backups")
-    timestamp    = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    if not getattr(config, "DEVELOPMENT_SYSTEM", False):
+        return jsonify({"status": "error", "message": "Not a development system"}), 403
 
-    # Read current version
-    try:
-        with open(os.path.join(netwatch_dir, "VERSION")) as f:
-            version = f.read().strip()
-    except Exception:
-        version = "unknown"
+    version = request.json.get("version", "").strip() if request.is_json else ""
 
-    pkg_name = f"netwatch_update_v{version}_{timestamp}"
+    script = os.path.join(NETWATCH_DIR, "build_release.sh")
+    if not os.path.isfile(script):
+        return jsonify({"status": "error", "message": "build_release.sh not found — install v3.4.2+"}), 500
 
     try:
-        staging = tempfile.mkdtemp()
-        dest    = os.path.join(staging, pkg_name)
-        os.makedirs(dest)
+        cmd = ["bash", script]
+        if version:
+            cmd.append(version)
 
-        # Files to include — all code, templates, static
-        # Explicitly exclude anything personal or environment-specific
-        exclude_files = {
-            "config.py", "netwatch.db", "netwatch.db.bak",
-            "netwatch.db.pre_restore", "netwatch-backup-public.asc",
-        }
-        exclude_dirs = {
-            "venv", "__pycache__", "logs", "certs", "backups", "data",
-        }
+        result = subprocess.run(
+            cmd,
+            capture_output=True, text=True, timeout=120,
+            cwd=NETWATCH_DIR
+        )
+        output = result.stdout + result.stderr
 
-        for item in os.listdir(netwatch_dir):
-            if item in exclude_files or item.endswith(".pyc") or \
-               item.endswith(".bak") or item.endswith(".gpg"):
-                continue
-            src = os.path.join(netwatch_dir, item)
-            dst = os.path.join(dest, item)
-            if os.path.isdir(src):
-                if item in exclude_dirs:
-                    continue
-                shutil.copytree(src, dst, ignore=shutil.ignore_patterns(
-                    "*.pyc", "__pycache__", "*.db", "*.gpg", "*.bak"))
-            else:
-                shutil.copy2(src, dst)
+        if result.returncode != 0:
+            return jsonify({"status": "error", "message": "Build script failed", "output": output}), 500
 
-        # Write a manifest.json so the Package Installer knows what to do
-        import json
-        # Build action list — replace all code files, skip config/db/certs
-        actions = []
-        for item in os.listdir(dest):
-            if item == "manifest.json":
-                continue
-            src_path = os.path.join(dest, item)
-            if os.path.isfile(src_path):
-                actions.append({"action": "replace", "file": item})
-            elif os.path.isdir(src_path):
-                # Add all files in subdirs
-                for root, dirs, files in os.walk(src_path):
-                    dirs[:] = [d for d in dirs if d != "__pycache__"]
-                    for f in files:
-                        rel = os.path.relpath(os.path.join(root, f), dest)
-                        actions.append({"action": "replace", "file": rel})
+        # Extract SHA-256 and zip path from output
+        sha_match  = re.search(r"SHA-256:\s*([0-9a-f]{64})", output)
+        path_match = re.search(r"Output\s*:\s*(\S+\.zip)", output)
+        ver_match  = re.search(r"Version\s*:\s*(\S+)", output)
 
-        actions.append({"action": "restart", "services": ["web", "monitor"]})
+        sha256   = sha_match.group(1)  if sha_match  else ""
+        zip_path = path_match.group(1) if path_match else ""
+        built_ver = ver_match.group(1) if ver_match  else version
 
+        log.info("release_built", version=built_ver, sha256=sha256[:12],
+                 user=auth.get_current_user().get("username"))
+
+        return jsonify({
+            "status":    "ok",
+            "version":   built_ver,
+            "sha256":    sha256,
+            "zip_path":  zip_path,
+            "filename":  os.path.basename(zip_path) if zip_path else "",
+            "output":    output,
+        })
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"status": "error", "message": "Build timed out (>120s)"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/admin/publish_release", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_users")
+def admin_publish_release():
+    """
+    Publish a built release zip to GitHub:
+      1. Create a GitHub Release tagged vVERSION
+      2. Upload the zip as a release asset
+      3. Update releases/latest.json with version, asset URL, and SHA-256
+      4. Commit and push latest.json to both Gitea (origin) and GitHub remotes
+
+    Requires DEVELOPMENT_SYSTEM = True and a GitHub PAT with:
+      - contents: write  (for pushing commits)
+      - releases: write  (for creating releases and uploading assets)
+    The PAT must be embedded in the github remote URL.
+    """
+    import subprocess, re
+
+    if not getattr(config, "DEVELOPMENT_SYSTEM", False):
+        return jsonify({"status": "error", "message": "Not a development system"}), 403
+
+    try:
+        import requests as req_lib
+    except ImportError:
+        return jsonify({"status": "error", "message": "requests library not available"}), 500
+
+    data        = request.json or {}
+    version     = data.get("version", "").strip()
+    sha256      = data.get("sha256",  "").strip()
+    zip_path    = data.get("zip_path", "").strip()
+    description = data.get("description", f"NetWatch v{version} release.").strip()
+
+    if not version or not sha256 or not zip_path:
+        return jsonify({"status": "error", "message": "version, sha256, and zip_path are required"}), 400
+
+    if not os.path.isfile(zip_path):
+        return jsonify({"status": "error", "message": f"Zip not found: {zip_path}"}), 400
+
+    # -- Extract GitHub owner/repo and PAT from the github remote URL ----------
+    try:
+        result = subprocess.run(
+            ["git", "-C", NETWATCH_DIR, "remote", "get-url", "github"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0:
+            return jsonify({"status": "error",
+                            "message": "github remote not configured — add it first"}), 400
+
+        remote_url = result.stdout.strip()
+        # https://TOKEN@github.com/OWNER/REPO.git
+        m = re.match(r"https://([^@]+)@github\.com/([^/]+)/([^/]+?)(?:\.git)?$", remote_url)
+        if not m:
+            return jsonify({"status": "error",
+                            "message": f"Cannot parse github remote URL: {remote_url}"}), 400
+
+        pat   = m.group(1)
+        owner = m.group(2)
+        repo  = m.group(3)
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Failed to read github remote: {e}"}), 500
+
+    headers = {
+        "Authorization": f"token {pat}",
+        "Accept":        "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    tag = f"v{version}"
+    steps = []
+
+    # -- Step 1: Create GitHub Release ----------------------------------------
+    try:
+        resp = req_lib.post(
+            f"https://api.github.com/repos/{owner}/{repo}/releases",
+            headers=headers,
+            json={
+                "tag_name":   tag,
+                "name":       f"NetWatch {tag}",
+                "body":       description,
+                "draft":      False,
+                "prerelease": False,
+            },
+            timeout=30
+        )
+        if resp.status_code not in (200, 201):
+            return jsonify({"status": "error",
+                            "message": f"GitHub release creation failed: {resp.status_code} {resp.text}",
+                            "steps": steps}), 500
+
+        release_data  = resp.json()
+        release_id    = release_data["id"]
+        upload_url    = release_data["upload_url"].split("{")[0]  # strip template part
+        steps.append(f"✓ GitHub Release created: {tag} (id {release_id})")
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Release creation error: {e}",
+                        "steps": steps}), 500
+
+    # -- Step 2: Upload zip asset ----------------------------------------------
+    zip_filename = os.path.basename(zip_path)
+    try:
+        with open(zip_path, "rb") as f:
+            zip_bytes = f.read()
+
+        asset_resp = req_lib.post(
+            f"{upload_url}?name={zip_filename}&label={zip_filename}",
+            headers={**headers, "Content-Type": "application/zip"},
+            data=zip_bytes,
+            timeout=120
+        )
+        if asset_resp.status_code not in (200, 201):
+            return jsonify({"status": "error",
+                            "message": f"Asset upload failed: {asset_resp.status_code} {asset_resp.text}",
+                            "steps": steps}), 500
+
+        asset_url = asset_resp.json()["browser_download_url"]
+        steps.append(f"✓ Asset uploaded: {asset_url}")
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Asset upload error: {e}",
+                        "steps": steps}), 500
+
+    # -- Step 3: Update releases/latest.json ----------------------------------
+    try:
+        from datetime import date
         manifest = {
-            "version":      version,
-            "description":  f"NetWatch update to v{version}. Preserves your config.py, database, and certificates. New config settings added automatically.",
-            "min_version":  "2.0",
-            "actions":      actions,
+            "version":        version,
+            "description":    description,
+            "package_url":    asset_url,
+            "changelog_url":  "",
+            "package_sha256": sha256,
+            "min_version":    "",
+            "critical":       False,
+            "released":       date.today().isoformat(),
         }
-        with open(os.path.join(dest, "manifest.json"), "w") as f:
-            json.dump(manifest, f, indent=2)
-
-        # Package it
-        os.makedirs(output_dir, exist_ok=True)
-        zip_path  = os.path.join(output_dir, pkg_name)
-        shutil.make_archive(zip_path, "zip", staging, pkg_name)
-        final_zip = zip_path + ".zip"
-        shutil.rmtree(staging)
-
-        size_mb = round(os.path.getsize(final_zip) / 1024 / 1024, 1)
-        log.info("update_package_generated", path=final_zip, size_mb=size_mb)
-        return jsonify({"status": "ok", "filename": os.path.basename(final_zip), "size_mb": size_mb})
-
+        manifest_path = os.path.join(NETWATCH_DIR, "releases", "latest.json")
+        os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+        with open(manifest_path, "w") as f:
+            import json as json_lib
+            json_lib.dump(manifest, f, indent=2)
+            f.write("\n")
+        steps.append("✓ releases/latest.json updated")
     except Exception as e:
-        log.error("update_package_failed", error=str(e))
-        return jsonify({"status": "error", "message": str(e)})
+        return jsonify({"status": "error", "message": f"Manifest update error: {e}",
+                        "steps": steps}), 500
 
-
-@app.route("/api/admin/generate_distrib", methods=["POST"])
-@auth.login_required
-@auth.requires_permission("manage_admin")
-def admin_generate_distrib():
-    """Generate a blank distributable zip with personal data stripped."""
-    import shutil, tempfile, re, sqlite3
-
-    netwatch_dir = NETWATCH_DIR
-    output_dir   = os.path.join(os.path.dirname(NETWATCH_DIR), "backups")
-    timestamp    = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    distrib_name = f"netwatch_distributable_{timestamp}"
-
+    # -- Step 4: Commit and push to both remotes ------------------------------
+    git = ["git", "-C", NETWATCH_DIR]
     try:
-        staging = tempfile.mkdtemp()
-        dest    = os.path.join(staging, "netwatch_distributable")
-        os.makedirs(dest)
+        subprocess.run([*git, "add", "releases/latest.json"],
+                       check=True, capture_output=True, timeout=15)
+        subprocess.run([*git, "commit", "-m",
+                        f"{tag}: publish release — update latest.json"],
+                       check=True, capture_output=True, timeout=15)
+        steps.append("✓ Committed releases/latest.json")
 
-        # 1. Copy all code and template files
-        skip = {"venv", "__pycache__", "logs", "data", "certs",
-                "netwatch.db", "netwatch.db.bak", "netwatch.db.pre_restore",
-                "*.pyc", "*.gpg"}
-        for item in os.listdir(netwatch_dir):
-            if item in skip or item.endswith(".pyc") or item.endswith(".bak"):
-                continue
-            src = os.path.join(netwatch_dir, item)
-            dst = os.path.join(dest, item)
-            if os.path.isdir(src):
-                shutil.copytree(src, dst, ignore=shutil.ignore_patterns(
-                    "*.pyc", "__pycache__", "*.db", "*.gpg", "*.bak"))
-            else:
-                shutil.copy2(src, dst)
+        subprocess.run([*git, "push", "origin", "main"],
+                       check=True, capture_output=True, timeout=60)
+        steps.append("✓ Pushed to Gitea (origin)")
 
-        # 2. Strip personal data from config.py
-        config_path = os.path.join(dest, "config.py")
-        if os.path.exists(config_path):
-            with open(config_path, "r") as f:
-                cfg = f.read()
-
-            replacements = {
-                r'^SECRET_KEY\s*=.*$':         'SECRET_KEY          = "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY"',
-                r'^GMAIL_USER\s*=.*$':          'GMAIL_USER          = "your_email@gmail.com"',
-                r'^GMAIL_APP_PASSWORD\s*=.*$':  'GMAIL_APP_PASSWORD  = "your_app_password_here"',
-                r'^ALERT_TO\s*=.*$':            'ALERT_TO            = "your_email@gmail.com"',
-                r'^ALERTS_ENABLED\s*=.*$':      'ALERTS_ENABLED      = False',
-                r'^LAN_GATEWAY\s*=.*$':         'LAN_GATEWAY         = "192.168.1.1"',
-                r'^WIFI_GATEWAY\s*=.*$':        'WIFI_GATEWAY        = ""',
-                r'^SITE_NAME\s*=.*$':           'SITE_NAME           = "NetWatch"',
-            }
-            for pattern, replacement in replacements.items():
-                cfg = re.sub(pattern, replacement, cfg, flags=re.MULTILINE)
-
-            with open(config_path, "w") as f:
-                f.write(cfg)
-
-        # 3. Create a blank initialized database
-        db_path = os.path.join(dest, "netwatch.db")
-        conn = sqlite3.connect(db_path)
-        conn.close()
-        # Initialize schema by importing database module
-        import sys
-        sys.path.insert(0, netwatch_dir)
-        import importlib
-        db_mod = importlib.import_module("database")
-        # Point database to the blank db
-        orig_path = db_mod.DB_PATH
-        db_mod.DB_PATH = db_path
-        db_mod.init_db()
-        db_mod.DB_PATH = orig_path
-
-        # 4. Remove certs directory contents (keep the dir)
-        certs_dest = os.path.join(dest, "certs")
-        if os.path.exists(certs_dest):
-            shutil.rmtree(certs_dest)
-        os.makedirs(certs_dest)
-
-        # 5. Add README
-        readme_src = os.path.join(netwatch_dir, "README.md")
-        if os.path.exists(readme_src):
-            shutil.copy2(readme_src, os.path.join(dest, "README.md"))
-        else:
-            with open(os.path.join(dest, "README.md"), "w") as f:
-                f.write("# NetWatch\nSee https://github.com/your-repo for documentation.\n")
-
-        # 6. Create the zip
-        os.makedirs(output_dir, exist_ok=True)
-        zip_path = os.path.join(output_dir, distrib_name)
-        shutil.make_archive(zip_path, "zip", staging, "netwatch_distributable")
-        final_zip = zip_path + ".zip"
-
-        shutil.rmtree(staging)
-
-        size_mb = round(os.path.getsize(final_zip) / 1024 / 1024, 1)
-        log.info("distributable_generated", path=final_zip, size_mb=size_mb)
-        return jsonify({"status": "ok", "filename": os.path.basename(final_zip), "size_mb": size_mb})
-
+        subprocess.run([*git, "push", "github", "main"],
+                       check=True, capture_output=True, timeout=60)
+        steps.append("✓ Pushed to GitHub")
+    except subprocess.CalledProcessError as e:
+        err = e.stderr.decode() if e.stderr else str(e)
+        return jsonify({"status": "error",
+                        "message": f"Git push failed: {err}",
+                        "steps": steps}), 500
     except Exception as e:
-        log.error("distributable_failed", error=str(e))
-        return jsonify({"status": "error", "message": str(e)})
+        return jsonify({"status": "error", "message": f"Git error: {e}",
+                        "steps": steps}), 500
+
+    log.info("release_published", version=version, asset_url=asset_url,
+             user=auth.get_current_user().get("username"))
+
+    return jsonify({
+        "status":     "ok",
+        "version":    version,
+        "asset_url":  asset_url,
+        "steps":      steps,
+    })
 
 
-@app.route("/api/admin/distrib_download")
+@app.route("/api/admin/release_download")
 @auth.login_required
-@auth.requires_permission("manage_admin")
-def admin_distrib_download():
-    """Download a generated distributable zip."""
-    filename  = request.args.get("file", "")
-    backup_dir = os.path.join(os.path.dirname(NETWATCH_DIR), "backups")
-    if not (filename.startswith("netwatch_distributable_") or filename.startswith("netwatch_update_")) or ".." in filename:
+@auth.requires_permission("manage_users")
+def admin_release_download():
+    """Download a built release zip from ~/backups/releases/."""
+    if not getattr(config, "DEVELOPMENT_SYSTEM", False):
+        return jsonify({"status": "error", "message": "Not a development system"}), 403
+
+    filename   = request.args.get("file", "")
+    release_dir = os.path.join(os.path.expanduser("~"), "backups", "releases")
+
+    # Safety: filename must look like a release zip and contain no traversal
+    if not filename.startswith("netwatch-") or not filename.endswith(".zip") or ".." in filename:
         return jsonify({"status": "error", "message": "Invalid filename"}), 400
-    filepath = os.path.join(backup_dir, filename)
-    if not os.path.exists(filepath):
+
+    filepath = os.path.join(release_dir, filename)
+    if not os.path.isfile(filepath):
         return jsonify({"status": "error", "message": "File not found"}), 404
+
     return send_file(filepath, mimetype="application/zip",
                      as_attachment=True, download_name=filename)
 
