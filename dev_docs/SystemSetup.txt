@@ -1,6 +1,6 @@
 NETWATCH SYSTEM SETUP REFERENCE
 ================================
-Version: 1.0 | Created: 2026-03-20 | Session 23
+Version: 1.1 | Created: 2026-03-20 | Session 23 | Updated: 2026-03-26 | Session 34
 Purpose: Track every manual configuration step ever performed on the NetWatch Pi
   outside of a patcher package. This is the authoritative reference for what a
   fresh Pi needs beyond running install.sh, and the spec for what the first-run
@@ -85,6 +85,14 @@ SECTION 1: NETWATCH PI — BASE SYSTEM
   automatically):
     sudo -u netwatch-svc ~/netwatch/venv/bin/pip install pyotp qrcode
   SESSION: 28
+[MANUAL-ONCE] requests was installed manually on the existing production Pi at v3.3.99.
+  The production Pi predates install.sh and was never provisioned by it, so requests
+  was never in the venv despite being listed in install.sh from early on. Confirmed
+  missing when the "Check for Updates" button returned "requests library not available".
+  Test Pi (built with current install.sh) had it correctly. Fix:
+    sudo -u netwatch-svc ~/netwatch/venv/bin/pip install requests
+    sudo systemctl restart netwatch-web
+  SESSION: 34
 
 1.5 SYSTEMD SERVICES
 ---------------------
@@ -392,6 +400,21 @@ GAP-6: Promtail not in install.sh
 
 GAP-7: Node Exporter not in install.sh
   Same as GAP-6 -- entirely manual.
+
+GAP-8: Git setup not in install.sh
+  Entire Section 1.9 is manual. Wizard candidate.
+  Session: 30
+
+GAP-9: Production Pi venv missing requests
+  The production Pi was hand-built before install.sh existed and never re-provisioned
+  by it. requests is in the install.sh pip block but was never actually installed on
+  production. Only surfaced at v3.3.98 when the update checker button was added --
+  the update_check_now route needs requests and returned "library not available".
+  The monitor's daily check had also been silently skipping since v3.3.96 for the
+  same reason (_requests=None disables the check without any log noise).
+  FIXED manually on production at Session 34 -- see Section 1.4.
+  Lesson: any new server-side HTTP call should check that requests is actually present
+  in the production venv, not just in install.sh.
 
 ================================================================================
 SECTION 5: LOG FORMAT REFERENCE
