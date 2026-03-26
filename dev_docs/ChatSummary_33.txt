@@ -1,0 +1,214 @@
+NETWATCH CHAT SUMMARY — SESSION 33
+=====================================
+Date: 2026-03-25/26
+Starting version: v3.3.95 | Ending version: v3.3.97
+Session focus: Update checker + update installer design and implementation.
+  Two packages shipped. Full update/distribution story now functional end-to-end.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+ARC 1 — Extended design discussion (before any code)
+
+Full cohesive design brief produced for update checker + installer as a unit.
+Key decisions made during design:
+
+POST-SESSION 32 CONTEXT RECOVERED:
+  Matt had a post-closeout conversation (not in any summary) about how updates
+  would work without hand-crafted patcher manifests for every public release.
+  Key concept introduced: MIGRATIONS.md — a cumulative file in the repo tracking
+  schema changes by version. The installer reads this to know what SQL to apply
+  without requiring a bespoke run_sql action in every manifest. Recovered and
+  incorporated into the design before any code was written.
+
+SKIP-VERSION UPGRADES — built now, not later:
+  Sequential-only was the original Session 31 plan. Reversed: skip-version costs
+  almost nothing to implement now (zero users on any version) and retrofitting
+  later would be significantly more complex. MIGRATIONS.md + parse_migrations()
+  naturally supports it — apply all intermediate blocks, don't stop at one.
+
+TWO-STEP INSTALL FLOW (download then install):
+  Network failure mid-download could leave partial state if download and install
+  were combined. Download stores the verified zip locally first; install reads
+  from local file. Nothing changes on the Pi until the user clicks Install.
+  More foolproof for non-technical users.
+
+ROLLBACK VISIBILITY:
+  Non-technical users won't know rollback exists. Install failure UI shows an
+  explicit "use Emergency Rollback" notice rather than a generic error.
+
+SHA-256 IN latest.json:
+  Release zip is a static pre-built artifact. SHA-256 computed at release time,
+  stored in latest.json. Matches industry standard for self-hosted tools of this
+  scale (Home Assistant add-ons, Vaultwarden, Portainer, etc.). Dynamic zip
+  generation would require server infrastructure we don't have.
+
+HOW OTHER PROJECTS DO IT:
+  Confirmed design matches the GitHub Releases + static artifact + manifest URL
+  pattern used by projects of this type. Migration tracking borrowed from
+  Flyway/Alembic concept (cumulative tracked migrations), simplified for scale.
+
+MIGRATIONS.md FORMAT decided:
+  ## version_string      <- newest at top (human-friendly)
+  SQL statement;
+
+  ## older_version
+  SQL statement;
+
+  Parsed and sorted oldest-first by parse_migrations() for application.
+  Append-only, cumulative — every release zip contains full migration history
+  from first public release forward. No retrofitting of pre-release history.
+
+DISMISS BEHAVIOR settled:
+  Update banner dismissed globally (sticky per version) everywhere EXCEPT
+  /admin/patch where it always shows regardless of dismiss state.
+
+
+ARC 2 — Package v3.3.96 — Update Checker
+
+FILES CHANGED: database.py, config_schema.py, alert_subscribers.py,
+               main.py, webapp.py, base.html, patch_manager.html,
+               dev_docs/NetWatch_AI_Context_latest.txt, MIGRATIONS.md
+
+database.py:
+  - New system_settings table (key, value, updated_at) — system-level KV store,
+    not tied to any user. Safe for both services to read/write.
+  - get_system_setting(key, default=None) — read with fallback
+  - set_system_setting(key, value) — upsert with timestamp
+
+config_schema.py:
+  - UPDATE_CHECK_URL key added (group: system). Default = GitHub manifest URL.
+    Blank = disabled. Appears in Config Editor under System section.
+
+alert_subscribers.py:
+  - system_update alert type added to ALERT_TYPES (group: maintenance).
+    No send logic yet — placeholder for future auto-install alerts.
+
+main.py:
+  - import random added for jitter
+  - _check_for_updates() function: polls UPDATE_CHECK_URL once per day after
+    a random 0-3600s jitter offset (spread across all installs). Compares
+    available vs installed using packaging.version. Writes result to
+    system_settings. Fails silently on any error — never crashes monitor.
+  - Daily update check called from main loop alongside daily summary.
+  - last_update_check_date + update_check_jitter_s tracking variables added.
+
+webapp.py:
+  - inject_user() context processor: reads update_available_version from
+    system_settings. Injects update_available dict (version + description)
+    if available > dismissed. None if dismissed or no update.
+  - GET  /api/update/status — returns full update state as JSON
+  - POST /api/update/dismiss — writes current available version to
+    update_dismissed_version in system_settings. Banner suppressed until
+    a newer version appears.
+
+base.html:
+  - Blue update notification banner added (distinct from yellow config banner
+    and red MFA banner). Shown when update_available is injected.
+    dismissUpdateBanner() JS function calls /api/update/dismiss.
+
+patch_manager.html:
+  - patch_manager() route now passes update_always (ignores dismiss state).
+  - Update available card shown at top of page with version + description.
+    (v3.3.96 version: link to GitHub releases for manual download.)
+
+MIGRATIONS.md:
+  - Created at repo root. Empty shell with format documentation and rules.
+  - First entry goes here when first public release ships.
+
+
+ARC 3 — Package v3.3.97 — Update Installer
+
+FILES CHANGED: patcher.py, webapp.py, templates/patch_manager.html,
+               dev_docs/NetWatch_AI_Context_latest.txt
+
+patcher.py:
+  - parse_migrations(migrations_md) — parses MIGRATIONS.md text, returns
+    list of (version_str, [sql_statements]) tuples sorted oldest-first.
+    Skips comment lines (#), blank lines. Handles unparseable version strings
+    gracefully (preserved in document order, logged).
+  - apply_migrations(zip_bytes, installed_ver) — extracts MIGRATIONS.md from
+    zip, calls parse_migrations(), applies all SQL blocks for versions newer
+    than installed_ver via existing _run_sql(). Skip-version supported.
+    Returns dict: success, applied (list), skipped (list), error.
+    _run_sql() already swallows duplicate-column / already-exists errors so
+    re-runs are safe.
+
+webapp.py:
+  - POST /api/update/download (manage_admin) — fetches latest.json, gets
+    package_url + sha256, downloads zip, verifies SHA-256, saves to
+    ~/netwatch/updates/netwatch-VERSION.zip. Records path + version in
+    system_settings (update_downloaded_file, update_downloaded_version).
+  - POST /api/update/install (manage_users — Admin only) — reads stored zip,
+    calls apply_migrations() then patcher.apply_package(). Clears all
+    update_available_* and update_downloaded_* system_settings on success.
+    Deletes local zip (success or failure). Returns patcher result + migration
+    result for UI rendering.
+
+patch_manager.html:
+  - Update available card replaced with full two-step download/install UI:
+    - Download button → spinner → success message → Install button
+    - Install button → spinner → step-by-step result list (migrations + patcher
+      steps) → service restart polling (same pattern as manual install)
+    - Rollback notice shown prominently on failure
+    - Download errors re-enable the Download button for retry
+  - startUpdateDownload() and startUpdateInstall() JS functions added.
+
+
+SIMULATION RESULTS (pre-ship verification)
+-------------------------------------------
+parse_migrations() logic simulated with 3-version sample (3.3.96, 3.4.0, 3.4.1):
+- installed=3.3.95: all three applied in order ✓
+- installed=3.3.96: 3.3.96 skipped, 3.4.0 and 3.4.1 applied ✓
+Skip-version confirmed working correctly.
+
+
+DECISIONS MADE
+--------------
+- MIGRATIONS.md is the schema migration tracking mechanism going forward.
+  Rule: whenever a session package includes a run_sql action, that SQL also
+  goes into MIGRATIONS.md under the new version heading.
+- Skip-version upgrades supported from day one.
+- Two-step download/install flow for non-technical user safety.
+- Static pre-built release zip model (not dynamic). SHA-256 in latest.json.
+- Dismiss is global/sticky per version; /admin/patch always shows update card.
+- Only Admin (manage_users) can install updates. Admin + Operator see the banner.
+- system_update alert type added to ALERT_TYPES now; send logic deferred.
+- UPDATE_CHECK_URL defaults to GitHub manifest URL; blank = disabled.
+- Wizard opt-in deferred — default-on is fine, Config Editor allows disable.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None this session.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] releases/latest.json package_url and sha256 are empty — will be
+  filled when first real public release is cut.
+- [PENDING] releases/ directory not yet in install.sh (low priority — checker
+  creates updates/ at download time; releases/ only needed for new installs
+  that want to reference the manifest, which is fetched from GitHub).
+- [PENDING] Security audit before publicly advertising the repo.
+- [PENDING] Distributable installer (PC-side netwatch-setup.exe) design brief.
+- [PENDING] system_update alert send logic (for future auto-install feature).
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Update checker (v3.3.96)
+- Update installer (v3.3.97)
+
+No items removed from backlog otherwise.
+
+
+CURRENT STATE
+-------------
+- Pi version: v3.3.97 (after both packages installed)
+- Update checker: active, polls daily with jitter
+- Update installer: functional end-to-end
+- MIGRATIONS.md: in repo root, empty shell ready for first public release entry
+- Next task: security audit, distributable installer design, or documentation

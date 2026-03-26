@@ -1,53 +1,59 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-25 | Session 32 closed | v3.3.95
+Updated: 2026-03-26 | Session 33 closed | v3.3.97
 
-STATUS: Session 32 complete and closed out.
+STATUS: Session 33 complete and closed out.
 
-SESSION 32 SUMMARY
+SESSION 33 SUMMARY
 ------------------
-GitHub infrastructure set up:
-- Account: mattybusa
-- Public repo: github.com/mattybusa/NetWatch
-- PAT: netwatch-pi (repo-scoped, Contents read+write, no expiration)
-- github remote added to Pi (PAT embedded in URL, same pattern as Gitea)
-- Full codebase + history pushed
-- releases/latest.json placeholder committed to both remotes
-- Manifest URL confirmed live:
-  https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json
-- Release workflow: manual push to github remote when ready to publish
+Two packages shipped:
+
+v3.3.96 — Update Checker
+  Monitor service polls releases/latest.json daily (with 0-60min jitter).
+  system_settings DB table for inter-service state.
+  Dismissible notification banner in base.html (Admin + Operator).
+  Always shown on /admin/patch regardless of dismiss state.
+  UPDATE_CHECK_URL config key. system_update alert type added.
+  MIGRATIONS.md created at repo root (empty shell).
+
+v3.3.97 — Update Installer
+  parse_migrations() + apply_migrations() in patcher.py.
+  Skip-version upgrades supported (all intermediate SQL applied in order).
+  /api/update/download — fetches zip, verifies SHA-256, stores locally.
+  /api/update/install — applies migrations then patcher. Admin only.
+  Two-step UI in patch_manager.html with restart polling + rollback notice.
 
 NEXT SESSION
 ------------
-Primary candidate:
-  Update checker — monitor service polls releases/latest.json daily (with jitter),
-  compares version to installed version, writes available version to DB,
-  web service reads DB and shows notification banner to Admin/Operator users.
+Primary candidates (no order decided — Matt to choose):
 
-  Design decisions already made (Session 31):
-  - Model C: user-initiated update with notification, no auto-install by default
-  - UPDATE_CHECK_URL config key (defaults to manifest URL, blank = disabled)
-  - First-run wizard asks opt-in question
-  - system_update alert type (subscribable, Admin only by default)
-  - Notification banner visible to Admin + Operator (manage_admin permission)
-  - Only Admin can install (manage_users permission)
-  - Fails silently on network errors
+  1. Security audit
+     Review attack surface before any public promotion:
+     - Package installer / deployed files uploader (path traversal, code execution)
+     - Auth / session hardening
+     - Physical and remote access review
+     Goal: confidence before distributing to others.
 
-  Work required:
-  - New config key: UPDATE_CHECK_URL (config_schema.py)
-  - Monitor service: daily poll with jitter, version comparison, DB write
-  - New DB table or user_pref for available_version
-  - webapp.py: API endpoint to read available version
-  - Notification banner in base.html or dashboard
-  - Design brief still required before code (new feature norm)
+  2. Distributable installer design brief
+     PC-side application (netwatch-setup.exe concept):
+     - Handles Pi imaging, SD card pre-configuration
+     - SSH-based install initiation
+     - No SSH knowledge required from user
+     Design brief required before any code.
 
-Other open candidates:
-  - Update installer (download + sha256 + patcher) — follows update checker
-  - Security audit (pre-distribution)
-  - Distributable installer design brief (PC-side netwatch-setup.exe)
-  - Documentation (User PDF, Admin guide)
+  3. Documentation
+     User PDF, Admin guide PDF, Developer reference, Changelog PDF.
+
+  4. mBase / architecture pending discussion items
+     9 PENDING DISCUSSION items in Audit_Findings.txt still unresolved.
+     Load all four mBase docs at session start if this is the chosen task.
 
 NOTE
 ----
-releases/ directory not in install.sh yet. Low priority — update checker can
-create it on first run, or add to install.sh when update checker is built.
+MIGRATIONS.md rule going forward: whenever a session package includes a
+run_sql action, that SQL also goes into MIGRATIONS.md under the new version
+heading. This is now part of the development discipline.
+
+releases/ directory not yet in install.sh. Low priority — update checker
+creates updates/ dir at download time. Revisit when distributable installer
+is built.
