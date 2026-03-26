@@ -29,6 +29,12 @@ import alert_subscribers
 import security_log
 import theme_manager
 
+# requests is used for update checking — fail gracefully if not installed
+try:
+    import requests as _requests
+except ImportError:
+    _requests = None
+
 log = structlog.get_logger().bind(service="web")
 
 app = Flask(__name__)
@@ -3410,10 +3416,8 @@ def api_update_check_now():
 
     Returns JSON with success, message, available_version (if any), and last_checked.
     """
-    try:
-        import requests as req_lib
-    except ImportError:
-        return jsonify({"success": False, "message": "requests library not available"}), 500
+    if _requests is None:
+        return jsonify({"success": False, "message": "requests library not available — install it in the venv"}), 500
 
     check_url = getattr(config, "UPDATE_CHECK_URL", "").strip()
     if not check_url:
@@ -3422,7 +3426,7 @@ def api_update_check_now():
     try:
         from packaging import version as pkg_version
 
-        resp = req_lib.get(check_url, timeout=10)
+        resp = _requests.get(check_url, timeout=10)
         resp.raise_for_status()
         manifest = resp.json()
 
