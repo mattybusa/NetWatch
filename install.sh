@@ -173,7 +173,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Copy all files from the directory containing this install.sh
 rsync -a --exclude='venv/' --exclude='*.pyc' --exclude='__pycache__' \
-    --exclude='install.sh' \
+    --exclude='install.sh' --exclude='dev_docs/' \
+    --exclude='build_release.sh' \
     "$SCRIPT_DIR/" "$NETWATCH_DIR/"
 
 chmod +x "$NETWATCH_DIR/backup.sh" "$NETWATCH_DIR/restore.sh" 2>/dev/null || true
