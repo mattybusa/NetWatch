@@ -2701,7 +2701,7 @@ def admin_publish_release():
     tag = f"v{version}"
     steps = []
 
-    # -- Step 1: Create GitHub Release ----------------------------------------
+    # -- Step 1: Create GitHub Release (or fetch existing one) ----------------
     try:
         resp = req_lib.post(
             f"https://api.github.com/repos/{owner}/{repo}/releases",
@@ -2715,15 +2715,28 @@ def admin_publish_release():
             },
             timeout=30
         )
-        if resp.status_code not in (200, 201):
+        if resp.status_code in (200, 201):
+            release_data = resp.json()
+            steps.append(f"✓ GitHub Release created: {tag} (id {release_data['id']})")
+        elif resp.status_code == 422 and "already_exists" in resp.text:
+            # Release already exists — fetch it instead
+            fetch = req_lib.get(
+                f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}",
+                headers=headers, timeout=15
+            )
+            if fetch.status_code != 200:
+                return jsonify({"status": "error",
+                                "message": f"Release exists but could not fetch it: {fetch.status_code}",
+                                "steps": steps}), 500
+            release_data = fetch.json()
+            steps.append(f"✓ GitHub Release already exists: {tag} (id {release_data['id']}) — reusing")
+        else:
             return jsonify({"status": "error",
                             "message": f"GitHub release creation failed: {resp.status_code} {resp.text}",
                             "steps": steps}), 500
 
-        release_data  = resp.json()
-        release_id    = release_data["id"]
-        upload_url    = release_data["upload_url"].split("{")[0]  # strip template part
-        steps.append(f"✓ GitHub Release created: {tag} (id {release_id})")
+        release_id = release_data["id"]
+        upload_url = release_data["upload_url"].split("{")[0]
     except Exception as e:
         return jsonify({"status": "error", "message": f"Release creation error: {e}",
                         "steps": steps}), 500
@@ -2770,6 +2783,13 @@ def admin_publish_release():
             import json as json_lib
             json_lib.dump(manifest, f, indent=2)
             f.write("\n")
+        # Ensure netwatch-svc owns the file so future writes succeed
+        import pwd
+        try:
+            pw = pwd.getpwnam("netwatch-svc")
+            os.chown(manifest_path, pw.pw_uid, pw.pw_gid)
+        except (KeyError, PermissionError):
+            pass  # Best effort — non-fatal if chown fails
         steps.append("✓ releases/latest.json updated")
     except Exception as e:
         return jsonify({"status": "error", "message": f"Manifest update error: {e}",

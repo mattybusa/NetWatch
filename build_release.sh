@@ -180,20 +180,58 @@ echo "  Found $FILE_COUNT files to include."
 # -- Write manifest.json ------------------------------------------------------
 echo "  Writing manifest.json..."
 
-# Remove trailing comma+newline from last action, add restart
-# Strip the last ",\n" and close the array properly
-MANIFEST_ACTIONS_CLEAN="$(printf '%b' "$MANIFEST_ACTIONS" | sed '$ s/,$//')"
+# -- Write manifest.json using Python for reliable JSON generation -----------
+echo "  Writing manifest.json..."
 
-cat > "$WORK_DIR/manifest.json" << MANIFEST_EOF
-{
-  "version": "${VERSION}",
-  "description": "NetWatch v${VERSION} release.",
-  "actions": [
-${MANIFEST_ACTIONS_CLEAN}
-    { "action": "restart", "services": ["monitor", "web"] }
-  ]
+# Write accumulated actions to a temp file (heredoc can't expand bash arrays reliably)
+ACTIONS_TMP="$WORK_DIR/_actions.txt"
+printf '%b' "$MANIFEST_ACTIONS" > "$ACTIONS_TMP"
+
+python3 - "$WORK_DIR" "$VERSION" "$ACTIONS_TMP" << 'PYEOF'
+import json, sys, os
+
+work_dir   = sys.argv[1]
+version    = sys.argv[2]
+actions_file = sys.argv[3]
+
+with open(actions_file) as f:
+    raw = f.read()
+
+actions = []
+for line in raw.strip().splitlines():
+    line = line.strip().rstrip(',').strip()
+    if line:
+        try:
+            actions.append(json.loads(line))
+        except json.JSONDecodeError as e:
+            print(f"WARNING: Could not parse action: {line!r} — {e}", file=sys.stderr)
+
+actions.append({"action": "restart", "services": ["monitor", "web"]})
+
+manifest = {
+    "version":     version,
+    "description": f"NetWatch v{version} release.",
+    "actions":     actions,
 }
-MANIFEST_EOF
+
+out_path = os.path.join(work_dir, "manifest.json")
+with open(out_path, "w") as f:
+    json.dump(manifest, f, indent=2)
+    f.write("\n")
+
+# Validate
+with open(out_path) as f:
+    json.load(f)
+
+print(f"  manifest.json written ({len(actions)} actions, validated).")
+PYEOF
+
+if [[ $? -ne 0 ]]; then
+    echo "ERROR: Failed to write manifest.json" >&2
+    exit 1
+fi
+
+rm -f "$ACTIONS_TMP"
 
 echo "  manifest.json written."
 
