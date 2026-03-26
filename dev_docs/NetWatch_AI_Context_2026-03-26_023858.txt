@@ -23,7 +23,7 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.3.98
+- **Pi version:** v3.3.97
 - **Pi path:** `/home/mboynton/netwatch/`
 - **Canonical matches Pi at v3.3.95**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.
@@ -720,10 +720,6 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   shows dismissible notification banner (Admin/Operator). Always shown on /admin/patch
   regardless of dismiss state. system_update alert type added to ALERT_TYPES.
   MIGRATIONS.md created in repo root (empty shell). SHIPPED v3.3.96 (Session 33).
-- ✅ Update check now: "Check for Updates" button on /admin/patch triggers an
-  immediate manifest poll from the web service — no waiting 24h. Reloads page if
-  update found; updates last-checked timestamp in place if already current.
-  POST /api/update/check_now. SHIPPED v3.3.98 (Session 34).
 - ✅ Update installer: download + SHA-256 verify + MIGRATIONS.md apply + patcher.
   Two-step flow (download then install). parse_migrations() + apply_migrations()
   in patcher.py. Skip-version upgrades supported — all intermediate migration

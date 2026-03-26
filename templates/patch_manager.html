@@ -100,6 +100,24 @@
   </div>
   {% endif %}
 
+  <!-- ── Update Check Strip ── -->
+  {% if check_url_configured %}
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;
+              font-size:0.8rem;color:var(--text-muted);">
+    <button id="check-now-btn" class="nw-btn"
+            onclick="runCheckNow()"
+            style="font-size:0.78rem;padding:4px 12px;">
+      🔄 Check for Updates
+    </button>
+    <span id="check-now-status" style="display:none;"></span>
+    {% if last_checked %}
+    <span id="last-checked-lbl">Last checked: {{ last_checked }} UTC</span>
+    {% else %}
+    <span id="last-checked-lbl">Not checked yet this session</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <!-- ── Upload Zone ── -->
   <div id="drop-zone" class="nw-card"
        style="padding:48px; text-align:center; cursor:pointer;
@@ -671,6 +689,48 @@ async function loadHistory() {
 }
 
 loadHistoryLimit().then(() => loadHistory());
+
+// ── Check for Updates ─────────────────────────────────────────────────────────
+async function runCheckNow() {
+  const btn    = document.getElementById("check-now-btn");
+  const status = document.getElementById("check-now-status");
+  const lbl    = document.getElementById("last-checked-lbl");
+
+  btn.disabled = true;
+  status.style.display = "inline";
+  status.style.color   = "var(--text-muted)";
+  status.textContent   = "⟳ Checking...";
+
+  try {
+    const resp = await fetch("/api/update/check_now", { method: "POST" });
+    const data = await resp.json();
+
+    if (data.success) {
+      if (data.available_version) {
+        // Update found — reload so the update card appears
+        status.style.color = "var(--ok)";
+        status.textContent = `✓ ${data.message} — reloading...`;
+        setTimeout(() => location.reload(), 1200);
+      } else {
+        // Already up to date
+        status.style.color = "var(--ok)";
+        status.textContent = `✓ ${data.message}`;
+        if (data.last_checked && lbl) {
+          lbl.textContent = `Last checked: ${data.last_checked} UTC`;
+        }
+        btn.disabled = false;
+      }
+    } else {
+      status.style.color = "var(--fail)";
+      status.textContent = `✗ ${data.message || "Check failed"}`;
+      btn.disabled = false;
+    }
+  } catch (e) {
+    status.style.color = "var(--fail)";
+    status.textContent = "✗ Request failed";
+    btn.disabled = false;
+  }
+}
 
 // ── Update installer ──────────────────────────────────────────────────────────
 

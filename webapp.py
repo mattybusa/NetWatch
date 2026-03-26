@@ -3397,6 +3397,79 @@ def api_update_status():
     })
 
 
+@app.route("/api/update/check_now", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def api_update_check_now():
+    """
+    Immediately poll UPDATE_CHECK_URL and update system_settings with the result.
+
+    Runs the same logic as the monitor's daily _check_for_updates(), but
+    synchronously from the web service so the user doesn't have to wait up to
+    24 hours after changing the manifest or for testing purposes.
+
+    Returns JSON with success, message, available_version (if any), and last_checked.
+    """
+    try:
+        import requests as req_lib
+    except ImportError:
+        return jsonify({"success": False, "message": "requests library not available"}), 500
+
+    check_url = getattr(config, "UPDATE_CHECK_URL", "").strip()
+    if not check_url:
+        return jsonify({"success": False, "message": "UPDATE_CHECK_URL is not configured"}), 400
+
+    try:
+        from packaging import version as pkg_version
+
+        resp = req_lib.get(check_url, timeout=10)
+        resp.raise_for_status()
+        manifest = resp.json()
+
+        available_ver = manifest.get("version", "").strip()
+        description   = manifest.get("description", "").strip()
+
+        version_file = os.path.join(NETWATCH_DIR, "VERSION")
+        try:
+            with open(version_file) as f:
+                installed_ver = f.read().strip()
+        except FileNotFoundError:
+            installed_ver = "0.0.0"
+
+        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        database.set_system_setting("update_last_checked", now_str)
+
+        if available_ver and pkg_version.parse(available_ver) > pkg_version.parse(installed_ver):
+            database.set_system_setting("update_available_version",     available_ver)
+            database.set_system_setting("update_available_description", description)
+            log.info("update_check_now_found", available=available_ver,
+                     installed=installed_ver,
+                     user=auth.get_current_user().get("username"))
+            return jsonify({
+                "success":           True,
+                "message":           f"Update available: v{available_ver}",
+                "available_version": available_ver,
+                "last_checked":      now_str,
+            })
+        else:
+            # No newer version — clear any stale available entry
+            database.set_system_setting("update_available_version",     "")
+            database.set_system_setting("update_available_description", "")
+            log.info("update_check_now_current", installed=installed_ver,
+                     available=available_ver,
+                     user=auth.get_current_user().get("username"))
+            return jsonify({
+                "success":           True,
+                "message":           f"Already up to date (v{installed_ver})",
+                "available_version": "",
+                "last_checked":      now_str,
+            })
+
+    except Exception as e:
+        log.warning("update_check_now_failed", error=str(e))
+        return jsonify({"success": False, "message": f"Check failed: {e}"}), 502
+
+
 @app.route("/api/update/dismiss", methods=["POST"])
 @auth.login_required
 @auth.requires_permission("manage_admin")
@@ -3587,7 +3660,12 @@ def patch_manager():
             "version":     avail_ver,
             "description": database.get_system_setting("update_available_description", ""),
         }
-    return render_template("patch_manager.html", update_always=update_always)
+    check_url_configured = bool(getattr(config, "UPDATE_CHECK_URL", "").strip())
+    last_checked         = database.get_system_setting("update_last_checked", "")
+    return render_template("patch_manager.html",
+                           update_always=update_always,
+                           check_url_configured=check_url_configured,
+                           last_checked=last_checked)
 
 
 @app.route("/api/patch/preview", methods=["POST"])
