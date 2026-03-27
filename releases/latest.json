@@ -1,9 +1,9 @@
 {
-  "version": "3.4.28",
-  "description": "- v3.4.27: Fix release description bullet list formatting: switched description field from single-line input to textarea so newlines are preserved when submitting to GitHub.\n- v3.4.28: Migration test package 1 of 2: adds _test_col_1 to system_settings table to verify skip-version migration behavior.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.28/netwatch-3.4.28.zip",
+  "version": "3.4.29",
+  "description": "- v3.4.29: Migration test package 2 of 2: adds _test_col_2 to system_settings table to verify skip-version migration behavior.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.29/netwatch-3.4.29.zip",
   "changelog_url": "",
-  "package_sha256": "1a9092122d6a1cd82304bed6e80cf5a7d314ac462b852cbcef82ea2eb611b578",
+  "package_sha256": "5d7324fbd6c2e6623b69419c0f3cab15029705f0c9b29f9c222ee431bfdd0b0f",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
