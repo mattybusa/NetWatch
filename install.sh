@@ -210,12 +210,44 @@ fi
 # = Fresh install = copy files ================
 section "Copying NetWatch files"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MANIFEST_URL="https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json"
 
-# Copy all files from the directory containing this install.sh
+# Detect whether we are running standalone (curl install) or from an extracted
+# release zip. If database.py exists alongside install.sh, use it directly.
+# Otherwise download the release zip from GitHub and extract from that.
+if [[ -f "$SCRIPT_DIR/database.py" ]]; then
+    log "Codebase found alongside install.sh -- using local files"
+    SOURCE_DIR="$SCRIPT_DIR"
+    TEMP_DIR=""
+else
+    log "Running standalone -- downloading NetWatch codebase from GitHub..."
+    TEMP_DIR=$(mktemp -d)
+    trap 'rm -rf "$TEMP_DIR"' EXIT
+
+    PACKAGE_URL=$(curl -sf --max-time 10 "$MANIFEST_URL" | \
+        python3 -c "import sys,json; d=json.load(sys.stdin); print(d['package_url'])" 2>/dev/null) || true
+
+    if [[ -z "$PACKAGE_URL" ]]; then
+        err "Could not retrieve release manifest from GitHub. Check your internet connection and try again."
+    fi
+
+    log "Downloading release zip..."
+    curl -fL --max-time 120 -o "$TEMP_DIR/netwatch.zip" "$PACKAGE_URL" || \
+        err "Failed to download NetWatch release zip from $PACKAGE_URL"
+
+    log "Extracting release..."
+    unzip -q "$TEMP_DIR/netwatch.zip" -d "$TEMP_DIR/extracted" || \
+        err "Failed to extract release zip"
+
+    SOURCE_DIR="$TEMP_DIR/extracted"
+    log "Codebase downloaded and extracted successfully"
+fi
+
+# Copy all NetWatch files into place
 rsync -a --exclude='venv/' --exclude='*.pyc' --exclude='__pycache__' \
     --exclude='install.sh' --exclude='dev_docs/' \
     --exclude='build_release.sh' \
-    "$SCRIPT_DIR/" "$NETWATCH_DIR/"
+    "$SOURCE_DIR/" "$NETWATCH_DIR/"
 
 chmod +x "$NETWATCH_DIR/backup.sh" "$NETWATCH_DIR/restore.sh" 2>/dev/null || true
 # Transfer ownership to service account; installing user retains access via group
