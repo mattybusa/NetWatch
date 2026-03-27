@@ -407,7 +407,10 @@ function goToReview() {
   // Populate summary
   const gmail = document.getElementById('gmail-user').value;
   const networkType = document.getElementById('network-type').value;
-  const wifiGw = networkType === 'advanced' ? (document.getElementById('wifi-gateway').value || 'Not set') : 'Same as LAN (simple setup)';
+  const wifiIfaceVal = document.getElementById('wifi-interface').value;
+  const wifiGw = networkType === 'advanced'
+    ? (document.getElementById('wifi-gateway').value || 'Not set')
+    : (wifiIfaceVal ? 'Same as LAN — checked via WiFi interface' : 'Same as LAN — WiFi interface not set, check skipped');
   document.getElementById('s-site').textContent    = document.getElementById('site-name').value || '—';
   document.getElementById('s-lan').textContent     = document.getElementById('lan-gateway').value || '—';
   document.getElementById('s-wifi').textContent    = wifiGw;
@@ -435,12 +438,19 @@ async function applyConfig() {
   btn.disabled = true;
   btn.innerHTML = '<i class="bi bi-hourglass-split me-2"></i>Applying...';
 
+  const networkType  = document.getElementById('network-type').value;
+  const lanGateway   = document.getElementById('lan-gateway').value;
+  const wifiGateway  = networkType === 'simple'
+                       ? lanGateway   // same gateway, but checked via separate interface
+                       : document.getElementById('wifi-gateway').value;
+  const wifiIface    = document.getElementById('wifi-interface').value;
+
   const payload = {
     site_name:       document.getElementById('site-name').value,
-    lan_gateway:     document.getElementById('lan-gateway').value,
-    wifi_gateway:    document.getElementById('wifi-gateway').value,
+    lan_gateway:     lanGateway,
+    wifi_gateway:    wifiIface ? wifiGateway : '',  // only set if WiFi interface configured
     lan_interface:   document.getElementById('lan-interface').value,
-    wifi_interface:  document.getElementById('wifi-interface').value,
+    wifi_interface:  wifiIface,
     wan_primary:     document.getElementById('wan-primary').value,
     wan_secondary:   document.getElementById('wan-secondary').value,
     relay_modem:     parseInt(document.getElementById('relay-modem').value),
