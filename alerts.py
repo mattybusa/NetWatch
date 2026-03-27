@@ -433,7 +433,7 @@ def _build_html_body(alert_type, message, display_name="there", theme="dark-blue
     <!-- Header bar -->
     <div style="background:{color};padding:22px 28px;">
       <div style="display:flex;align-items:center;gap:10px;">
-        <div style="font-size:22px;line-height:1;">📡</div>
+        <div style="font-size:22px;line-height:1;">🛜</div>
         <div>
           <div style="margin:0;color:{header_text};font-size:18px;font-weight:700;
                       letter-spacing:0.5px;">{site_name}</div>
