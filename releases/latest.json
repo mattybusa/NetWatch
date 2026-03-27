@@ -1,9 +1,9 @@
 {
-  "version": "3.4.18",
-  "description": "WiFi monitoring fix for simple networks. On a simple network setup, NetWatch now independently verifies both your wired and wireless connections by pinging the gateway through each interface separately. Previously the WiFi check was skipped entirely on simple networks \u2014 now a disconnected WiFi interface is correctly detected and reported.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.18/netwatch-3.4.18.zip",
+  "version": "3.4.19",
+  "description": "Fixed setup wizard interface auto-detection. The /api/setup/interfaces endpoint was blocked by the first-run redirect guard, preventing eth0/wlan0 from being pre-populated in the wizard. This also caused WiFi gateway to be left blank on simple network setups. Both issues are resolved \u2014 the wizard now correctly detects and pre-fills network interfaces on fresh installs.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.19/netwatch-3.4.19.zip",
   "changelog_url": "",
-  "package_sha256": "0a62475622472555756958ba4a7dbaa3ef8c9ebc78d70633252d85fa77289f7e",
+  "package_sha256": "62666ddb294afc6e199825da78f59996c548561cf581bac9224295e09f34128b",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
