@@ -1,9 +1,9 @@
 {
-  "version": "3.4.11",
-  "description": "Self-healing package installer. install.sh now resolves version-sensitive package names dynamically from the Debian archive at install time, rather than hardcoding names that can change between OS releases. Fresh installs will continue to work correctly as Debian evolves, without requiring updated releases to fix package naming changes.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.11/netwatch-3.4.11.zip",
+  "version": "3.4.12",
+  "description": "GitHub sync fix. Publishing a release now pushes the complete accumulated codebase to GitHub, not just the manifest file. GitHub's main branch will always reflect the full current codebase after a publish, ensuring that direct file downloads (such as install.sh) serve the correct version.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.12/netwatch-3.4.12.zip",
   "changelog_url": "",
-  "package_sha256": "7a4ba7ab27a5d061224659c40e9530e0947c9d094757b98cba1df927eecf85ab",
+  "package_sha256": "dde08c84ee86a2082a40624ac8c48fdc7736ec9dd789caadf7eb2d51be04ee2e",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
