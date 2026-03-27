@@ -393,7 +393,7 @@
               ✨ Generate
             </button>
           </div>
-          <div id="gen-notes-hint" style="display:none;font-size:0.72rem;color:var(--text-muted);margin-top:3px;"></div>
+          <div id="gen-notes-hint" style="visibility:hidden;font-size:0.72rem;color:var(--text-muted);margin-top:3px;min-height:1em;"></div>
         </div>
         <button id="release-build-btn" class="nw-btn nw-btn-primary"
                 onclick="doBuildRelease()"
@@ -649,7 +649,7 @@ async function generateReleaseNotes() {
   const hint = document.getElementById("gen-notes-hint");
   btn.disabled = true;
   btn.textContent = "⟳";
-  hint.style.display = "none";
+  hint.style.visibility = "hidden";
   try {
     const res = await fetch("/api/admin/release_notes_draft").then(r => r.json());
     if (res.status === "ok") {
@@ -657,18 +657,18 @@ async function generateReleaseNotes() {
         document.getElementById("release-description").value = res.text;
         const since = res.last_published ? `since v${res.last_published}` : "all time";
         hint.textContent = `${res.count} package${res.count !== 1 ? "s" : ""} ${since}`;
-        hint.style.display = "block";
+        hint.style.visibility = "visible";
       } else {
         hint.textContent = "No new packages since last release.";
-        hint.style.display = "block";
+        hint.style.visibility = "visible";
       }
     } else {
       hint.textContent = "Error: " + (res.message || "unknown");
-      hint.style.display = "block";
+      hint.style.visibility = "visible";
     }
   } catch(e) {
     hint.textContent = "Request failed — check server logs";
-    hint.style.display = "block";
+    hint.style.visibility = "visible";
   }
   btn.disabled = false;
   btn.textContent = "✨ Generate";
