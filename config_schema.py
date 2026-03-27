@@ -588,6 +588,22 @@ CONFIG_SCHEMA = [
         "ui_hidden":   False,
     },
 
+    {
+        "key":         "MFA_REQUIRED",
+        "default":     True,
+        "required":    False,
+        "group":       "auth",
+        "section":     "Security",
+        "label":       "Require MFA for Admin/Operator",
+        "description": "When enabled, Admin and Operator accounts must set up multi-factor "
+                       "authentication within the grace period. When disabled, MFA becomes "
+                       "optional for all roles — existing MFA setups still work but are not "
+                       "enforced. Requires service restart to take effect.",
+        "sensitive":   False,
+        "type":        "bool",
+        "ui_hidden":   False,
+    },
+
     # ── Logging ───────────────────────────────────────────────────────────────
     {
         "key":         "LOG_FORMAT",

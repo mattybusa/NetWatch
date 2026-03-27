@@ -762,10 +762,23 @@ def request_password_reset(username):
 # MFA — TOTP SETUP AND VERIFICATION
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Roles that require MFA (mandatory). Monitor is optional.
+# Roles that require MFA when enforcement is enabled.
 MFA_MANDATORY_ROLES = {"Admin", "Operator"}
 # Grace period for mandatory roles to complete MFA setup (days)
 MFA_GRACE_DAYS = 7
+
+
+def mfa_enforcement_enabled():
+    """
+    Return True if MFA is required for mandatory roles (MFA_REQUIRED config key).
+    Defaults to True if the key is absent (safe default).
+    Checked at runtime so config changes take effect after restart.
+    """
+    try:
+        import config as _cfg
+        return bool(getattr(_cfg, "MFA_REQUIRED", True))
+    except Exception:
+        return True
 # Number of backup codes generated per user
 MFA_BACKUP_CODE_COUNT = 8
 # Challenge code expiry (minutes) for email/SMS OTP fallback

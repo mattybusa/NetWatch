@@ -344,7 +344,7 @@ def inject_user():
     mfa_warning = None
     try:
         u = auth.get_current_user()
-        if u and not u.get("is_guest") and u.get("role_name") in auth.MFA_MANDATORY_ROLES:
+        if u and not u.get("is_guest") and auth.mfa_enforcement_enabled() and u.get("role_name") in auth.MFA_MANDATORY_ROLES:
             mfa_status = auth.get_mfa_status(u["id"])
             if not mfa_status["enabled"]:
                 if mfa_status["grace_expired"]:
@@ -387,6 +387,8 @@ def inject_user():
         "mfa_warning":            mfa_warning,
         "update_available":       update_available,
         "is_dev_system":          bool(getattr(config, "DEVELOPMENT_SYSTEM", False)),
+        "mfa_required":           bool(getattr(config, "MFA_REQUIRED", True)),
+        "mfa_grace_days":          auth.MFA_GRACE_DAYS,
     }
 
 
@@ -706,7 +708,7 @@ def login():
             session["mfa_must_change"]  = bool(user.get("must_change_pass"))
             return redirect(url_for("mfa_challenge"))
 
-        if role_name in auth.MFA_MANDATORY_ROLES and not mfa_status["enabled"]:
+        if auth.mfa_enforcement_enabled() and role_name in auth.MFA_MANDATORY_ROLES and not mfa_status["enabled"]:
             # Role requires MFA but user hasn't set it up yet
             if mfa_status["grace_expired"]:
                 # Grace period over — must set up MFA before doing anything else
@@ -982,7 +984,7 @@ def mfa_disable():
     auth.disable_mfa(user["id"])
 
     # If role requires MFA, set grace deadline so banner appears on next page load
-    if user["role_name"] in auth.MFA_MANDATORY_ROLES:
+    if auth.mfa_enforcement_enabled() and user["role_name"] in auth.MFA_MANDATORY_ROLES:
         auth.set_mfa_grace_deadline(user["id"])
 
     log.info("MFA disabled by user", username=user["username"])
@@ -2676,8 +2678,7 @@ def admin_build_release():
     if not getattr(config, "DEVELOPMENT_SYSTEM", False):
         return jsonify({"status": "error", "message": "Not a development system"}), 403
 
-    version     = request.json.get("version",     "").strip() if request.is_json else ""
-    description = request.json.get("description", "").strip() if request.is_json else ""
+    version = request.json.get("version", "").strip() if request.is_json else ""
 
     script = os.path.join(NETWATCH_DIR, "build_release.sh")
     if not os.path.isfile(script):
@@ -2685,11 +2686,8 @@ def admin_build_release():
 
     try:
         cmd = ["bash", script]
-        if version or description:
-            # Script: argv[1]=version (blank → use VERSION file), argv[2]=description
-            cmd.append(version)   # may be "" — script treats blank as "use VERSION file"
-        if description:
-            cmd.append(description)
+        if version:
+            cmd.append(version)
 
         result = subprocess.run(
             cmd,
@@ -2714,13 +2712,12 @@ def admin_build_release():
                  user=auth.get_current_user().get("username"))
 
         return jsonify({
-            "status":      "ok",
-            "version":     built_ver,
-            "description": description,
-            "sha256":      sha256,
-            "zip_path":    zip_path,
-            "filename":    os.path.basename(zip_path) if zip_path else "",
-            "output":      output,
+            "status":    "ok",
+            "version":   built_ver,
+            "sha256":    sha256,
+            "zip_path":  zip_path,
+            "filename":  os.path.basename(zip_path) if zip_path else "",
+            "output":    output,
         })
 
     except subprocess.TimeoutExpired:
@@ -2728,44 +2725,6 @@ def admin_build_release():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
-
-
-@app.route("/api/admin/discard_release", methods=["POST"])
-@auth.login_required
-@auth.requires_permission("manage_users")
-def admin_discard_release():
-    """
-    Delete a locally built release zip, resetting the Release Manager to its
-    initial state so the user can change the version/description and rebuild.
-    Only available when DEVELOPMENT_SYSTEM = True in config.py.
-    """
-    if not getattr(config, "DEVELOPMENT_SYSTEM", False):
-        return jsonify({"status": "error", "message": "Not a development system"}), 403
-
-    data     = request.json or {}
-    zip_path = data.get("zip_path", "").strip()
-
-    if not zip_path:
-        return jsonify({"status": "error", "message": "zip_path is required"}), 400
-
-    # Safety: only allow deleting files inside the releases directory
-    releases_dir = "/home/mboynton/backups/releases"
-    real_path    = os.path.realpath(zip_path)
-    if not real_path.startswith(os.path.realpath(releases_dir) + os.sep):
-        return jsonify({"status": "error", "message": "Path not in releases directory"}), 400
-
-    if not os.path.isfile(real_path):
-        # Already gone - treat as success (idempotent)
-        return jsonify({"status": "ok", "message": "File already removed"})
-
-    try:
-        os.remove(real_path)
-        log.info("release_discarded", zip_path=real_path,
-                 user=auth.get_current_user().get("username"))
-        return jsonify({"status": "ok", "message": "Release zip deleted"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route("/api/admin/publish_release", methods=["POST"])
 @auth.login_required

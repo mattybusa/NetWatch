@@ -179,6 +179,53 @@
   </div>
   {% endif %}
 
+  <!-- Security Settings -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('security')">
+      <div class="nw-label" style="margin:0;">Security</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-security"></i>
+    </div>
+    <div id="section-security" class="nw-collapse-body">
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 16px;">
+        System-wide security settings. Changes require a service restart to take effect.
+      </p>
+
+      <!-- MFA Required toggle -->
+      <div style="display:flex;align-items:flex-start;gap:14px;padding:14px;border-radius:8px;
+                  background:var(--bg-input);border:1px solid var(--border);">
+        <div style="flex:1;">
+          <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin-bottom:4px;">
+            Require MFA for Admin &amp; Operator accounts
+          </div>
+          <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.5;">
+            When enabled, Admin and Operator accounts must set up multi-factor authentication
+            within the {{ mfa_grace_days }}-day grace period or be locked out until they do.
+            When disabled, MFA becomes optional for all roles — existing MFA setups remain
+            active and still challenge at login, but setup is no longer enforced.
+          </div>
+          {% if not mfa_required %}
+          <div style="margin-top:8px;padding:6px 10px;border-radius:6px;font-size:0.75rem;
+                      background:rgba(255,152,0,0.12);border:1px solid var(--warn);color:var(--warn);">
+            ⚠ MFA is currently disabled. Admin and Operator accounts are protected by
+            password only.
+          </div>
+          {% endif %}
+        </div>
+        <div style="flex-shrink:0;padding-top:2px;">
+          <button id="mfa-toggle-btn"
+                  onclick="toggleMfaRequired()"
+                  class="nw-btn {% if mfa_required %}nw-btn-primary{% endif %}"
+                  style="min-width:80px;padding:6px 14px;font-size:0.82rem;">
+            {% if mfa_required %}Enabled{% else %}Disabled{% endif %}
+          </button>
+        </div>
+      </div>
+
+      <div id="mfa-toggle-msg" style="display:none;margin-top:10px;font-size:0.8rem;
+           padding:8px 12px;border-radius:6px;"></div>
+    </div>
+  </div>
+
   <!-- Backup Manager (consolidated) -->
   <div class="nw-card p-4 mb-4">
     <div class="nw-collapse-header" onclick="toggleSection('backup')">
@@ -396,12 +443,7 @@
           </div>
           <div id="gen-notes-hint" style="visibility:hidden;font-size:0.72rem;color:var(--text-muted);margin-top:3px;min-height:1em;"></div>
         </div>
-        <div style="padding-bottom:calc(1em + 3px);display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
-          <button id="release-reset-btn" class="nw-btn"
-                  onclick="doResetRelease()"
-                  style="display:none;white-space:nowrap;padding:6px 14px;font-size:0.82rem;color:var(--text-muted);">
-            ↩ Reset
-          </button>
+        <div style="padding-bottom:calc(1em + 3px);">
           <button id="release-build-btn" class="nw-btn nw-btn-primary"
                   onclick="doBuildRelease()"
                   style="white-space:nowrap;padding:7px 16px;">
@@ -560,6 +602,62 @@
 {% block scripts %}
 <script>/* v1772383470 */
 
+
+// ── Security: MFA Required toggle ─────────────────────────────────────────────
+async function toggleMfaRequired() {
+  const btn    = document.getElementById("mfa-toggle-btn");
+  const msg    = document.getElementById("mfa-toggle-msg");
+  const current = btn.classList.contains("nw-btn-primary");  // true = currently enabled
+  const newVal  = !current;
+
+  const label = newVal ? "Enabled" : "Disabled";
+  if (!confirm(
+    newVal
+      ? "Enable MFA enforcement? Admin and Operator accounts without MFA will enter a grace period."
+      : "Disable MFA enforcement? Admin and Operator accounts will only require a password to log in. Are you sure?"
+  )) return;
+
+  btn.disabled = true;
+  btn.textContent = "Saving...";
+  msg.style.display = "none";
+
+  try {
+    const res = await fetch("/api/config/save", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({MFA_REQUIRED: newVal})
+    }).then(r => r.json());
+
+    if (res.success) {
+      msg.textContent = res.message || "Saved. Services restarting...";
+      msg.style.background = "rgba(76,175,80,0.1)";
+      msg.style.border = "1px solid var(--ok)";
+      msg.style.color = "var(--ok)";
+      msg.style.display = "block";
+      // Page will reload after restart — show countdown
+      let secs = 8;
+      const iv = setInterval(() => {
+        secs--;
+        msg.textContent = (res.message || "Saved.") + ` Reloading in ${secs}s...`;
+        if (secs <= 0) { clearInterval(iv); window.location.reload(); }
+      }, 1000);
+    } else {
+      msg.textContent = res.message || "Save failed.";
+      msg.style.background = "rgba(244,67,54,0.1)";
+      msg.style.border = "1px solid var(--fail)";
+      msg.style.color = "var(--text-primary)";
+      msg.style.display = "block";
+      btn.disabled = false;
+      btn.textContent = current ? "Enabled" : "Disabled";
+    }
+  } catch (e) {
+    msg.textContent = "Request failed: " + e;
+    msg.style.display = "block";
+    btn.disabled = false;
+    btn.textContent = current ? "Enabled" : "Disabled";
+  }
+}
+
 // ── Collapsible sections ───────────────────────────────────────────────────────
 const STORAGE_KEY = 'nw-admin-collapsed';
 
@@ -698,30 +796,25 @@ async function doBuildRelease() {
   log.textContent = "Running build_release.sh — this may take 10–20 seconds...";
 
   try {
-    const desc    = document.getElementById("release-description").value.trim();
     const res = await fetch("/api/admin/build_release", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version: version, description: desc })
+      body: JSON.stringify({ version: version })
     }).then(r => r.json());
 
     log.textContent = res.output || "";
 
     if (res.status === "ok") {
       _releaseData = res;
-      // Lock inputs — rebuild requires Reset first
-      document.getElementById("release-version").disabled     = true;
-      document.getElementById("release-description").disabled = true;
-      document.getElementById("gen-notes-btn").disabled       = true;
-      document.getElementById("release-build-btn").disabled   = true;
-      document.getElementById("release-reset-btn").style.display = "inline-block";
       document.getElementById("release-result-version").textContent =
         `v${res.version}  ·  ${res.filename}`;
       document.getElementById("release-sha256").textContent = res.sha256;
       document.getElementById("release-download-link").href =
         "/api/admin/release_download?file=" + encodeURIComponent(res.filename);
 
-      // Description is already locked into _releaseData.description from the build POST
+      // Pre-fill description from input if set
+      const desc = document.getElementById("release-description").value.trim();
+      if (desc) _releaseData.description = desc;
 
       result.style.display = "block";
     } else {
@@ -737,40 +830,6 @@ async function doBuildRelease() {
   btn.textContent = "🔨 Build Release";
 }
 
-async function doResetRelease() {
-  if (!_releaseData || !_releaseData.zip_path) {
-    // Nothing built yet — just re-enable fields
-    _resetReleaseUI();
-    return;
-  }
-  try {
-    await fetch("/api/admin/discard_release", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({zip_path: _releaseData.zip_path}),
-    });
-  } catch (_) { /* non-fatal — zip may already be gone */ }
-  _resetReleaseUI();
-}
-
-function _resetReleaseUI() {
-  _releaseData = null;
-  // Re-enable all inputs
-  document.getElementById("release-version").disabled     = false;
-  document.getElementById("release-description").disabled = false;
-  document.getElementById("gen-notes-btn").disabled       = false;
-  document.getElementById("release-build-btn").disabled   = false;
-  document.getElementById("release-reset-btn").style.display = "none";
-  // Hide result / output / error panels
-  document.getElementById("release-result").style.display        = "none";
-  document.getElementById("release-build-output").style.display  = "none";
-  document.getElementById("release-publish-output").style.display= "none";
-  document.getElementById("release-error").style.display         = "none";
-  // Reset publish button text in case it was mid-flight
-  const pub = document.getElementById("release-publish-btn");
-  if (pub) pub.textContent = "🚀 Publish to GitHub";
-}
-
 async function doPublishRelease() {
   if (!_releaseData) return;
 
@@ -779,7 +838,7 @@ async function doPublishRelease() {
   const pubOut   = document.getElementById("release-publish-output");
   const errDiv   = document.getElementById("release-error");
 
-  const description = (_releaseData.description || "").trim()
+  const description = document.getElementById("release-description").value.trim()
     || `NetWatch v${_releaseData.version} release.`;
 
   btn.disabled = true;
