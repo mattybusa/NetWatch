@@ -151,6 +151,8 @@ section "Setting up directories"
 # Use sudo for mkdir in case a previous install left the directory owned by netwatch-svc
 sudo mkdir -p "$NETWATCH_DIR"/{logs,data,certs,static,templates,scripts}
 sudo mkdir -p "$HOME/backups"
+# Take ownership back so the rest of install runs as the installing user
+sudo chown -R "$INSTALL_USER:$INSTALL_USER" "$NETWATCH_DIR"
 # Backup scripts run as netwatch-svc -- give it write access to the backup dir
 sudo chown "$SVC_USER:$SVC_USER" "$HOME/backups"
 log "Directories created"
