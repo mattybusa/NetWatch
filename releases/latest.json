@@ -1,9 +1,9 @@
 {
-  "version": "3.4.12",
-  "description": "GitHub sync fix. Publishing a release now pushes the complete accumulated codebase to GitHub, not just the manifest file. GitHub's main branch will always reflect the full current codebase after a publish, ensuring that direct file downloads (such as install.sh) serve the correct version.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.12/netwatch-3.4.12.zip",
+  "version": "3.4.13",
+  "description": "Self-contained curl install. install.sh now works as a standalone download \u2014 when run via curl on a fresh Pi, it automatically downloads the full NetWatch codebase from the GitHub release and installs from it. No zip extraction or manual file setup required. Running from an extracted release zip continues to work as before.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.13/netwatch-3.4.13.zip",
   "changelog_url": "",
-  "package_sha256": "dde08c84ee86a2082a40624ac8c48fdc7736ec9dd789caadf7eb2d51be04ee2e",
+  "package_sha256": "07d05a62e833c20bc54c09361a2bf3c3829b3654768120a2c2dc762bf49db516",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
