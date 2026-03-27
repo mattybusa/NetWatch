@@ -1,0 +1,258 @@
+NETWATCH CHAT SUMMARY — SESSION 34
+====================================
+Date: 2026-03-26
+Starting version: v3.3.97 (context doc authoritative; zip label matched)
+Ending version: v3.4.9 (production); v3.4.6 (test Pi — on public release version)
+Summary: Update check infrastructure improvements, three bug fixes discovered from
+  test Pi feedback, release build and publish pipeline built end-to-end and validated,
+  first public release (v3.4.6) successfully installed on test Pi via update checker.
+
+SCOPE NOTE: This session covered 12+ distinct arcs across many packages. Expanded
+summaries produced for all major items.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+v3.3.98 — Check for Updates button on /admin/patch (see Feature_ReleaseAndDist.txt).
+  POST /api/update/check_now triggers immediate manifest poll from web service.
+  Reloads page if update found; updates last-checked timestamp if already current.
+  Visible only when UPDATE_CHECK_URL is configured.
+
+v3.3.99 — Fix check_now on production Pi (see Feature_ReleaseAndDist.txt).
+  requests library was imported locally inside the function with try/except ImportError.
+  On production Pi, requests was never installed (Pi predates install.sh). The module-
+  level import pattern from main.py (_requests = None fallback) was adopted. Root cause
+  confirmed: production Pi was hand-built before install.sh existed; requests was in
+  install.sh but never actually installed. Test Pi (fresh install.sh) had it correctly.
+  Manual fix on production: sudo -u netwatch-svc ~/netwatch/venv/bin/pip install requests.
+  GAP-9 added to SystemSetup.txt.
+
+v3.4.0 — SystemSetup.txt updated: GAP-9 documented (requests missing from production
+  venv), version bumped to 1.1. Doc-only package, no restart.
+
+v3.4.1 — Three fixes (see Feature_MinorFixesSession_34.txt):
+  (1) pkg_update.log excluded from code export zip — was transferring production log
+  history to other installs including test Pi.
+  (2) Git column in Package History hidden when git not configured — GIT_CONFIGURED
+  constant passed from route to template; header, cells, colspan, and pollGitStatus()
+  all gated on it.
+  (3) Gotchas.txt updated with BUILD SCRIPTS INVOKED BY WEB SERVICE entry.
+
+v3.4.2 — build_release.sh added to Pi (see Feature_ReleaseAndDist.txt).
+  Walks codebase, excludes dev_docs/config.py/runtime files, generates manifest.json
+  with replace action per file, includes MIGRATIONS.md and install.sh, outputs zip to
+  ~/backups/releases/, prints SHA-256. install.sh updated to exclude dev_docs/ and
+  build_release.sh from rsync on fresh installs.
+
+v3.4.3 — Release Manager card in Admin (see Feature_ReleaseAndDist.txt).
+  Replaces "Share NetWatch" card entirely. Only visible when DEVELOPMENT_SYSTEM=True
+  in config.py (ui_hidden key, never shown in Config Editor). Build Release button
+  runs build_release.sh via subprocess, shows log and SHA-256. Publish to GitHub
+  button creates GitHub Release via API, uploads zip asset, updates releases/latest.json,
+  commits and pushes to both Gitea and GitHub remotes. Old generate_distrib and
+  generate_update_pkg routes removed. DEVELOPMENT_SYSTEM config key added to
+  config_schema.py with ui_hidden=True.
+
+v3.4.4 — Fix Release Manager JS: stray closing brace in admin.html killed the script
+  block before doBuildRelease was defined. Caused "doBuildRelease is not defined"
+  uncaught ReferenceError. Web restart only.
+
+v3.4.5 — Fix build_release.sh output path: $HOME resolves to /nonexistent for
+  netwatch-svc. Changed RELEASES_DIR from $HOME/backups/releases to hardcoded
+  /home/mboynton/backups/releases. Also fixed release_download route in webapp.py
+  which used os.path.expanduser("~") — same problem.
+
+v3.4.6 — First public release published to GitHub via Release Manager.
+  (Note: v3.4.6 is the release zip version published publicly, not a separate
+  development package. Build and publish ran from the Release Manager UI.)
+
+v3.4.7 — Fix publish_release: handle already-exists GitHub release (422) by fetching
+  existing release instead of failing. Fix releases/latest.json ownership: chown to
+  netwatch-svc after write so future publishes don't hit Permission Denied.
+
+v3.4.8 — Fix build_release.sh manifest generation: bash heredoc does not expand
+  variables inside quoted delimiter (<<'PYEOF'). manifest.json was empty, causing
+  JSONDecodeError on the test Pi during install. Fixed by writing actions to a temp
+  file and passing it as a Python argv argument instead.
+
+v3.4.9 — Fix publish_release asset upload: existing asset with same filename causes
+  422. Now lists existing assets, deletes matching one, then uploads fresh.
+
+Test Pi installed v3.4.6 successfully via update checker (Download → Install).
+  Confirmed full end-to-end pipeline: monitor polls GitHub, Check Now finds update,
+  download verifies SHA-256, apply_migrations() runs (empty MIGRATIONS.md, no-op),
+  patcher installs full codebase, services restart. Skip-version confirmed: test Pi
+  jumped from v3.3.99 to v3.4.6 in one shot.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- v3.3.98 check_now returned "requests library not available" on production. Root
+  cause diagnosed incorrectly as an import failure — actual cause was requests
+  genuinely not installed in production venv (hand-built Pi, predates install.sh).
+  Module-level import fixed the pattern but not the underlying missing package;
+  manual pip install was the actual fix.
+
+- First attempt to save config.py with nano failed with "Permission denied" — file
+  owned by netwatch-svc. Used sudo tee -a instead.
+
+- Build Release button did nothing (v3.4.3): stray closing brace in admin.html JS
+  killed script block before doBuildRelease was defined. Fixed in v3.4.4.
+
+- build_release.sh wrote output to /nonexistent/backups/releases (v3.4.3): $HOME
+  for netwatch-svc. Fixed in v3.4.5 with hardcoded absolute path.
+
+- GitHub Publish returned 401 Bad Credentials (v3.4.3): remote URL format was
+  mattybusa:TOKEN@github.com — regex captured mattybusa:TOKEN as the entire PAT
+  instead of just TOKEN. Fixed regex in v3.4.6 to handle both formats.
+
+- releases/latest.json permission denied (v3.4.3): file was created manually by
+  mboynton in Session 32, owned by mboynton. netwatch-svc couldn't write it.
+  Manual chown fix applied; v3.4.7 adds chown after write for future runs.
+
+- GitHub Release 422 already_exists on Publish retry (v3.4.7): fixed to fetch
+  existing release instead of failing.
+
+- manifest.json was empty/invalid JSON on test Pi install (v3.4.8): bash heredoc
+  with quoted delimiter (<<'PYEOF') does not expand bash variables. MANIFEST_ACTIONS
+  was never interpolated. Fixed by writing to temp file and passing as Python argv.
+
+- GitHub asset upload 422 already_exists (v3.4.9): fixed by deleting existing asset
+  before uploading replacement.
+
+- Distribution/installer design discussion went too broad before testable foundation
+  existed. Pulled back to build_release.sh and end-to-end test first. Correct approach.
+
+
+DECISIONS MADE
+--------------
+- requests missing from production venv documented as GAP-9 in SystemSetup.txt.
+  Rule: any new server-side HTTP call should verify requests is in the production venv,
+  not just in install.sh.
+
+- DEVELOPMENT_SYSTEM config key: ui_hidden=True, set manually in config.py, never
+  shown in Config Editor. Release Manager only visible when True. Regular users never
+  see it.
+
+- "Share NetWatch" card removed entirely. The old generate_distrib and generate_update_pkg
+  routes were incompatible with the patcher-format release zip model and removed.
+
+- GitHub PAT scope: existing "repo" scope covers releases write. No PAT changes needed.
+
+- releases/latest.json ownership: file must be owned by netwatch-svc. Manual chown
+  applied in Session 34; v3.4.7 adds automatic chown after every write.
+
+- MIGRATIONS.md: cleared at v1.0.0 reset point since all 3.x.x entries are pre-public
+  and already baked into init_db() for fresh installs. Public users only ever upgrade
+  from v1.0.0+, so pre-1.0.0 migration entries are irrelevant and would cause incorrect
+  SQL application if left in.
+
+- Version reset to v1.0.0: deferred. Not ready yet — need more testing, install path
+  work, and documentation before declaring public release quality.
+
+- Test Pi left at v3.4.6 (public release version) deliberately. Future releases tested
+  against it via update checker. Do not install further development packages on test Pi.
+
+- Production only gets development packages going forward. Test Pi only gets public
+  releases via update checker.
+
+- Distributable installer approach: Option A (Imager advanced options + one curl command)
+  for first release. Cloud-init (Raspberry Pi OS Trixie, Nov 2025) is the modern path —
+  user copies user-data file to boot partition, Pi installs itself on first boot. No
+  Foundation involvement required. Design deferred to future session.
+
+- build_release.sh uses Python (passed via temp file) for manifest generation, not bash
+  heredocs. Shell heredocs with quoted delimiters do not expand variables.
+
+- End-of-session context doc at v3.4.9 reflects all session work.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] Test the full release flow cleanly from build_release.sh on production
+  after v3.4.9 install — all the fix iterations happened on v3.4.6 release artifacts.
+  v3.4.9 has not been end-to-end tested (Build → Publish → test Pi installs).
+
+- [PENDING] install.sh end-to-end fresh install test needs to be repeated with current
+  codebase. Test Pi was set up in Session 31 against v3.3.94. Many changes since then.
+
+- [PENDING] cloud-init / firstboot install path not yet designed or tested. The curl
+  pipe bash approach (Imager advanced options + one command) is the agreed first-release
+  installer. user-data file template not yet written.
+
+- [PENDING] Documentation: User PDF, Admin guide, Developer reference. Not started.
+
+- [PENDING] Security audit before public promotion. Attack surface review for package
+  installer, auth/session, physical/remote access.
+
+- [PENDING] Version reset to v1.0.0. Timing: after more testing, install path work,
+  and documentation. When reset happens: clear MIGRATIONS.md of all 3.x.x entries.
+
+- [PENDING] install.sh: does not include releases/ directory setup. Low priority —
+  update checker creates updates/ at download time, releases/ only needed for new
+  installs that reference the manifest (fetched from GitHub). Revisit with distributable.
+
+- [PENDING] Git setup documentation: power-user edge case for users who want to self-
+  develop a fork. Belongs in developer reference docs, not normal install flow. Section
+  1.9 of SystemSetup.txt is the current reference.
+
+- [PENDING] 9 PENDING DISCUSSION items in Audit_Findings.txt still unresolved.
+
+- [UNVERIFIED] Gotchas.txt was updated directly during session (dev session pattern).
+  Entries appended for: BUILD SCRIPTS INVOKED BY WEB SERVICE MUST USE ABSOLUTE PATHS.
+  Verify Gotchas.txt on Pi has this entry before next session.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Check for Updates button on /admin/patch (v3.3.98/v3.3.99)
+- requests library installed on production Pi — GAP-9 documented (manual fix)
+- pkg_update.log excluded from code export zip (v3.4.1)
+- Git column hidden when git not configured (v3.4.1)
+- build_release.sh: release zip builder on Pi (v3.4.2)
+- Release Manager: Build + Publish UI in Admin, gated on DEVELOPMENT_SYSTEM (v3.4.3)
+- "Share NetWatch" card removed (generate_distrib/generate_update_pkg routes removed)
+- First public release published: v3.4.6 live on GitHub
+- End-to-end update installer validated: test Pi v3.3.99 → v3.4.6 via update checker
+
+Added this session:
+- Install path testing: verify fresh install works with current codebase
+- cloud-init / firstboot install path design and implementation
+- Documentation (User PDF, Admin guide, Developer reference)
+- Security audit before public promotion
+- Version reset to v1.0.0 (deferred pending above)
+
+No change in status:
+- 9 PENDING DISCUSSION items in Audit_Findings.txt — still open
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_ReleaseAndDist.txt — Full detail on check_now button, build_release.sh,
+  Release Manager UI/routes, all publish failures and fixes, first public release.
+Feature_MinorFixesSession_34.txt — Three fixes: pkg_update.log export exclusion,
+  git column conditional rendering, GAP-9 SystemSetup.txt update.
+
+
+NEW GOTCHAS ADDED
+-----------------
+Appended directly to Gotchas.txt during session (dev session):
+- BUILD SCRIPTS INVOKED BY WEB SERVICE MUST USE ABSOLUTE PATHS, NOT $HOME (new) —
+  $HOME resolves to /nonexistent for netwatch-svc. Use hardcoded absolute paths or
+  paths derived from script location. Also applies to os.path.expanduser("~") in Python.
+
+Note: Gotchas.txt already had an entry for this pattern from Session 26 (venv python
+paths) — the new entry covers the output directory / $HOME variant specifically.
+
+
+CURRENT STATE
+-------------
+- Production Pi version: v3.4.9
+- Test Pi version: v3.4.6 (first public release — leave here for update testing)
+- First public release: v3.4.6 live at github.com/mattybusa/NetWatch
+- releases/latest.json: points to v3.4.6 zip on GitHub
+- DEVELOPMENT_SYSTEM=True active on production Pi (manually added to config.py)
+- Next task: install path testing (fresh Pi end-to-end), then cloud-init install
+  design, then documentation, then security audit, then v1.0.0 version reset.
+  No specific next package staged — next session starts with discussion of priorities.

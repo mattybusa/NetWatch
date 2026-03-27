@@ -1,59 +1,60 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-26 | Session 33 closed | v3.3.97
+Updated: 2026-03-26 | Session 34 closed | v3.4.9 (production) / v3.4.6 (test Pi)
 
-STATUS: Session 33 complete and closed out.
+STATUS: Session 34 complete and closed out.
 
-SESSION 33 SUMMARY
+SESSION 34 SUMMARY
 ------------------
-Two packages shipped:
+Check for Updates button, build_release.sh, Release Manager UI, first public release
+v3.4.6 published to GitHub and installed on test Pi via update checker. Many fix
+iterations on the publish pipeline — all resolved by end of session.
 
-v3.3.96 — Update Checker
-  Monitor service polls releases/latest.json daily (with 0-60min jitter).
-  system_settings DB table for inter-service state.
-  Dismissible notification banner in base.html (Admin + Operator).
-  Always shown on /admin/patch regardless of dismiss state.
-  UPDATE_CHECK_URL config key. system_update alert type added.
-  MIGRATIONS.md created at repo root (empty shell).
-
-v3.3.97 — Update Installer
-  parse_migrations() + apply_migrations() in patcher.py.
-  Skip-version upgrades supported (all intermediate SQL applied in order).
-  /api/update/download — fetches zip, verifies SHA-256, stores locally.
-  /api/update/install — applies migrations then patcher. Admin only.
-  Two-step UI in patch_manager.html with restart polling + rollback notice.
+KEY STATE
+---------
+- Production Pi: v3.4.9, DEVELOPMENT_SYSTEM=True in config.py
+- Test Pi (192.168.100.15): v3.4.6 (public release version — leave here)
+- GitHub: v3.4.6 release live, latest.json pointing to it
+- releases/latest.json: owned by netwatch-svc (fixed in v3.4.7)
+- build_release.sh: on Pi at ~/netwatch/build_release.sh
 
 NEXT SESSION
 ------------
-Primary candidates (no order decided — Matt to choose):
+Priority order (discuss with Matt at start):
 
-  1. Security audit
-     Review attack surface before any public promotion:
-     - Package installer / deployed files uploader (path traversal, code execution)
-     - Auth / session hardening
-     - Physical and remote access review
-     Goal: confidence before distributing to others.
+  1. Verify v3.4.9 release pipeline end-to-end
+     Build a fresh release zip (v3.4.9 or next version) via Release Manager,
+     publish it, confirm test Pi picks it up via Check for Updates and installs
+     cleanly. This validates all the Session 34 fixes work together.
 
-  2. Distributable installer design brief
-     PC-side application (netwatch-setup.exe concept):
-     - Handles Pi imaging, SD card pre-configuration
-     - SSH-based install initiation
-     - No SSH knowledge required from user
-     Design brief required before any code.
+  2. Fresh install testing
+     Test install.sh end-to-end on a blank Pi with current codebase. Last tested
+     at v3.3.94 (Session 31). Many changes since (dev_docs exclusion, build_release.sh
+     exclusion, requests in pip block, etc.). Must verify before calling it production
+     ready.
 
-  3. Documentation
-     User PDF, Admin guide PDF, Developer reference, Changelog PDF.
+  3. cloud-init / install path design
+     User wants zero-CLI install: Imager advanced options + user-data file on boot
+     partition triggers curl | bash automatically. Design the user-data template and
+     any install.sh changes needed for unattended operation. Test on real hardware.
 
-  4. mBase / architecture pending discussion items
-     9 PENDING DISCUSSION items in Audit_Findings.txt still unresolved.
-     Load all four mBase docs at session start if this is the chosen task.
+  4. Documentation
+     User PDF, Admin guide, Developer reference. Cannot be finalized until install
+     path is confirmed working.
+
+  5. Security audit
+     Attack surface review before public promotion. Package installer path traversal,
+     auth/session hardening, physical/remote access.
+
+  6. Version reset to v1.0.0
+     After above items are done. Clear MIGRATIONS.md of 3.x.x entries when cutting
+     v1.0.0. Both Pis get reset via Package Installer (manual upload, not update checker).
 
 NOTE
 ----
-MIGRATIONS.md rule going forward: whenever a session package includes a
-run_sql action, that SQL also goes into MIGRATIONS.md under the new version
-heading. This is now part of the development discipline.
+MIGRATIONS.md rule: whenever a session package includes a run_sql action, add the
+same SQL to MIGRATIONS.md under the new version heading before closeout.
 
-releases/ directory not yet in install.sh. Low priority — update checker
-creates updates/ dir at download time. Revisit when distributable installer
-is built.
+Test Pi is the update checker validator. Production-only packages go to production
+only. Public releases (via Release Manager) go to both Pis (test Pi via update checker,
+production via update checker or direct install).

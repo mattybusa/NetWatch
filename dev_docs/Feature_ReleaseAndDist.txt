@@ -1,0 +1,187 @@
+FEATURE: Release Build and Distribution Pipeline
+================================================
+Type: Feature
+Date: 2026-03-26
+Session: 34
+Outcome: Complete — end-to-end validated. First public release (v3.4.6) installed
+  on test Pi via update checker.
+
+
+BACKGROUND
+----------
+After the update checker (v3.3.96) and update installer (v3.3.97) were built in
+Session 33, the distribution story still had no way to produce a valid release zip,
+no UI for triggering a build, and no automation for publishing to GitHub. The
+releases/latest.json on GitHub had empty package_url and sha256. The test Pi
+couldn't receive any update because there was nothing to receive.
+
+This session built the complete pipeline:
+  1. Check Now button — for immediate testing without waiting 24h
+  2. build_release.sh — produces a valid patcher-format release zip on the Pi
+  3. Release Manager UI — triggers build and publish from within NetWatch
+  4. End-to-end validation — test Pi updated from v3.3.99 to v3.4.6
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+
+CHECK NOW BUTTON — requests import failure on production (v3.3.98):
+The initial implementation imported requests inside the function body with a local
+try/except ImportError. On production, this returned "requests library not available"
+because requests was genuinely not installed in the production venv. The Pi was
+hand-built before install.sh existed and requests was never installed despite being
+in the install.sh pip block. The module-level import (_requests = None pattern from
+main.py) was adopted in v3.3.99, making the failure visible at service startup
+rather than silently at call time. Manual pip install on production was the actual fix.
+GAP-9 added to SystemSetup.txt. The daily monitor update check had also been silently
+skipping since v3.3.96 for the same reason.
+
+RELEASE MANAGER — stray closing brace kills JS (v3.4.3 → v3.4.4):
+The str_replace that replaced the old doGenerateDistrib/doGenerateUpdate functions
+with the new Release Manager functions produced a stray closing brace just before
+the Release Manager section. This brace closed the enclosing script block early,
+making doBuildRelease undefined at runtime. Symptom: "doBuildRelease is not defined"
+uncaught ReferenceError. Fixed in v3.4.4 by removing the orphan brace.
+
+BUILD RELEASE — $HOME resolves to /nonexistent (v3.4.3 → v3.4.5):
+build_release.sh used RELEASES_DIR="$HOME/backups/releases". When invoked as a
+subprocess by the web service (running as netwatch-svc), $HOME=/nonexistent. mkdir
+failed with "Permission denied". Fixed in v3.4.5 by hardcoding the absolute path
+/home/mboynton/backups/releases. The release_download route in webapp.py had the
+same problem via os.path.expanduser("~") — also fixed in v3.4.5.
+
+PUBLISH — GitHub 401 Bad Credentials (v3.4.3 → v3.4.6):
+The regex to extract the PAT from the GitHub remote URL was:
+  r"https://([^@]+)@github\.com/..."
+The remote URL format was https://mattybusa:TOKEN@github.com/... so the regex
+captured "mattybusa:TOKEN" as the entire group, sending the wrong string as the
+Authorization header. Fixed regex to handle both formats:
+  r"https://(?:[^:@]+:)?([^@]+)@github\.com/..."
+which correctly extracts just the token portion regardless of whether a username
+prefix is present.
+
+PUBLISH — releases/latest.json Permission Denied (v3.4.3 → v3.4.7):
+releases/latest.json was created manually by mboynton in Session 32 and owned by
+mboynton. The web service running as netwatch-svc couldn't write it. Manual chown
+applied as a one-time fix. v3.4.7 adds os.chown() after every manifest write to
+ensure netwatch-svc ownership persists.
+
+PUBLISH — GitHub Release already exists 422 (v3.4.3 → v3.4.7):
+After the manifest permission fix, Publish was retried. GitHub returned 422 because
+the v3.4.6 release already existed from the partial earlier attempt. Fixed in v3.4.7
+to fetch the existing release via GET /repos/{owner}/{repo}/releases/tags/{tag}
+when a 422 is received on POST, then reuse the release_id and upload_url.
+
+BUILD RELEASE — manifest.json invalid JSON (v3.4.8):
+build_release.sh used a Python heredoc to generate manifest.json:
+  python3 - << PYEOF
+  actions_raw = """${MANIFEST_ACTIONS}"""
+  ...
+  PYEOF
+A quoted heredoc delimiter (<<'PYEOF' or <<PYEOF with variables) does not expand
+bash variables inside the script body. MANIFEST_ACTIONS was never interpolated —
+manifest.json was generated with an empty actions list or was completely empty.
+The test Pi's install attempt produced:
+  json.decoder.JSONDecodeError: Expecting ',' delimiter: line 71 column 5
+The fix: write MANIFEST_ACTIONS to a temp file ($WORK_DIR/_actions.txt) via
+printf, then pass the file path as sys.argv to the Python script. Python reads the
+file and parses the action lines. This is reliable and portable.
+
+PUBLISH — asset upload 422 already_exists (v3.4.9):
+After the manifest and release fixes, the asset upload failed because a zip was
+already attached to the v3.4.6 GitHub release from the partial earlier attempt.
+GitHub returns 422 if you try to upload an asset with the same filename. Fixed in
+v3.4.9 by listing existing assets, finding any with matching filename, deleting them
+via DELETE /repos/{owner}/{repo}/releases/assets/{id}, then uploading fresh.
+
+
+WHAT WORKED
+-----------
+
+CHECK NOW BUTTON (v3.3.98/v3.3.99):
+New route: POST /api/update/check_now (manage_admin permission).
+Runs the same manifest fetch/compare logic as main.py's _check_for_updates() but
+synchronously from the web service. Writes result to system_settings. Returns JSON
+with success, message, available_version, last_checked.
+Template: GET /admin/patch passes check_url_configured and last_checked to
+patch_manager.html. A button strip appears between the update card and upload zone
+when UPDATE_CHECK_URL is configured. On success with update found: reloads page
+(update card re-renders from server). On success already current: updates
+last-checked timestamp in place. On failure: shows error in red, re-enables button.
+webapp.py: requests imported at module level with _requests=None fallback (same
+pattern as main.py). check_now uses _requests directly.
+
+BUILD_RELEASE.SH (v3.4.2):
+Shell script living in ~/netwatch/build_release.sh. Run as netwatch-svc by the web
+service via subprocess. Usage: bash build_release.sh [version_override].
+- Walks NETWATCH_DIR with find, applies exclusion rules matching the export route:
+  EXCLUDE_DIRS: dev_docs venv certs __pycache__ snapshots logs data backups updates
+    themes .gnupg .git
+  EXCLUDE_FILES: config.py gunicorn.ctl pkg_update.log build_release.sh
+  EXCLUDE_PREFIXES: netwatch.db
+  EXCLUDE_EXTS: .pyc .bak .gpg .gz
+- Copies included files to a WORK_DIR temp directory preserving relative paths
+- Writes actions to $WORK_DIR/_actions.txt via printf
+- Python script (passed as heredoc, reads actions from argv file) generates
+  manifest.json using json.dump() — always produces valid JSON
+- Validates manifest.json with json.load() before proceeding
+- Zips WORK_DIR to ~/backups/releases/netwatch-VERSION.zip
+- Computes SHA-256 with sha256sum
+- Prints version, output path, size, SHA-256, and next-step instructions
+Output directory: /home/mboynton/backups/releases/ (absolute path, not $HOME)
+install.sh updated to exclude dev_docs/ and build_release.sh from rsync.
+
+RELEASE MANAGER UI (v3.4.3+):
+Admin page card, visible only when DEVELOPMENT_SYSTEM=True in config.py.
+DEVELOPMENT_SYSTEM: new config_schema.py entry, ui_hidden=True, type bool,
+default False. Never appears in Config Editor. Set manually in config.py.
+inject_user() context processor now includes is_dev_system boolean.
+Card layout: version input, description input, Build Release button, log area,
+result section (SHA-256, download link, Publish button), publish steps area,
+error area.
+
+Routes:
+- POST /api/admin/build_release (manage_users): runs build_release.sh via
+  subprocess.run(), captures stdout+stderr, parses SHA-256 and zip path from output
+  via regex, returns JSON with version/sha256/zip_path/filename/output.
+- POST /api/admin/publish_release (manage_users): extracts PAT/owner/repo from
+  github remote URL (handles both TOKEN@ and USERNAME:TOKEN@ formats); creates
+  GitHub Release (or fetches existing on 422); deletes existing asset if present;
+  uploads zip; updates releases/latest.json (chowns to netwatch-svc); commits and
+  pushes to both origin (Gitea) and github remotes.
+- GET /api/admin/release_download: serves zip from /home/mboynton/backups/releases/
+  (security: filename must start with "netwatch-" and end with ".zip", no "..")
+Old routes removed: generate_update_pkg, generate_distrib, distrib_download.
+Old JS functions removed: doGenerateDistrib(), doGenerateUpdate().
+New JS functions: doBuildRelease(), doPublishRelease().
+
+FIRST PUBLIC RELEASE (v3.4.6):
+GitHub Release: github.com/mattybusa/NetWatch/releases/tag/v3.4.6
+Asset: netwatch-3.4.6.zip
+SHA-256: b89f1946dcd07a372e000385634a473ad2670e6d32357d43b216ae57b3be5d3f
+releases/latest.json: live at raw.githubusercontent.com/mattybusa/NetWatch/main/
+  releases/latest.json, pointing to v3.4.6 asset.
+Test Pi update: v3.3.99 → v3.4.6 via Check Now → Download → Install. Confirmed
+working. apply_migrations() ran, found empty MIGRATIONS.md, no-op. Patcher applied
+full codebase. Services restarted. Version file updated to 3.4.6.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- v3.4.9 has not been end-to-end tested (build fresh zip → publish → test Pi
+  installs). All the fix iterations happened against the v3.4.6 artifacts. Should
+  be verified at the start of Session 35.
+
+- Publish sets min_version to "" in latest.json. Should eventually allow specifying
+  a minimum version that can upgrade (e.g. users on very old versions may need to
+  upgrade through an intermediate). Deferred — no users on any version yet.
+
+- build_release.sh output path is hardcoded to /home/mboynton/backups/releases.
+  For a truly distributable build system, this should be derived from the Pi's
+  actual home directory. Low priority — only runs on the development Pi.
+
+- Release Manager "description" field feeds directly into latest.json and the GitHub
+  Release body. No preview or formatting. Acceptable for now.
+
+- GitHub PAT needs "releases: write" scope (covered by "repo" scope). If PAT is
+  ever regenerated, ensure repo scope is included.

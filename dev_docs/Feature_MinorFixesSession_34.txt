@@ -1,0 +1,69 @@
+FEATURE: Minor Fixes — Session 34
+===================================
+Type: Feature (minor fixes consolidated)
+Date: 2026-03-26
+Session: 34
+Outcome: Complete
+
+
+ARC: pkg_update.log Export Exclusion (v3.4.1)
+----------------------------------------------
+BACKGROUND:
+pkg_update.log is a runtime log file on the Pi that records apt update history.
+It was being picked up by the os.walk in admin_export_code_full() and included in
+the code export zip. When the test Pi was set up using a code export from production,
+it inherited production's pkg_update.log, showing update history from before the
+test Pi even existed.
+
+WHAT WORKED:
+Added "pkg_update.log" to EXCLUDE_FILES in admin_export_code_full() in webapp.py,
+alongside "config.py" and "gunicorn.ctl". Comment added: "runtime log — Pi-specific,
+should not transfer to other installs". The file is not in EXCLUDE_DIRS because it
+lives at the NETWATCH_DIR root, not in a subdirectory.
+
+Note: build_release.sh also excludes pkg_update.log via its own EXCLUDE_FILES list,
+so release zips are also clean.
+
+
+ARC: Git Column Conditional Rendering (v3.4.1)
+-----------------------------------------------
+BACKGROUND:
+The Package History table in patch_manager.html always showed a "Git" column header
+and git push status cells regardless of whether git was configured on the Pi. The
+test Pi (fresh install, no git initialized) showed the column with "·" dots in every
+row, which was confusing.
+
+The _is_git_configured() check in patcher.py correctly suppresses git push operations
+when git isn't set up, but this was never surfaced to the template.
+
+WHAT WORKED:
+webapp.py: patch_manager route now calls patcher.get_git_configured() and passes
+result as git_configured to the template.
+
+patch_manager.html:
+- GIT_CONFIGURED constant added at top of script block:
+    const GIT_CONFIGURED = {{ 'true' if git_configured else 'false' }};
+- Table header: {% if git_configured %}<th>Git</th>{% endif %}
+- loadHistory() JS: gitCell is empty string when !GIT_CONFIGURED; colspan on
+  empty-state row uses GIT_CONFIGURED ? 8 : 7
+- pollGitStatus() call after install: guarded with if (GIT_CONFIGURED)
+
+Result: test Pi shows a clean 7-column table with no git column. Production Pi
+(git configured) unchanged.
+
+
+ARC: SystemSetup.txt GAP-9 Documentation (v3.4.0)
+---------------------------------------------------
+BACKGROUND:
+The production Pi was hand-built before install.sh existed. requests was in the
+install.sh pip block but was never actually installed on production. This was only
+discovered when the Check for Updates button returned "requests library not available".
+The monitor's daily update check had also been silently skipping since v3.3.96.
+
+WHAT WORKED:
+SystemSetup.txt Section 1.4 updated with a MANUAL-ONCE entry documenting the
+manual pip install of requests on production at v3.3.99 and the reason it was
+needed. Section 4 updated with GAP-9 entry documenting the issue, root cause,
+fix, and lesson: "any new server-side HTTP call should check that requests is
+actually present in the production venv, not just in install.sh." Version bumped
+to 1.1. Shipped as doc-only package v3.4.0.
