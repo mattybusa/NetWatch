@@ -1,9 +1,9 @@
 {
-  "version": "3.4.26",
-  "description": "- v3.4.24: Release description generator now formats entries as a Markdown bullet list so GitHub renders them as separate lines.- v3.4.25: Remove unused Install Another Package button from Package Installer post-apply view.- v3.4.26: Fix email header emoji: replace satellite \ud83d\udce1 with WiFi arcs \ud83d\udedc in alert email template.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.26/netwatch-3.4.26.zip",
+  "version": "3.4.28",
+  "description": "- v3.4.27: Fix release description bullet list formatting: switched description field from single-line input to textarea so newlines are preserved when submitting to GitHub.\n- v3.4.28: Migration test package 1 of 2: adds _test_col_1 to system_settings table to verify skip-version migration behavior.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.28/netwatch-3.4.28.zip",
   "changelog_url": "",
-  "package_sha256": "049b9dee0af7cbf9a9c4d860099d38f353af16c7a38f9cd1e32812b55f8aa781",
+  "package_sha256": "1a9092122d6a1cd82304bed6e80cf5a7d314ac462b852cbcef82ea2eb611b578",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
