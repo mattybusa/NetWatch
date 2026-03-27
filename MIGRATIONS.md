@@ -27,4 +27,5 @@ prior version and no migrations to reconstruct.
 
 <!-- Entries begin below this line. Oldest at bottom, newest at top. -->
 
-<!-- No public release versions yet. First entry goes here when v1.0 ships. -->
+## 3.4.30
+ALTER TABLE system_settings ADD COLUMN _test_col_1 TEXT DEFAULT NULL
