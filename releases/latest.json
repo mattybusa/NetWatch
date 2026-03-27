@@ -1,9 +1,9 @@
 {
-  "version": "3.4.6",
-  "description": "NetWatch v3.4.6 \u2014 update checker, release manager, and install improvements",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.6/netwatch-3.4.6.zip",
+  "version": "3.4.9",
+  "description": "Update checker and release pipeline complete. This release adds the ability to check for and install NetWatch updates directly from the Admin panel. The monitor polls GitHub daily for new versions; the Admin \u2192 Package Installer page shows a notification when an update is available with a one-click Download and Install flow. SHA-256 verification ensures the downloaded package is authentic. Also includes the Release Manager for development systems, fixes for the update check on hand-built installs, and several infrastructure improvements.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.9/netwatch-3.4.9.zip",
   "changelog_url": "",
-  "package_sha256": "385d146fac538374d2fb09d35c4e8b8266ae466951a0d4719c3fa84dfba245c6",
+  "package_sha256": "b88e735cd0fcacb83413f2ca06096ed96e2d802d21c2939e2b5fc8b005fed65d",
   "min_version": "",
   "critical": false,
   "released": "2026-03-26"
