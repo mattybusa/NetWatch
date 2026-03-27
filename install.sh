@@ -148,8 +148,9 @@ log "Home directory set to 751 for service account traversal"
 
 # = NetWatch directory ==================
 section "Setting up directories"
-mkdir -p "$NETWATCH_DIR"/{logs,data,certs,static,templates,scripts}
-mkdir -p "$HOME/backups"
+# Use sudo for mkdir in case a previous install left the directory owned by netwatch-svc
+sudo mkdir -p "$NETWATCH_DIR"/{logs,data,certs,static,templates,scripts}
+sudo mkdir -p "$HOME/backups"
 # Backup scripts run as netwatch-svc -- give it write access to the backup dir
 sudo chown "$SVC_USER:$SVC_USER" "$HOME/backups"
 log "Directories created"
