@@ -1,9 +1,9 @@
 {
-  "version": "3.4.20",
-  "description": "Hide dev-only UI on standard installations. Deployed Files and Developer Tools (Download Current Code) are no longer shown when DEVELOPMENT_SYSTEM is false. Export Data retains CSV exports for all users. No functional changes to non-admin pages.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.20/netwatch-3.4.20.zip",
+  "version": "3.4.23",
+  "description": "v3.4.21: Release description auto-generation: new Generate button in Release Manager pre-populates the description field with changelog entries since the last published release, formatted as v{version}: {description} per line.v3.4.22: Fix Release Manager layout shift when generate hint appears: hint div now holds its space at all times using visibility instead of display, preventing the row from jumping.v3.4.23: Fix Release Manager row alignment: version column and Build button now have matching padding-bottom to compensate for the hint div height, keeping all three columns level.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.23/netwatch-3.4.23.zip",
   "changelog_url": "",
-  "package_sha256": "74c32a6b0d6ec84f57ed0f14194bb290d7b5d44d6643c068d9649261751ad502",
+  "package_sha256": "f1df376413c9ae43d01112f41cac98fcd40a9fb74c2a04dffd9648bf968deabc",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
