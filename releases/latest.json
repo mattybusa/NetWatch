@@ -1,9 +1,9 @@
 {
-  "version": "3.4.33",
-  "description": "- v3.4.32: Clean up MIGRATIONS.md after skip-version migration test: remove test entries for _test_col_1 and _test_col_2. Test columns remain in DB as harmless artifacts (SQLite DROP COLUMN requires 3.35+).\n- v3.4.33: Release Manager now updates GitHub Wiki Changelog.md on publish: prepends a new entry with version, date, and release description. Non-fatal \u2014 wiki failure does not block the release.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.33/netwatch-3.4.33.zip",
+  "version": "3.4.34",
+  "description": "- v3.4.34: Release Manager: lock fields after build, Reset button to discard and rebuild, description embedded in release zip manifest.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.34/netwatch-3.4.34.zip",
   "changelog_url": "",
-  "package_sha256": "319c47930d714bb424329d101d9a15392477fec3b2fa19a1bf2dd68e535dd59a",
+  "package_sha256": "3eb0aa0382697fc4e47d474e9a08f140ba3c965f6f199e1ed48f0641acd2b80d",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
