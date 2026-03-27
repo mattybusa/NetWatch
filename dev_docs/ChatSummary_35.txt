@@ -1,0 +1,178 @@
+NETWATCH CHAT SUMMARY — SESSION 35
+====================================
+Date: 2026-03-27
+Starting version: v3.4.9 (production) / v3.4.6 (test Pi)
+Ending version: v3.4.18 (production) / v3.4.18 pending install (test Pi)
+Session focus: Release pipeline validation, fresh install testing, and a large
+  install.sh overhaul covering dynamic package resolution, self-contained curl
+  install, GitHub sync fix, and wizard network improvements.
+
+SCOPE NOTE: This session covered 9 distinct arcs across 12 packages (v3.4.10–
+  v3.4.18). Expanded summaries produced for the two largest arcs. Several arcs
+  are minor fixes consolidated in Feature_MinorFixesSession_35.txt.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+ARC 1 — v3.4.9 release pipeline end-to-end validation
+  Built fresh release zip via Release Manager, published to GitHub, test Pi
+  (v3.4.6) installed v3.4.9 via update checker. Full pipeline confirmed working.
+  (See Feature_MinorFixesSession_35.txt — ARC: Pipeline Validation)
+
+ARC 2 — Fresh install testing (v3.4.10–v3.4.16)
+  Ran install.sh via curl on fresh Trixie test Pi. Uncovered and fixed a cascade
+  of install failures across 7 packages. Full detail in Feature_FreshInstall_35.txt.
+
+  Key fixes shipped:
+  - v3.4.10: libgpiod2 → libgpiod3 for Trixie; separated speedtest-cli fallback
+  - v3.4.11: Dynamic libgpiod resolution via Debian archive API (api.ftp-master.
+    debian.org/madison) — source package name is stable anchor, binary name
+    resolved at install time. log() calls redirected to stderr (first attempt
+    had them polluting the variable capture).
+  - v3.4.12: publish_release GitHub sync fix — was only committing latest.json,
+    leaving accumulated patcher commits unpushed to GitHub. Now pushes all
+    commits unconditionally.
+  - v3.4.13: install.sh self-contained curl install — detects if running
+    standalone, downloads release zip from GitHub via latest.json manifest,
+    extracts and installs from it. Falls back to local files if codebase present.
+  - v3.4.14: sudo mkdir -p for netwatch directory — re-runs failed when previous
+    attempt left directory owned by netwatch-svc.
+  - v3.4.15: chown -R back to installing user after mkdir — venv creation failed
+    on re-runs for same ownership reason.
+  - v3.4.16: wlan0 IP append in cert generation used sudo -u netwatch-svc tee on
+    a file owned by installing user — changed to plain echo append.
+  - Fresh install confirmed successful end-to-end (v3.4.16).
+
+ARC 3 — Setup wizard: interface fields + auto-detection (v3.4.17)
+  Wizard never asked for LAN_INTERFACE or WIFI_INTERFACE — those config values
+  stayed blank. Added interface fields to Step 1. Added /api/setup/interfaces
+  route that runs `ip -o addr show` and returns active interfaces. Wizard calls
+  this on page load and pre-populates eth0/wlan0 fields. Interface values saved
+  to config.py via setup_apply. Review summary shows interface values.
+  (See Feature_FreshInstall_35.txt for full detail)
+
+ARC 4 — Setup wizard: simple network WiFi monitoring fix (v3.4.18)
+  On simple network, WIFI_GATEWAY was sent as empty string — WiFi check skipped
+  entirely (wifi_ok = None). Confirmed network.py uses `ping -I <iface>` to force
+  traffic through specific interface. Fixed wizard payload: on simple network,
+  wifi_gateway is set to lan_gateway value (same IP, different interface). Only
+  set if wifi_interface is configured — avoids unbound WiFi check with no
+  interface. Review summary updated to show whether WiFi will be monitored.
+  (See Feature_MinorFixesSession_35.txt — ARC: WiFi Simple Network Fix)
+
+
+DESIGN DISCUSSION — Self-healing package dependency system
+  Extended discussion about making install.sh resilient to future package renames.
+  Considered: try/fallback, distro detection, pip-only, CI testing, OS pinning.
+  Investigated: Debian Package Tracker API (no machine-readable successor endpoint),
+  apt-cache Replaces: field (not reliably populated), Madison API
+  (api.ftp-master.debian.org/madison — confirmed working JSON API).
+  
+  Key insight: source package name (e.g. "libgpiod") is stable across renames.
+  Binary name (libgpiod2 → libgpiod3) changes. Query API at install time using
+  source name, filter to "stable" suite, match binary pattern. Authoritative,
+  no fuzzy matching, no external dependency beyond curl.
+  
+  Final design: dynamic resolution in install.sh only. No database table, no
+  canary, no release builder integration. Loud failure if API unreachable.
+  Implemented in v3.4.11.
+
+DESIGN DISCUSSION — GitHub sync strategy
+  Discovered publish_release only committed latest.json and pushed that one commit
+  to GitHub. Patcher auto-commits to Gitea after every install but never to GitHub.
+  Result: GitHub main branch was a patchwork of files from different points in time.
+  Fix: push all accumulated commits unconditionally on publish. Git handles the diff
+  — sends everything GitHub hasn't seen since last push. Fixed v3.4.12.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- Dynamic package resolution (v3.4.11 first attempt): log() calls inside
+  resolve_debian_package() went to stdout, polluting LIBGPIOD_PKG variable with
+  log timestamp + package name. Fixed by redirecting log calls to stderr.
+- GitHub sync (v3.4.12 first attempt): tried git add -A + commit before push.
+  If nothing new to commit (patcher already committed everything), git exits 1,
+  check=True raises exception, push never happened. Fixed by checking git status
+  first and only committing if staged changes exist, then pushing unconditionally.
+- Debian Package Tracker REST API: returns 404. Not a machine-readable API.
+  sources.debian.org API exists but is for source browsing, not binary successor
+  lookups. Madison API (confirmed working) was the right tool.
+
+
+DECISIONS MADE
+--------------
+- Dynamic package resolution: query api.ftp-master.debian.org/madison at install
+  time using source package name. No hardcoded binary names for unstable packages.
+  Only libgpiod currently flagged as unstable — python3-lgpio and all others are
+  stable Debian names.
+- GitHub main branch strategy: publish_release pushes all accumulated patcher
+  commits to GitHub. GitHub stays current only at publish time, not after every
+  install. This is correct and expected behavior.
+- install.sh curl approach: self-contained — downloads its own codebase from
+  the GitHub release zip. No manual zip extraction required by user.
+- Simple network WiFi monitoring: WIFI_GATEWAY set to LAN_GATEWAY in config,
+  checked via WIFI_INTERFACE independently from LAN check. WiFi check only
+  activated if wifi_interface field is populated in wizard.
+- Canary / database tracking for package names: decided against. Installer is
+  fully dynamic — no tracking needed. Loud failure is sufficient safety net.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None this session — all lessons were operational (log to stderr in bash variable
+capture, git commit exit code on nothing-to-commit) and are documented in the
+expanded summaries rather than Gotchas.txt as they are install.sh / publish
+route specific rather than general NetWatch patterns.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] Fresh install test with v3.4.18 not yet run — wizard changes not
+  verified on a clean Pi end-to-end. Interface auto-detection behavior unverified.
+- [PENDING] Release description auto-generation from package changelog — discussed
+  but not implemented this session (session closed before reaching it).
+- [PENDING] Security audit before public promotion.
+- [PENDING] Version reset to v1.0.0.
+- [PENDING] Documentation (User PDF, Admin guide, Developer reference).
+- [PENDING] cloud-init / firstboot install path.
+- [PENDING] 9 PENDING DISCUSSION items in Audit_Findings.txt still open.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- v3.4.9 release pipeline end-to-end validation
+- Fresh install testing and fixes (v3.4.10–v3.4.16)
+- Self-healing dynamic package resolution in install.sh
+- GitHub main branch sync fix in publish_release
+- Setup wizard interface fields + auto-detection (v3.4.17)
+- Simple network WiFi monitoring fix (v3.4.18)
+
+Added this session:
+- Release description auto-generation from package changelog (discussed, deferred)
+- Fresh install re-test needed with v3.4.18 (wizard changes unverified)
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_FreshInstall_35.txt — Full detail on fresh install arc: all failures,
+  fixes, dynamic package resolution design discussion, self-contained curl
+  install, wizard interface fields and auto-detection.
+Feature_MinorFixesSession_35.txt — Pipeline validation, WiFi simple network
+  monitoring fix.
+
+
+CURRENT STATE
+-------------
+- Production Pi: v3.4.18
+- Test Pi: v3.4.16 (last successful fresh install — v3.4.17/18 not yet installed
+  via update checker)
+- GitHub: v3.4.16 is current public release (v3.4.18 not yet published)
+- Next session priority order:
+  1. Publish v3.4.18 as public release
+  2. Fresh install test with v3.4.18 (verify wizard interface auto-detection)
+  3. Release description auto-generation from package changelog
+  4. Security audit
+  5. Documentation
+  6. Version reset to v1.0.0

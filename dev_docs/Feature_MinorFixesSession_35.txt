@@ -1,0 +1,52 @@
+FEATURE: Minor Fixes — Session 35
+===================================
+Type: Minor fixes (consolidated)
+Date: 2026-03-27
+Sessions: Session 35
+Outcome: Complete
+
+
+ARC: Pipeline Validation (v3.4.9)
+-----------------------------------
+BACKGROUND
+  First clean end-to-end test of the full release pipeline after all Session 34
+  fixes. v3.4.9 was the production version but had never been tested as a public
+  release end-to-end (all Session 34 fixes happened during v3.4.6 release artifacts).
+
+WHAT WORKED
+  Built fresh release zip via Release Manager on production. Published to GitHub.
+  Test Pi (v3.4.6) picked up v3.4.9 via Check for Updates, downloaded, verified
+  SHA-256, installed cleanly. Services restarted. Full pipeline confirmed working
+  with all Session 34 fixes in place.
+
+
+ARC: WiFi Simple Network Fix (v3.4.18)
+----------------------------------------
+BACKGROUND
+  On simple network selection in the setup wizard, wifi_gateway was sent as empty
+  string. network.py check_network() skips WiFi check entirely when WIFI_GATEWAY
+  is blank (wifi_ok = None). This meant a disconnected WiFi interface was never
+  detected — the system appeared healthy even if wlan0 was down.
+
+  Confirmed network.py correctly uses ping -I <interface> to force traffic through
+  a specific interface (line 91: cmd appends "-I", interface when interface set).
+  So the monitoring logic is correct — the problem was the wizard not setting
+  WIFI_GATEWAY on simple networks.
+
+WHAT WORKED
+  setup.html applyConfig() payload now computes wifi_gateway as:
+  - Simple network + wifi_interface set: wifi_gateway = lan_gateway value
+    (same IP, different physical interface — independently verified)
+  - Simple network + wifi_interface blank: wifi_gateway = "" (skip, same as before)
+  - Advanced network: wifi_gateway = wifi-gateway field value
+
+  Review summary updated: shows "Same as LAN — checked via WiFi interface" or
+  "Same as LAN — WiFi interface not set, check skipped" depending on configuration.
+
+  This ensures on a typical home network, both eth0 → gateway and wlan0 → gateway
+  are independently verified. If wlan0 goes down, wifi_ok goes false while lan_ok
+  remains true — correctly reported as a partial failure.
+
+KNOWN LIMITATIONS
+  Not verified on a live Pi — session closed before fresh install test with v3.4.18.
+  The logic is correct but end-to-end behavior unconfirmed.

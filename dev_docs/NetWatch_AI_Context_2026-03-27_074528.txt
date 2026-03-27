@@ -747,23 +747,7 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   CONFIRMED Session 34.
 - ✅ pkg_update.log excluded from code export zip (v3.4.1, Session 34).
 - ✅ Git column in Package History hidden when git not configured (v3.4.1, Session 34).
-- ✅ v3.4.9 release pipeline end-to-end validated (Session 35).
-- ✅ install.sh: dynamic package resolution via Debian archive API — libgpiod binary
-  name resolved at install time from source package. Survives future Debian renames.
-  SHIPPED v3.4.11 (Session 35).
-- ✅ publish_release: GitHub sync fix — all accumulated patcher commits now pushed
-  to GitHub on every publish. GitHub main branch stays current. SHIPPED v3.4.12 (Session 35).
-- ✅ install.sh: self-contained curl install — downloads release zip from GitHub
-  automatically when run standalone. SHIPPED v3.4.13 (Session 35).
-- ✅ install.sh: re-run resilience fixes (sudo mkdir, ownership restore, wlan0
-  cert append). SHIPPED v3.4.14–v3.4.16 (Session 35).
-- ✅ Setup wizard: LAN_INTERFACE/WIFI_INTERFACE fields with auto-detection via
-  /api/setup/interfaces. SHIPPED v3.4.17 (Session 35).
-- ✅ Setup wizard: simple network WiFi monitoring — WIFI_GATEWAY set to LAN_GATEWAY
-  and checked via WiFi interface independently. SHIPPED v3.4.18 (Session 35).
-- Publish v3.4.18 as public release (not yet done — session closed first)
-- Fresh install re-test with v3.4.18 (wizard changes unverified on clean Pi)
-- Release description auto-generation from package changelog (discussed, deferred)
+- Verify v3.4.9 release pipeline end-to-end (build fresh zip, publish, test Pi installs)
 - Fresh install testing with current codebase (last tested v3.3.94, Session 31)
 - cloud-init / firstboot install path (user-data template, unattended install.sh)
 - Security audit before public promotion

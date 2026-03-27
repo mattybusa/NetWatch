@@ -1,0 +1,134 @@
+FEATURE: Fresh Install Testing & install.sh Overhaul
+======================================================
+Type: Feature / Bug fixes
+Date: 2026-03-27
+Sessions: Session 35
+Outcome: Complete (v3.4.10–v3.4.16 install fixes, v3.4.17 wizard improvements)
+
+
+BACKGROUND
+----------
+Last fresh install test was Session 31 against v3.3.94. Many changes since then.
+Test Pi was reflashed with Trixie (Debian 13) and install.sh run via curl. A
+cascade of failures uncovered and fixed across 7 packages. Additionally, the
+setup wizard was found to be missing interface configuration fields entirely.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+
+libgpiod package name (v3.4.10 first attempt):
+  install.sh had libgpiod2 hardcoded. Trixie renamed it to libgpiod3. The apt
+  block had 2>/dev/null piped to a speedtest-cli fallback — entire apt block
+  failed silently when libgpiod2 wasn't found, only speedtest-cli installed.
+  Fix: separate speedtest-cli into its own fallback apt call, change libgpiod2
+  to libgpiod3.
+
+Dynamic resolution log to stdout (v3.4.11 first attempt):
+  resolve_debian_package() used log() calls without >&2. When LIBGPIOD_PKG=$(...)
+  captured the function's output, it captured both the log message and the package
+  name. apt received "[01:18:04] Resolved libgpiod → libgpiod3\nlibgpiod3" as the
+  package name — E: Unable to locate package. Fix: redirect all log() calls inside
+  the function to stderr with >&2.
+
+GitHub sync (v3.4.12 first attempt):
+  Changed publish_release to git add -A then commit then push. If patcher had
+  already committed everything, git commit found nothing staged, exited 1,
+  check=True raised CalledProcessError, push never ran. Fix: check git status
+  --porcelain first, only commit if staged changes exist, push unconditionally.
+
+install.sh standalone (v3.4.13):
+  When run via curl, install.sh was the only file present. rsync from SCRIPT_DIR
+  found no NetWatch files — only install.sh itself. database.py never copied to
+  NETWATCH_DIR. Database init failed with ModuleNotFoundError.
+
+Directory ownership on re-runs (v3.4.14, v3.4.15):
+  Previous failed installs left NETWATCH_DIR owned by netwatch-svc. Re-run as
+  nwadmin: mkdir -p failed (Permission denied). Fix: sudo mkdir -p.
+  Then venv creation failed same reason. Fix: chown -R back to installing user
+  after mkdir, before venv creation.
+
+TLS cert wlan0 append (v3.4.16):
+  EXT_FILE created by mktemp as nwadmin. Code did:
+    echo "IP.3 = $WLAN_IP" | sudo -u netwatch-svc tee -a "$EXT_FILE"
+  netwatch-svc can't write to a file owned by nwadmin. Fix: plain echo append
+  as installing user — no sudo -u needed.
+
+Debian Package Tracker API:
+  Investigated tracker.debian.org/api/package/X — returns 404. Not a REST API.
+  sources.debian.org has an API but for source code browsing, not binary successor
+  lookups. Madison API (api.ftp-master.debian.org/madison) was the correct tool —
+  confirmed returning full JSON with suite-by-suite binary package listings.
+
+apt-cache Replaces: metadata:
+  Investigated whether libgpiod3 declares Replaces: libgpiod2 in its metadata.
+  apt-cache show libgpiod3 returned nothing for Replaces/Provides fields. Not
+  reliably populated by maintainers. Cannot be used as verification mechanism.
+
+
+WHAT WORKED
+-----------
+
+Dynamic package resolution (v3.4.11):
+  resolve_debian_package() function in install.sh:
+  - Takes source package name, binary pattern (regex), and fallback name
+  - Queries api.ftp-master.debian.org/madison?package=SOURCE&f=json&S=true
+  - Python one-liner parses JSON, finds binary matching pattern in "stable" suite
+  - Returns package name; falls back to hardcoded name if API unreachable
+  - log() calls use >&2 so stdout only contains the package name
+  - LIBGPIOD_PKG=$(resolve_debian_package "libgpiod" "^libgpiod[0-9]+$" "libgpiod3")
+  - Currently only libgpiod uses this — all other packages are stable Debian names
+
+GitHub sync fix (v3.4.12):
+  publish_release route in webapp.py:
+  - git add releases/latest.json (only stage the manifest update)
+  - Check git status --porcelain — only commit if staged changes exist
+  - git push origin main — pushes all accumulated patcher commits to Gitea
+  - git push github main — pushes all accumulated commits to GitHub
+  Key insight: patcher commits to Gitea after every install. GitHub only gets
+  pushed at publish time. git push sends everything the remote hasn't seen —
+  no need to make a new commit just to trigger the push.
+
+Self-contained curl install (v3.4.13):
+  install.sh detects if running standalone by checking for database.py alongside
+  itself. If not found:
+  - Fetches releases/latest.json from GitHub raw URL
+  - Extracts package_url from JSON via python3 one-liner
+  - Downloads release zip with curl -fL
+  - Extracts to TEMP_DIR with unzip
+  - Sets SOURCE_DIR to extracted path
+  - rsync proceeds from SOURCE_DIR instead of SCRIPT_DIR
+  - TEMP_DIR cleaned up via trap EXIT
+  Falls back to local files if codebase present (zip install path still works).
+
+Setup wizard interface fields (v3.4.17):
+  New route: GET /api/setup/interfaces
+  - Runs `ip -o addr show`, parses output
+  - Returns list of {name, ip} for all IPv4 interfaces except loopback
+  - Called from wizard JS on page load via async IIFE
+  - Finds first eth*/en* interface → pre-populates lan-interface field
+  - Finds first wlan*/wl* interface → pre-populates wifi-interface field
+  - Shows "Interfaces auto-detected" notice if any found
+
+  setup.html Step 1 changes:
+  - Added Wired Interface and WiFi Interface fields (f-row pair)
+  - Both optional with clear hint text
+  - Detection notice shown when pre-populated
+
+  setup_apply changes in webapp.py:
+  - LAN_INTERFACE and WIFI_INTERFACE now read from payload and written to config.py
+  - Both default to "" if not provided
+
+  Review summary updated to show Wired Interface and WiFi Interface values.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- Fresh install with v3.4.18 not verified — session closed before re-test
+- resolve_debian_package() only used for libgpiod — if other packages rename,
+  they fail loudly (which is the intended behavior — loud failure is the signal)
+- Interface auto-detection: if Pi has unusual interface names (not eth*/wlan*
+  prefixes), detection silently skips them and fields stay blank for manual entry
+- Wizard WiFi monitoring (v3.4.18): only activates if wifi_interface is populated.
+  If user clears the auto-detected value, WiFi check is disabled. This is correct
+  behavior but not explicitly communicated in the wizard UI.
