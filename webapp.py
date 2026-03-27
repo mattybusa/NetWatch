@@ -2811,15 +2811,23 @@ def admin_publish_release():
         return jsonify({"status": "error", "message": f"Manifest update error: {e}",
                         "steps": steps}), 500
 
-    # -- Step 4: Commit and push to both remotes ------------------------------
+    # -- Step 4: Commit latest.json and push everything to both remotes -------
+    # patcher.py commits and pushes to Gitea (origin) on every install but never
+    # pushes to GitHub. All those commits are in git history but GitHub has never
+    # seen them. We commit latest.json, then push ALL commits to both remotes so
+    # GitHub main branch is fully in sync, not just the most recent change.
     git = ["git", "-C", NETWATCH_DIR]
     try:
         subprocess.run([*git, "add", "releases/latest.json"],
                        check=True, capture_output=True, timeout=15)
-        subprocess.run([*git, "commit", "-m",
-                        f"{tag}: publish release — update latest.json"],
-                       check=True, capture_output=True, timeout=15)
-        steps.append("✓ Committed releases/latest.json")
+        # Only commit if latest.json actually changed
+        status = subprocess.run([*git, "status", "--porcelain"],
+                                check=True, capture_output=True, timeout=15)
+        if status.stdout.strip():
+            subprocess.run([*git, "commit", "-m",
+                            f"{tag}: publish release — update latest.json"],
+                           check=True, capture_output=True, timeout=15)
+            steps.append("✓ Committed releases/latest.json")
 
         subprocess.run([*git, "push", "origin", "main"],
                        check=True, capture_output=True, timeout=60)
