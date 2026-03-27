@@ -815,3 +815,23 @@ This is in the process doc packaging rules but worth repeating: never zip withou
 first confirming the output file does not already exist.
 
 ---
+
+2026-03-27 | Session 36
+PACKAGES WITH run_sql MUST ALSO REPLACE MIGRATIONS.md ON DISK
+When a package includes a run_sql action, it must also include a replace action
+for MIGRATIONS.md with the new entry added. Without the replace action, patcher
+executes the SQL against the local DB but never writes the updated MIGRATIONS.md
+to disk. When build_release.sh runs to produce the next release zip, it copies
+MIGRATIONS.md from disk — which still contains the old content with no entry for
+that version. The release zip ships a blank migrations file, apply_migrations()
+finds no entries to apply, and skip-version upgraders never get the schema change.
+
+Rule: every package with a run_sql action requires TWO corresponding changes:
+  1. The same SQL added to MIGRATIONS.md under the new version heading
+  2. A { "action": "replace", "file": "MIGRATIONS.md" } entry in the manifest
+
+The existing process doc rule ("run_sql in a package → add SQL to MIGRATIONS.md")
+was necessary but not sufficient. The replace action is equally required.
+Root cause discovered during skip-version migration test, Session 36.
+
+---

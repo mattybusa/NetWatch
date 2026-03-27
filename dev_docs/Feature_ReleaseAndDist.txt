@@ -185,3 +185,49 @@ KNOWN LIMITATIONS / DEFERRED ITEMS
 
 - GitHub PAT needs "releases: write" scope (covered by "repo" scope). If PAT is
   ever regenerated, ensure repo scope is included.
+
+
+UPDATED: 2026-03-27 | Session 36 | v3.4.21, v3.4.33
+=====================================================
+
+ARC 1: Release Description Auto-Generation (v3.4.21)
+
+New GET /api/admin/release_notes_draft route in webapp.py:
+- Reads releases/latest.json to get last published version
+- Queries patch_log for successful installs (success=1) with package_version >
+  last_published, ordered by id ASC (oldest first)
+- Formats each entry as "- v{version}: {description}"
+- Returns JSON: {status, text, last_published, count}
+- Gated by DEVELOPMENT_SYSTEM check
+
+New UI in Release Manager card (admin.html):
+- Description <input> replaced with <textarea rows="3" style="resize:vertical">
+  so newlines survive the round trip to GitHub (single-line input strips \n)
+- Generate button added inline to the right of the textarea
+- Hint div below textarea shows "{count} packages since v{last_published}" after
+  generation, uses visibility:hidden (not display:none) to hold space permanently
+- Version column and Build button div given padding-bottom:calc(1em + 3px) to
+  match the hint div height and keep all three columns level
+
+Layout fix history: first attempt used display:none for hint div (caused shift on
+generate). Second attempt used visibility:hidden (fixed shift but caused permanent
+misalignment). Third attempt added matching padding-bottom to other columns (fixed).
+
+ARC 2: GitHub Wiki Changelog Automation (v3.4.33)
+
+Added Step 5 to admin_publish_release() in webapp.py:
+- Clones wiki repo: https://{pat}@github.com/{owner}/{repo}.wiki.git to a tmpdir
+- Reads existing Changelog.md (or creates header if file doesn't exist)
+- Prepends new entry: "## NetWatch v{version} — {date}" followed by description lines
+- Inserts after header block (after first sequence of # lines + blank line)
+- Commits with git config user.email/name set to avoid missing identity error
+- Pushes to "master" (GitHub wiki default branch — NOT "main")
+- Cleans up tmpdir in finally block regardless of outcome
+- Non-fatal: any exception appends a ⚠ warning to steps but does not block publish
+
+Key detail: wiki uses "master" branch. Confirmed working on first publish after
+v3.4.33 install.
+
+Known deferred item resolved: "Release Manager description field has no preview"
+is now partially addressed — the Generate button provides a pre-populated starting
+point that can be edited before building.

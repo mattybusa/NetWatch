@@ -1,0 +1,61 @@
+FEATURE: Setup Wizard Interface Auto-Detection Fix
+==================================================
+Type: Bug fix
+Date: 2026-03-27
+Sessions: Session 36
+Outcome: Complete — confirmed on full reimage of test Pi
+
+
+BACKGROUND
+----------
+The setup wizard (setup.html) calls /api/setup/interfaces on page load to detect
+active network interfaces and pre-populate the eth0/wlan0 fields. This was added
+in v3.4.17 (Session 35). Fresh install testing in Session 36 revealed that interface
+auto-detection was not working and WIFI_GATEWAY was not being set on simple network
+configurations.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+Initial symptom report: interfaces not auto-detected, WiFi gateway not set to LAN
+gateway value on simple network, only LAN gateway field populated from wizard input.
+
+The JS logic in setup.html was correct on inspection: detectInterfaces() fetches
+/api/setup/interfaces, populates fields, and applyConfig() sets wifi_gateway =
+lanGateway when network type is simple and wifiIface is non-empty. The real failure
+was upstream — the fetch itself was silently failing.
+
+
+WHAT WORKED
+-----------
+Root cause: check_first_run() before_request hook intercepts all requests during
+first-run state and redirects to the setup wizard, with exemptions only for paths
+starting with "/setup" and "/static". The /api/setup/interfaces route starts with
+"/api/" so it was caught by the guard and redirected to HTML. The JS fetch received
+an HTML page, resp.json() threw an exception, and the catch block swallowed it
+silently — no error visible, no interfaces detected.
+
+Because wifi-interface field stayed blank, applyConfig() evaluated:
+  wifi_gateway: wifiIface ? wifiGateway : ''
+...as wifiIface = "" → sent wifi_gateway as "". WIFI_GATEWAY ended up blank in
+config.py. Both symptoms (no interface detection AND missing WIFI_GATEWAY) shared
+the same single root cause.
+
+Fix: added `not request.path.startswith("/api/setup")` to the exemption check in
+check_first_run(). One line change in webapp.py.
+
+The second before_request hook (enforce_forced_change_deadline) was verified harmless
+on fresh install — it returns immediately when no user session exists.
+
+Files changed:
+- webapp.py: check_first_run() exemption extended to /api/setup paths
+
+Shipped: v3.4.19
+Confirmed: Full reimage of test Pi, wizard loaded with eth0/wlan0 pre-populated,
+  iface-detected notice shown, config.py contained correct LAN_INTERFACE, WIFI_INTERFACE,
+  and WIFI_GATEWAY values after wizard completion.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+None. Fix is complete and verified.

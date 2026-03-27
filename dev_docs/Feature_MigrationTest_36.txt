@@ -1,0 +1,109 @@
+FEATURE: Skip-Version Migration Test
+=====================================
+Type: Testing / Infrastructure validation
+Date: 2026-03-27
+Sessions: Session 36
+Outcome: Complete — migration system confirmed working. Critical gotcha discovered
+  and documented.
+
+
+BACKGROUND
+----------
+The skip-version update installer (apply_migrations in patcher.py) had never been
+tested end-to-end with real schema changes across skipped releases. The code was
+written in Session 33 and reviewed but never exercised in practice — all real-world
+updates had been single-version hops. Session 36 designed and ran a formal test.
+
+Test Pi was at v3.4.20. Production was at v3.4.27. Plan: create two packages each
+adding a throwaway column to system_settings with run_sql, publish both to GitHub,
+have test Pi update directly to the latest, verify both columns present.
+
+The presence of _test_col_1 (from the v3.4.30 package) on a Pi that only installed
+v3.4.31 would prove that MIGRATIONS.md was parsed and applied correctly for skipped
+versions.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+First attempt — v3.4.28 and v3.4.29:
+Packages were built with run_sql actions and MIGRATIONS.md files inside the zips,
+but WITHOUT a replace action for MIGRATIONS.md in the manifest. Patcher correctly
+ran the SQL (adding columns to production DB) and correctly applied the package files,
+but never wrote the updated MIGRATIONS.md to disk. The Pi's on-disk MIGRATIONS.md
+remained the original blank file.
+
+When build_release.sh ran to produce the GitHub release zip, it walked the Pi
+filesystem and copied MIGRATIONS.md from disk — which was still blank. The release
+zip shipped to GitHub contained a blank MIGRATIONS.md.
+
+When the test Pi downloaded v3.4.29 and apply_migrations() ran, it found MIGRATIONS.md
+in the zip, parsed it, found no entries newer than installed version, and applied
+nothing. Test Pi updated successfully (all files current) but neither test column
+appeared in system_settings.
+
+Diagnosis confirmed by:
+1. journalctl grep for "migrat" — no output
+2. updates/ directory empty (zip deleted post-install — expected)
+3. Reading build_release.sh — confirmed it copies MIGRATIONS.md from disk, not from
+   the test package zips
+4. Reading apply_migrations() — confirmed it reads MIGRATIONS.md from the release zip,
+   not from any installed package
+
+Root cause: MIGRATIONS.md on disk was never updated because no replace action existed
+in the manifest. The process doc rule ("run_sql in package → add SQL to MIGRATIONS.md")
+was necessary but not sufficient. The replace action is equally required.
+
+
+WHAT WORKED
+-----------
+Second attempt — v3.4.30 and v3.4.31:
+Both packages rebuilt with:
+  - run_sql action (same SQL as before)
+  - replace action for MIGRATIONS.md
+  - Updated MIGRATIONS.md content in the zip
+
+v3.4.30 MIGRATIONS.md: entry for 3.4.30 only.
+v3.4.31 MIGRATIONS.md: entries for both 3.4.31 AND 3.4.30 (cumulative — this is
+the file that ships in the release zip and must contain all history).
+
+Sequence:
+1. Install v3.4.30 on production — _test_col_1 added to DB, MIGRATIONS.md written
+   to disk with 3.4.30 entry
+2. Install v3.4.31 on production — _test_col_2 added to DB, MIGRATIONS.md updated
+   with both entries
+3. Publish v3.4.30 to GitHub, then v3.4.31
+4. Test Pi (v3.4.20) updated to v3.4.31 via update checker
+5. sqlite3 PRAGMA table_info(system_settings) on test Pi:
+   0|key|TEXT|0||1
+   1|value|TEXT|0||0
+   2|updated_at|TEXT|0||0
+   3|_test_col_2|TEXT|0|NULL|0
+   4|_test_col_1|TEXT|0|NULL|0
+
+Both columns present. _test_col_1 confirmed applied from MIGRATIONS.md entry for
+a version (3.4.30) the test Pi never directly installed. Migration system confirmed
+working correctly for skip-version upgrades.
+
+Column order (_test_col_2 before _test_col_1) is correct: apply_migrations sorts
+entries oldest-first (3.4.30 before 3.4.31), SQLite lists columns in addition order,
+so 3.4.30's column appears after 3.4.31's. This is expected and harmless.
+
+Cleanup: v3.4.32 shipped updated MIGRATIONS.md with test entries removed and a
+comment noting the columns remain as harmless artifacts. SQLite DROP COLUMN requires
+3.35+, not confirmed available on Pi OS.
+
+New gotcha added to Gotchas.txt:
+  PACKAGES WITH run_sql MUST ALSO REPLACE MIGRATIONS.md ON DISK
+
+Rule going forward: every package with a run_sql action requires:
+  1. Same SQL added to MIGRATIONS.md under the new version heading
+  2. { "action": "replace", "file": "MIGRATIONS.md" } in the manifest
+  3. MIGRATIONS.md content must be cumulative (all prior entries preserved)
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- _test_col_1 and _test_col_2 remain in system_settings on both Pis. Harmless
+  (NULL default, never referenced). Cleanup requires SQLite 3.35+.
+- Version of SQLite on Pi not confirmed. Worth checking before any future DROP
+  COLUMN attempt.

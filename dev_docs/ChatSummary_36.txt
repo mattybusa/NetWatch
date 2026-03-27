@@ -1,0 +1,174 @@
+NETWATCH CHAT SUMMARY — SESSION 36
+====================================
+Date: 2026-03-27
+Starting version: v3.4.18 (per context doc at session start)
+Ending version: v3.4.33
+Session focus: Fresh install wizard fixes, dev/prod UI separation, release tooling
+  improvements, skip-version migration testing, and GitHub Wiki changelog automation.
+
+SCOPE NOTE: This session covered 13 distinct arcs across 15 packages (v3.4.19–v3.4.33).
+  Major arcs have expanded summaries. Minor arcs grouped in Feature_MinorFixesSession_36.txt.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+v3.4.19 — Setup wizard interface auto-detection fix (see Feature_FreshInstall_36.txt)
+  /api/setup/interfaces was blocked by check_first_run() before_request guard. The guard
+  allowed /setup and /static but not /api/setup, so the fetch returned HTML, resp.json()
+  threw, and the catch swallowed it silently. Added /api/setup exemption. Both bugs
+  (no interface pre-population AND missing WIFI_GATEWAY on simple networks) shared this
+  root cause. Confirmed working on full reimage of test Pi.
+
+v3.4.20 — Dev/prod UI separation (see Feature_MinorFixesSession_36.txt — "Dev UI Hiding")
+  Deployed Files card hidden in admin.html when DEVELOPMENT_SYSTEM=False. Export Data
+  card split: CSV exports remain for all users, Download Current Code moved to new
+  Developer Tools card also gated by is_dev_system. is_dev_system already in global
+  context processor — no webapp.py changes needed.
+
+v3.4.21 — Release description auto-generation
+  (see Feature_ReleaseAndDist.txt — updated with revision block)
+  New GET /api/admin/release_notes_draft route queries patch_log for successful installs
+  newer than last published version (from releases/latest.json), formats as bullet list.
+  New Generate button inline with description field in Release Manager UI. Hint div
+  shows count and since-version after generation.
+
+v3.4.22–v3.4.23 — Release Manager layout fixes
+  (see Feature_MinorFixesSession_36.txt — "Release Manager Layout")
+  v3.4.22: hint div used visibility:hidden instead of display:none to hold space and
+  prevent layout shift. v3.4.23: version column and Build button given matching
+  padding-bottom:calc(1em + 3px) so all three columns stay level permanently.
+
+v3.4.24 — Release description bullet list formatting fix
+  (see Feature_MinorFixesSession_36.txt — "Release Description Bullets")
+  Entries were running together on GitHub. Root cause: description field was a single-line
+  <input> which strips newlines. Switched to <textarea> in v3.4.27. v3.4.24 added "- "
+  prefix to entries in the route. Both changes required for bullets to render correctly.
+
+v3.4.25 — Remove Install Another Package button from Package Installer post-apply view.
+  Button was unused and had spacing issues. Removed entirely.
+
+v3.4.26 — Email header emoji: satellite 📡 replaced with WiFi arcs 🛜 in alerts.py.
+  Single occurrence in _build_email_html(). Both services restarted. Confirmed via
+  test email.
+
+v3.4.27 — Description field switched to textarea
+  (see Feature_MinorFixesSession_36.txt — "Release Description Bullets")
+  Companion fix to v3.4.24. Textarea preserves \n characters through .value read and
+  JSON payload to server. Both v3.4.24 and v3.4.27 required for correct bullet rendering.
+  Confirmed working after publish.
+
+v3.4.28–v3.4.31 — Skip-version migration test
+  (see Feature_MigrationTest_36.txt)
+  Two test packages (v3.4.30, v3.4.31) each added a throwaway column to system_settings
+  with run_sql + replace MIGRATIONS.md. Published both to GitHub. Test Pi (v3.4.20)
+  updated directly to v3.4.31. Both columns confirmed present — migration system works.
+  First attempt (v3.4.28, v3.4.29) failed because packages lacked replace action for
+  MIGRATIONS.md — file on disk never updated, release zip shipped blank migrations.
+
+v3.4.32 — MIGRATIONS.md cleanup after migration test.
+  Removed test entries for _test_col_1 and _test_col_2. Added comment noting columns
+  remain in DB as harmless artifacts (SQLite DROP COLUMN requires 3.35+).
+
+v3.4.33 — GitHub Wiki Changelog.md automation
+  (see Feature_ReleaseAndDist.txt — updated with revision block)
+  publish_release route now adds Step 5: clone wiki repo, prepend new entry to
+  Changelog.md, commit and push. Non-fatal — wiki failure does not block the release.
+  Wiki URL: https://github.com/mattybusa/NetWatch/wiki. Confirmed working on first publish.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+
+- First migration test (v3.4.28, v3.4.29): packages had run_sql and MIGRATIONS.md in
+  the zip but no replace action for MIGRATIONS.md. Patcher ran the SQL against production
+  DB but never wrote MIGRATIONS.md to disk. build_release.sh copied the old blank
+  MIGRATIONS.md from disk into the release zip. Test Pi updated successfully (files
+  correct) but neither test column appeared in the DB. Root cause identified by reading
+  build_release.sh and tracing the file path. Fixed in v3.4.30/v3.4.31 by adding
+  replace action for MIGRATIONS.md to both packages.
+
+- Release description textarea syntax error: initial Python replacement of the JS code
+  inserted literal newlines into string literals ("\n" became actual newlines in source).
+  Fixed by using "\\n" in the replacement string.
+
+- First attempt at Release Manager layout fix (display:none → visibility:hidden) solved
+  the layout shift on generate but created a permanent offset because the hint div always
+  occupied space. Fixed by adding matching padding-bottom to the other columns.
+
+
+DECISIONS MADE
+--------------
+- GitHub Wiki for changelog: chosen over Releases page (requires per-entry clicks) and
+  Wiki manual maintenance. Single Changelog.md page, prepend-on-publish, publicly
+  readable. Automated via publish_release Step 5.
+- Older GitHub releases: agreed to leave release entries in place (storage is free,
+  history useful for forensics), but zip assets from old releases can be deleted manually
+  since skip-version upgrades make them redundant. Natural cleanup point is v1.0.0 cut.
+- Test columns _test_col_1 and _test_col_2 left in DB: SQLite 3.35+ required for
+  DROP COLUMN, not available. Documented in MIGRATIONS.md comment, harmless.
+- Deployed Files entire page hidden (not just Dev Docs section) on non-dev installs:
+  user can SSH+SCP or temporarily set DEVELOPMENT_SYSTEM=True if needed.
+- Release description field: switched from input to textarea so multiline bullet lists
+  survive the round trip to GitHub.
+- Wiki git push uses "master" branch (GitHub wiki default), not "main".
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- Fresh install re-test with v3.4.19+ not yet run on a completely clean image after
+  the wizard fix was confirmed. The single reimage test in this session confirmed the
+  wizard auto-detection fix but did not exhaustively test all wizard paths.
+- SQLite version on Pi: DROP COLUMN support requires 3.35+. Not verified what version
+  is currently installed. Relevant if we ever want to clean up test columns properly.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Setup wizard interface auto-detection fix (v3.4.19)
+- Dev/prod UI separation — Deployed Files and Developer Tools hidden on non-dev installs
+- Release description auto-generation with Generate button (v3.4.21)
+- Release Manager layout fixes (v3.4.22–v3.4.23)
+- Release description bullet list formatting (v3.4.24, v3.4.27)
+- Remove Install Another Package button (v3.4.25)
+- Email header emoji fix: satellite → WiFi arcs (v3.4.26)
+- Skip-version migration test — confirmed working (v3.4.30–v3.4.31)
+- GitHub Wiki Changelog.md automation on publish (v3.4.33)
+
+Added this session:
+- None — all work was either backlog items or identified-and-resolved within session.
+
+
+EXPANDED SUMMARIES PRODUCED
+----------------------------
+Feature_FreshInstall_36.txt — Setup wizard interface auto-detection fix: root cause,
+  failed first test, fix, and confirmation.
+Feature_MigrationTest_36.txt — Skip-version migration test: design, first failure
+  (missing MIGRATIONS.md replace action), fix, and confirmed result.
+Feature_MinorFixesSession_36.txt — Consolidated minor arcs: Dev UI Hiding, Release
+  Manager Layout, Release Description Bullets, Install Another Package button removal,
+  Email emoji fix.
+Feature_ReleaseAndDist.txt — Updated with revision block covering release description
+  auto-generation (v3.4.21) and GitHub Wiki automation (v3.4.33).
+
+
+NEW GOTCHAS ADDED
+-----------------
+- PACKAGES WITH run_sql MUST ALSO REPLACE MIGRATIONS.md ON DISK (new entry) — appended
+  directly to Gotchas.txt during session. The existing process doc rule was necessary
+  but not sufficient; replace action is equally required or disk file stays stale.
+
+
+CURRENT STATE
+-------------
+- Production Pi: v3.4.33
+- Test Pi: v3.4.31 (last update — v3.4.32 and v3.4.33 not yet installed via update
+  checker; will pick up on next check or manual trigger)
+- GitHub: v3.4.31 is current public release (v3.4.32 and v3.4.33 not yet published)
+- Wiki: Changelog.md created and confirmed working with first automated entry
+- Next session priorities:
+  1. Publish v3.4.32 and v3.4.33 to GitHub (test Pi will update)
+  2. Security audit
+  3. Documentation (User PDF, Admin guide, Developer reference)
+  4. Version reset to v1.0.0

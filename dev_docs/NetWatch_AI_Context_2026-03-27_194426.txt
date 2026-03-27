@@ -23,7 +23,7 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.4.33
+- **Pi version:** v3.4.18
 - **Pi path:** `/home/mboynton/netwatch/`
 - **Canonical matches Pi at v3.3.95**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.
@@ -761,21 +761,10 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   /api/setup/interfaces. SHIPPED v3.4.17 (Session 35).
 - ✅ Setup wizard: simple network WiFi monitoring — WIFI_GATEWAY set to LAN_GATEWAY
   and checked via WiFi interface independently. SHIPPED v3.4.18 (Session 35).
-- ✅ Publish v3.4.18/v3.4.19 as public release. DONE Session 36.
-- ✅ Fresh install re-test with v3.4.19 — wizard interface auto-detection fix confirmed
-  on full reimage. DONE Session 36.
-- ✅ Release description auto-generation: Generate button in Release Manager pulls
-  changelog entries since last publish, formats as Markdown bullet list. DONE v3.4.21
-  Session 36.
-- ✅ Dev/prod UI separation: Deployed Files card and Developer Tools (Download Current
-  Code) hidden when DEVELOPMENT_SYSTEM=False. DONE v3.4.20 Session 36.
-- ✅ Setup wizard interface auto-detection fix: /api/setup paths exempted from
-  first-run redirect guard. DONE v3.4.19 Session 36.
-- ✅ GitHub Wiki Changelog.md automation: publish_release prepends entry to wiki on
-  every publish. DONE v3.4.33 Session 36.
-- ✅ Skip-version migration system validated end-to-end. Critical rule: packages with
-  run_sql must also include replace action for MIGRATIONS.md. DONE Session 36.
-- Fresh install testing with current codebase (last tested v3.4.19, Session 36)
+- Publish v3.4.18 as public release (not yet done — session closed first)
+- Fresh install re-test with v3.4.18 (wizard changes unverified on clean Pi)
+- Release description auto-generation from package changelog (discussed, deferred)
+- Fresh install testing with current codebase (last tested v3.3.94, Session 31)
 - cloud-init / firstboot install path (user-data template, unattended install.sh)
 - Security audit before public promotion
 - Version reset to v1.0.0 (after above — clear MIGRATIONS.md of 3.x.x entries)

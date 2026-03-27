@@ -1,53 +1,49 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-27 | Session 35 closed | v3.4.18 (production)
+Updated: 2026-03-27 | Session 36 closed | v3.4.33 (production)
 
-STATUS: Session 35 complete and closed out.
+STATUS: Session 36 complete and closed out.
 
-SESSION 35 SUMMARY
+SESSION 36 SUMMARY
 ------------------
-Release pipeline validated (v3.4.9). Fresh install testing revealed cascade of
-failures — fixed across v3.4.10–v3.4.16. Major install.sh improvements: dynamic
-package resolution, self-contained curl install, GitHub sync fix, re-run resilience.
-Setup wizard: interface auto-detection fields added (v3.4.17), simple network WiFi
-monitoring fix (v3.4.18).
+Setup wizard interface auto-detection fix (v3.4.19). Dev/prod UI separation —
+Deployed Files and Developer Tools hidden on non-dev installs (v3.4.20). Release
+description auto-generation with Generate button (v3.4.21). Layout fixes (v3.4.22-23).
+Bullet list formatting fix (v3.4.24, v3.4.27). Minor fixes: remove Install Another
+Package button (v3.4.25), email emoji fix (v3.4.26). Skip-version migration test —
+confirmed working, critical gotcha found re: MIGRATIONS.md replace action (v3.4.30-32).
+GitHub Wiki Changelog.md automation on publish (v3.4.33).
 
 KEY STATE
 ---------
-- Production Pi: v3.4.18
-- Test Pi: v3.4.16 (last fresh install — v3.4.17/18 not yet installed)
-- GitHub: v3.4.16 is current public release
-- v3.4.18 installed on production but NOT yet published to GitHub
+- Production Pi: v3.4.33
+- Test Pi: v3.4.31 (v3.4.32 and v3.4.33 not yet installed)
+- GitHub: v3.4.31 is current public release (v3.4.32 and v3.4.33 not yet published)
+- Wiki: Changelog.md live and confirmed working
+- MIGRATIONS.md: cleaned up after test, no production entries yet
+- DB: system_settings has _test_col_1 and _test_col_2 as harmless test artifacts
+  on both Pis
 
 NEXT SESSION
 ------------
 Priority order:
 
-  1. Publish v3.4.18 to GitHub as public release
-     Do this first so test Pi can pick it up and fresh install test uses
-     current code.
+  1. Publish v3.4.32 and v3.4.33 to GitHub
+     Test Pi will update via update checker.
 
-  2. Fresh install re-test with v3.4.18
-     Wizard changes (interface auto-detection, WiFi simple network fix)
-     not verified on a clean Pi. Run curl install, go through wizard,
-     confirm eth0/wlan0 pre-populated, confirm config.py has correct values.
-
-  3. Release description auto-generation
-     Discussed in Session 35 — pull package descriptions from changelog
-     since last published release, concatenate, pre-populate Release Manager
-     description field. Straightforward to implement.
-
-  4. Security audit
+  2. Security audit
      Attack surface review before public promotion.
 
-  5. Documentation
+  3. Documentation
      User PDF, Admin guide, Developer reference.
 
-  6. Version reset to v1.0.0
+  4. Version reset to v1.0.0
      After above. Clear MIGRATIONS.md of 3.x.x entries when cutting v1.0.0.
 
 NOTE
 ----
-MIGRATIONS.md rule: whenever a session package includes a run_sql action,
-add the same SQL to MIGRATIONS.md under the new version heading before closeout.
-No run_sql actions this session — MIGRATIONS.md unchanged.
+MIGRATIONS.md rule (updated Session 36): whenever a session package includes a
+run_sql action, that SQL must also be added to MIGRATIONS.md under the new version
+heading AND a replace action for MIGRATIONS.md must be included in the manifest.
+Both steps are required. See Gotchas.txt: PACKAGES WITH run_sql MUST ALSO REPLACE
+MIGRATIONS.md ON DISK.
