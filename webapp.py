@@ -2644,7 +2644,7 @@ def admin_release_notes_draft():
                         continue
                 except Exception:
                     continue
-            entries.append(f"v{ver}: {desc}")
+            entries.append(f"- v{ver}: {desc}")
 
         if not entries:
             return jsonify({"status": "ok", "text": "", "last_published": last_published})
