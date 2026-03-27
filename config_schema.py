@@ -503,6 +503,50 @@ CONFIG_SCHEMA = [
         "ui_hidden":   False,
     },
 
+    {
+        "key":         "SUMMARY_FREQUENCY",
+        "default":     "daily",
+        "required":    False,
+        "group":       "alerts",
+        "section":     "Alerts",
+        "label":       "Summary Frequency",
+        "description": "How often to send the network summary email. "
+                       "daily = every day at SUMMARY_HOUR. "
+                       "weekly = once per week on SUMMARY_DAY at SUMMARY_HOUR.",
+        "sensitive":   False,
+        "type":        "str",
+        "ui_hidden":   False,
+    },
+    {
+        "key":         "SUMMARY_DAY",
+        "default":     0,
+        "required":    False,
+        "group":       "alerts",
+        "section":     "Alerts",
+        "label":       "Summary Day (weekly only)",
+        "description": "Day of week to send the summary when SUMMARY_FREQUENCY=weekly. "
+                       "0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday, 4=Friday, 5=Saturday, 6=Sunday.",
+        "sensitive":   False,
+        "type":        "int",
+        "min":         0,
+        "max":         6,
+        "ui_hidden":   False,
+    },
+    {
+        "key":         "SUMMARY_HOUR",
+        "default":     8,
+        "required":    False,
+        "group":       "alerts",
+        "section":     "Alerts",
+        "label":       "Summary Send Hour (0-23)",
+        "description": "Hour of day (local time, 24h) at which to send the network summary email. Default: 8 (8 AM).",
+        "sensitive":   False,
+        "type":        "int",
+        "min":         0,
+        "max":         23,
+        "ui_hidden":   False,
+    },
+
     # ── Security ──────────────────────────────────────────────────────────────
     {
         "key":         "LOCKOUT_FAIL_THRESHOLD",

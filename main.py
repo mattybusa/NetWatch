@@ -176,13 +176,21 @@ def main():
                 database.prune_old_records()
                 main._last_prune_date = today
 
-            # -- Daily summary email ------------------------------------------
-            # Send at approximately 8:00 AM each day
+            # -- Summary email (daily or weekly) ------------------------------
+            # Frequency/day/hour are runtime config — read each loop iteration
+            # so changes take effect after a monitor restart without redeploying.
             now = datetime.now()
-            summary_hour = 8
-            if (now.hour == summary_hour and
-                    now.date() != last_summary_date and
-                    config.ALERTS_ENABLED):
+            summary_hour = int(getattr(config, "SUMMARY_HOUR", 8))
+            summary_freq = (getattr(config, "SUMMARY_FREQUENCY", "daily") or "daily").strip().lower()
+            summary_day  = int(getattr(config, "SUMMARY_DAY",  0))   # 0=Mon … 6=Sun
+
+            _hour_match = (now.hour == summary_hour)
+            _not_sent   = (now.date() != last_summary_date)
+            _freq_match = (
+                summary_freq == "daily" or
+                (summary_freq == "weekly" and now.weekday() == summary_day)
+            )
+            if _hour_match and _not_sent and _freq_match and config.ALERTS_ENABLED:
                 alerts.send_daily_summary()
                 last_summary_date = now.date()
 
