@@ -27,8 +27,9 @@ prior version and no migrations to reconstruct.
 
 <!-- Entries begin below this line. Oldest at bottom, newest at top. -->
 
-## 3.4.31
-ALTER TABLE system_settings ADD COLUMN _test_col_2 TEXT DEFAULT NULL
+<!-- NOTE: _test_col_1 and _test_col_2 columns remain in system_settings on -->
+<!-- both Pis as harmless test artifacts from the Session 36 migration test.  -->
+<!-- SQLite 3.35+ required to DROP COLUMN — not available on Pi OS at time    -->
+<!-- of test. They can be ignored; they have no functional effect.            -->
 
-## 3.4.30
-ALTER TABLE system_settings ADD COLUMN _test_col_1 TEXT DEFAULT NULL
+<!-- No production schema changes yet. First real entry goes here. -->
