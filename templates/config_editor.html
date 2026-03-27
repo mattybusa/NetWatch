@@ -136,6 +136,27 @@
           </span>
         {% endif %}
 
+      {% elif field.get('allowed_values') %}
+        <!-- Dropdown for fields with a fixed set of valid values -->
+        <select class="nw-input" id="field_{{ field.key }}" name="{{ field.key }}"
+                style="max-width:200px;">
+          {% for v in field.allowed_values %}
+            <option value="{{ v }}" {% if values.get(field.key, '') == v %}selected{% endif %}>{{ v }}</option>
+          {% endfor %}
+        </select>
+
+      {% elif field.get('day_names') %}
+        <!-- Dropdown for day-of-week fields -->
+        <select class="nw-input" id="field_{{ field.key }}" name="{{ field.key }}"
+                style="max-width:200px;">
+          {% for name in field.day_names %}
+            <option value="{{ loop.index0 }}"
+              {% if values.get(field.key, '')|string == loop.index0|string %}selected{% endif %}>
+              {{ loop.index0 }} — {{ name }}
+            </option>
+          {% endfor %}
+        </select>
+
       {% else %}
         <!-- String input -->
         <input class="nw-input" type="text" id="field_{{ field.key }}"
@@ -143,7 +164,7 @@
       {% endif %}
 
       <div style="font-size:0.73rem;color:var(--text-muted);margin-top:5px;line-height:1.4;">
-        {{ field.desc }}
+        {{ field.desc | safe }}
       </div>
     </div>
 
