@@ -116,6 +116,30 @@ def check_first_run():
 def setup_wizard():
     return render_template("setup.html")
 
+@app.route("/api/setup/interfaces")
+def setup_interfaces():
+    """Detect active network interfaces and their IPs for wizard pre-population."""
+    import subprocess
+    interfaces = []
+    try:
+        result = subprocess.run(["ip", "-o", "addr", "show"],
+                                capture_output=True, text=True, timeout=5)
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            iface = parts[1]
+            family = parts[2]
+            if family != "inet":  # IPv4 only
+                continue
+            if iface == "lo":     # skip loopback
+                continue
+            ip = parts[3].split("/")[0]
+            interfaces.append({"name": iface, "ip": ip})
+    except Exception as e:
+        log.warning("interface_detection_failed", error=str(e))
+    return jsonify({"interfaces": interfaces})
+
 @app.route("/setup/skip")
 def setup_skip():
     """Mark setup as done by writing a minimal config, redirect to login."""
@@ -155,6 +179,8 @@ def setup_apply():
         cfg = replace_cfg(cfg, "SECRET_KEY",      secret_key)
         cfg = replace_cfg(cfg, "LAN_GATEWAY",     data.get("lan_gateway", "192.168.1.1"))
         cfg = replace_cfg(cfg, "WIFI_GATEWAY",    data.get("wifi_gateway", ""))
+        cfg = replace_cfg(cfg, "LAN_INTERFACE",   data.get("lan_interface", ""))
+        cfg = replace_cfg(cfg, "WIFI_INTERFACE",  data.get("wifi_interface", ""))
         cfg = replace_cfg(cfg, "WAN_PRIMARY",     data.get("wan_primary", "8.8.8.8"))
         cfg = replace_cfg(cfg, "WAN_SECONDARY",   data.get("wan_secondary", "8.8.4.4"))
         cfg = replace_cfg(cfg, "RELAY_MODEM",     data.get("relay_modem", 17))
@@ -2811,23 +2837,15 @@ def admin_publish_release():
         return jsonify({"status": "error", "message": f"Manifest update error: {e}",
                         "steps": steps}), 500
 
-    # -- Step 4: Commit latest.json and push everything to both remotes -------
-    # patcher.py commits and pushes to Gitea (origin) on every install but never
-    # pushes to GitHub. All those commits are in git history but GitHub has never
-    # seen them. We commit latest.json, then push ALL commits to both remotes so
-    # GitHub main branch is fully in sync, not just the most recent change.
+    # -- Step 4: Commit and push to both remotes ------------------------------
     git = ["git", "-C", NETWATCH_DIR]
     try:
         subprocess.run([*git, "add", "releases/latest.json"],
                        check=True, capture_output=True, timeout=15)
-        # Only commit if latest.json actually changed
-        status = subprocess.run([*git, "status", "--porcelain"],
-                                check=True, capture_output=True, timeout=15)
-        if status.stdout.strip():
-            subprocess.run([*git, "commit", "-m",
-                            f"{tag}: publish release — update latest.json"],
-                           check=True, capture_output=True, timeout=15)
-            steps.append("✓ Committed releases/latest.json")
+        subprocess.run([*git, "commit", "-m",
+                        f"{tag}: publish release — update latest.json"],
+                       check=True, capture_output=True, timeout=15)
+        steps.append("✓ Committed releases/latest.json")
 
         subprocess.run([*git, "push", "origin", "main"],
                        check=True, capture_output=True, timeout=60)

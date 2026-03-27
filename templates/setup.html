@@ -148,6 +148,21 @@
       </div>
       <div class="f-row">
         <div class="f-group">
+          <label class="f-label">Wired Interface <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+          <input type="text" class="f-input" id="lan-interface" placeholder="e.g. eth0">
+          <div class="f-hint">Network interface for wired checks. Leave blank to use default route.</div>
+        </div>
+        <div class="f-group">
+          <label class="f-label">WiFi Interface <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+          <input type="text" class="f-input" id="wifi-interface" placeholder="e.g. wlan0">
+          <div class="f-hint">Network interface for WiFi checks. Leave blank to use default route.</div>
+        </div>
+      </div>
+      <div id="iface-detected" style="display:none;font-size:0.8rem;color:var(--text-muted);margin-top:-8px;margin-bottom:8px;">
+        <i class="bi bi-info-circle me-1"></i>Interfaces auto-detected and pre-filled — verify before continuing.
+      </div>
+      <div class="f-row">
+        <div class="f-group">
           <label class="f-label">WAN Check IP (Primary)</label>
           <input type="text" class="f-input" id="wan-primary" value="8.8.8.8">
         </div>
@@ -272,6 +287,8 @@
         <div class="summary-row"><span class="k">Site Name</span><span class="v" id="s-site"></span></div>
         <div class="summary-row"><span class="k">LAN Gateway</span><span class="v" id="s-lan"></span></div>
         <div class="summary-row"><span class="k">WiFi Gateway</span><span class="v" id="s-wifi"></span></div>
+        <div class="summary-row"><span class="k">Wired Interface</span><span class="v" id="s-lan-iface"></span></div>
+        <div class="summary-row"><span class="k">WiFi Interface</span><span class="v" id="s-wifi-iface"></span></div>
         <div class="summary-row"><span class="k">WAN Primary</span><span class="v" id="s-wan1"></span></div>
         <div class="summary-row"><span class="k">WAN Secondary</span><span class="v" id="s-wan2"></span></div>
       </div>
@@ -319,6 +336,35 @@
 // ── State ──────────────────────────────────────────────────────────────────────
 let emailSkipped = false;
 
+// Auto-detect network interfaces on page load and pre-populate fields
+(async function detectInterfaces() {
+  try {
+    const resp = await fetch('/api/setup/interfaces');
+    const data = await resp.json();
+    const ifaces = data.interfaces || [];
+    if (ifaces.length === 0) return;
+
+    // Find first wired (eth*) and first wireless (wlan*) interface
+    const wired    = ifaces.find(i => i.name.startsWith('eth') || i.name.startsWith('en'));
+    const wireless = ifaces.find(i => i.name.startsWith('wlan') || i.name.startsWith('wl'));
+
+    let detected = false;
+    if (wired) {
+      document.getElementById('lan-interface').value = wired.name;
+      detected = true;
+    }
+    if (wireless) {
+      document.getElementById('wifi-interface').value = wireless.name;
+      detected = true;
+    }
+    if (detected) {
+      document.getElementById('iface-detected').style.display = '';
+    }
+  } catch (e) {
+    // Detection failed silently — user fills in manually
+  }
+})();
+
 function toggleWifiGateway() {
   const type = document.getElementById('network-type').value;
   document.getElementById('wifi-gateway-group').style.display = type === 'advanced' ? '' : 'none';
@@ -365,6 +411,8 @@ function goToReview() {
   document.getElementById('s-site').textContent    = document.getElementById('site-name').value || '—';
   document.getElementById('s-lan').textContent     = document.getElementById('lan-gateway').value || '—';
   document.getElementById('s-wifi').textContent    = wifiGw;
+  document.getElementById('s-lan-iface').textContent  = document.getElementById('lan-interface').value || 'Not set (default route)';
+  document.getElementById('s-wifi-iface').textContent = document.getElementById('wifi-interface').value || 'Not set (default route)';
   document.getElementById('s-wan1').textContent    = document.getElementById('wan-primary').value;
   document.getElementById('s-wan2').textContent    = document.getElementById('wan-secondary').value;
   document.getElementById('s-modem').textContent   = document.getElementById('relay-modem').value;
@@ -391,6 +439,8 @@ async function applyConfig() {
     site_name:       document.getElementById('site-name').value,
     lan_gateway:     document.getElementById('lan-gateway').value,
     wifi_gateway:    document.getElementById('wifi-gateway').value,
+    lan_interface:   document.getElementById('lan-interface').value,
+    wifi_interface:  document.getElementById('wifi-interface').value,
     wan_primary:     document.getElementById('wan-primary').value,
     wan_secondary:   document.getElementById('wan-secondary').value,
     relay_modem:     parseInt(document.getElementById('relay-modem').value),
