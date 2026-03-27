@@ -1,9 +1,9 @@
 {
-  "version": "3.4.14",
-  "description": "Self-contained curl install. install.sh now works as a standalone download \u2014 when run via curl on a fresh Pi, it automatically downloads the full NetWatch codebase from the GitHub release and installs from it. No zip extraction or manual file setup required. Running from an extracted release zip continues to work as before.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.14/netwatch-3.4.14.zip",
+  "version": "3.4.15",
+  "description": "Install resilience fix. install.sh now recovers cleanly from previous failed install attempts. If a prior run left files owned by the service account, the installer reclaims ownership before proceeding so venv creation and subsequent steps succeed without manual cleanup.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.15/netwatch-3.4.15.zip",
   "changelog_url": "",
-  "package_sha256": "662113fed7af762c5a4d22947e2fd8368bce5a6589510d413e1bb74a979faa41",
+  "package_sha256": "420ae4460e760a3a3ed6320843ad4ceaeebdd49efd217c59d732c0892d4a4548",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
