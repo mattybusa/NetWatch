@@ -1,9 +1,9 @@
 {
-  "version": "3.4.35",
-  "description": "- v3.4.35: Security card on Admin page: MFA_REQUIRED config key toggles mandatory MFA enforcement for Admin/Operator roles.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.35/netwatch-3.4.35.zip",
+  "version": "3.4.38",
+  "description": "- v3.4.36: Configurable summary frequency: SUMMARY_FREQUENCY (daily/weekly), SUMMARY_DAY, and SUMMARY_HOUR config keys. New-keys modal will prompt on next Config Editor open.\n- v3.4.37: Config Editor/modal improvements: allowed_values validation for SUMMARY_FREQUENCY, dropdowns in new-keys modal, HTML bold in descriptions.\n- v3.4.38: Config Editor main editor: dropdowns for allowed_values/day_names fields, bold descriptions rendering correctly.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.38/netwatch-3.4.38.zip",
   "changelog_url": "",
-  "package_sha256": "4d1ee50ca818cccf925254b6f8d8e83d441a4b0dd65eb9bbb19bbb258eae6de1",
+  "package_sha256": "250e802eb97870b7ee18da195561280baa2d67388cbeeea5b5c5da73b78506d8",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
