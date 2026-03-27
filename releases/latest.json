@@ -1,9 +1,9 @@
 {
-  "version": "3.4.31",
-  "description": "- v3.4.31: Migration test package 2 of 2: adds _test_col_2 to system_settings table to verify skip-version migration behavior.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.31/netwatch-3.4.31.zip",
+  "version": "3.4.33",
+  "description": "- v3.4.32: Clean up MIGRATIONS.md after skip-version migration test: remove test entries for _test_col_1 and _test_col_2. Test columns remain in DB as harmless artifacts (SQLite DROP COLUMN requires 3.35+).\n- v3.4.33: Release Manager now updates GitHub Wiki Changelog.md on publish: prepends a new entry with version, date, and release description. Non-fatal \u2014 wiki failure does not block the release.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.33/netwatch-3.4.33.zip",
   "changelog_url": "",
-  "package_sha256": "d4c2e541a408d97c74cada9488b09b82706748e0573082b94a7ab39bc9f4517c",
+  "package_sha256": "319c47930d714bb424329d101d9a15392477fec3b2fa19a1bf2dd68e535dd59a",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
