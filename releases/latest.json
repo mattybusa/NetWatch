@@ -1,9 +1,9 @@
 {
-  "version": "3.4.10",
+  "version": "3.4.11",
   "description": "Self-healing package installer. install.sh now resolves version-sensitive package names dynamically from the Debian archive at install time, rather than hardcoding names that can change between OS releases. Fresh installs will continue to work correctly as Debian evolves, without requiring updated releases to fix package naming changes.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.10/netwatch-3.4.10.zip",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.11/netwatch-3.4.11.zip",
   "changelog_url": "",
-  "package_sha256": "1a6777c11062ca4ba6b7ce66d503bcb66200ecd5c6883e166f2437c2a36f5b0b",
+  "package_sha256": "7a4ba7ab27a5d061224659c40e9530e0947c9d094757b98cba1df927eecf85ab",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
