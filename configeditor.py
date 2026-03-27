@@ -48,6 +48,10 @@ def _build_fields():
             field["min"] = entry["min"]
         if "max" in entry:
             field["max"] = entry["max"]
+        if "allowed_values" in entry:
+            field["allowed_values"] = entry["allowed_values"]
+        if "day_names" in entry:
+            field["day_names"] = entry["day_names"]
         fields.append(field)
     return fields
 
@@ -139,7 +143,12 @@ def save_config(new_values, saved_by="web"):
                     validated[key] = val
 
             elif ftype in ("str", "password"):
-                validated[key] = raw
+                if "allowed_values" in field and raw not in field["allowed_values"]:
+                    errors.append(
+                        f"{field['label']}: must be one of: {', '.join(field['allowed_values'])}"
+                    )
+                else:
+                    validated[key] = raw
 
         except ValueError:
             errors.append(f"{field['label']}: must be a valid {ftype}")

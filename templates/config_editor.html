@@ -787,6 +787,20 @@ document.getElementById("import-diff-modal").addEventListener("click", function(
               ${checked ? "Enabled" : "Disabled"}
             </span>
           </div>`;
+      } else if (field.allowed_values) {
+        // Dropdown for fields with a fixed set of valid values
+        const opts = field.allowed_values.map(v =>
+          `<option value="${esc(v)}" ${String(val) === v ? "selected" : ""}>${esc(v)}</option>`
+        ).join("");
+        inputHtml = `<select class="nw-input" id="modal_${esc(field.key)}"
+                             style="max-width:200px;">${opts}</select>`;
+      } else if (field.day_names) {
+        // Dropdown for SUMMARY_DAY — show numeric value with day name
+        const opts = field.day_names.map((name, i) =>
+          `<option value="${i}" ${Number(val) === i ? "selected" : ""}>${i} — ${name}</option>`
+        ).join("");
+        inputHtml = `<select class="nw-input" id="modal_${esc(field.key)}"
+                             style="max-width:200px;">${opts}</select>`;
       } else if (field.type === "int") {
         inputHtml = `<input class="nw-input" type="number" id="modal_${esc(field.key)}"
                        value="${esc(String(val))}"
@@ -812,7 +826,7 @@ document.getElementById("import-diff-modal").addEventListener("click", function(
                     color:var(--accent);margin-bottom:6px;">${esc(field.label)}</div>
         ${inputHtml}
         <div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">
-          ${esc(field.description || "")}
+          ${field.description || ""}
         </div>
       </div>`;
     }

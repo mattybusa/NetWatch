@@ -511,8 +511,9 @@ CONFIG_SCHEMA = [
         "section":     "Alerts",
         "label":       "Summary Frequency",
         "description": "How often to send the network summary email. "
-                       "daily = every day at SUMMARY_HOUR. "
-                       "weekly = once per week on SUMMARY_DAY at SUMMARY_HOUR.",
+                       "<b>daily</b> = every day at SUMMARY_HOUR. "
+                       "<b>weekly</b> = once per week on SUMMARY_DAY at SUMMARY_HOUR.",
+        "allowed_values": ["daily", "weekly"],
         "sensitive":   False,
         "type":        "str",
         "ui_hidden":   False,
@@ -525,7 +526,9 @@ CONFIG_SCHEMA = [
         "section":     "Alerts",
         "label":       "Summary Day (weekly only)",
         "description": "Day of week to send the summary when SUMMARY_FREQUENCY=weekly. "
-                       "0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday, 4=Friday, 5=Saturday, 6=Sunday.",
+                       "<b>0</b>=Monday, <b>1</b>=Tuesday, <b>2</b>=Wednesday, "
+                       "<b>3</b>=Thursday, <b>4</b>=Friday, <b>5</b>=Saturday, <b>6</b>=Sunday.",
+        "day_names":     ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
         "sensitive":   False,
         "type":        "int",
         "min":         0,
@@ -539,7 +542,8 @@ CONFIG_SCHEMA = [
         "group":       "alerts",
         "section":     "Alerts",
         "label":       "Summary Send Hour (0-23)",
-        "description": "Hour of day (local time, 24h) at which to send the network summary email. Default: 8 (8 AM).",
+        "description": "Hour of day (local time, 24h) at which to send the network summary email. "
+                       "Default: <b>8</b> (8 AM). Valid range: <b>0</b>–<b>23</b>.",
         "sensitive":   False,
         "type":        "int",
         "min":         0,
