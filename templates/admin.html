@@ -396,7 +396,12 @@
           </div>
           <div id="gen-notes-hint" style="visibility:hidden;font-size:0.72rem;color:var(--text-muted);margin-top:3px;min-height:1em;"></div>
         </div>
-        <div style="padding-bottom:calc(1em + 3px);">
+        <div style="padding-bottom:calc(1em + 3px);display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
+          <button id="release-reset-btn" class="nw-btn"
+                  onclick="doResetRelease()"
+                  style="display:none;white-space:nowrap;padding:6px 14px;font-size:0.82rem;color:var(--text-muted);">
+            ↩ Reset
+          </button>
           <button id="release-build-btn" class="nw-btn nw-btn-primary"
                   onclick="doBuildRelease()"
                   style="white-space:nowrap;padding:7px 16px;">
@@ -693,25 +698,30 @@ async function doBuildRelease() {
   log.textContent = "Running build_release.sh — this may take 10–20 seconds...";
 
   try {
+    const desc    = document.getElementById("release-description").value.trim();
     const res = await fetch("/api/admin/build_release", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version: version })
+      body: JSON.stringify({ version: version, description: desc })
     }).then(r => r.json());
 
     log.textContent = res.output || "";
 
     if (res.status === "ok") {
       _releaseData = res;
+      // Lock inputs — rebuild requires Reset first
+      document.getElementById("release-version").disabled     = true;
+      document.getElementById("release-description").disabled = true;
+      document.getElementById("gen-notes-btn").disabled       = true;
+      document.getElementById("release-build-btn").disabled   = true;
+      document.getElementById("release-reset-btn").style.display = "inline-block";
       document.getElementById("release-result-version").textContent =
         `v${res.version}  ·  ${res.filename}`;
       document.getElementById("release-sha256").textContent = res.sha256;
       document.getElementById("release-download-link").href =
         "/api/admin/release_download?file=" + encodeURIComponent(res.filename);
 
-      // Pre-fill description from input if set
-      const desc = document.getElementById("release-description").value.trim();
-      if (desc) _releaseData.description = desc;
+      // Description is already locked into _releaseData.description from the build POST
 
       result.style.display = "block";
     } else {
@@ -727,6 +737,40 @@ async function doBuildRelease() {
   btn.textContent = "🔨 Build Release";
 }
 
+async function doResetRelease() {
+  if (!_releaseData || !_releaseData.zip_path) {
+    // Nothing built yet — just re-enable fields
+    _resetReleaseUI();
+    return;
+  }
+  try {
+    await fetch("/api/admin/discard_release", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({zip_path: _releaseData.zip_path}),
+    });
+  } catch (_) { /* non-fatal — zip may already be gone */ }
+  _resetReleaseUI();
+}
+
+function _resetReleaseUI() {
+  _releaseData = null;
+  // Re-enable all inputs
+  document.getElementById("release-version").disabled     = false;
+  document.getElementById("release-description").disabled = false;
+  document.getElementById("gen-notes-btn").disabled       = false;
+  document.getElementById("release-build-btn").disabled   = false;
+  document.getElementById("release-reset-btn").style.display = "none";
+  // Hide result / output / error panels
+  document.getElementById("release-result").style.display        = "none";
+  document.getElementById("release-build-output").style.display  = "none";
+  document.getElementById("release-publish-output").style.display= "none";
+  document.getElementById("release-error").style.display         = "none";
+  // Reset publish button text in case it was mid-flight
+  const pub = document.getElementById("release-publish-btn");
+  if (pub) pub.textContent = "🚀 Publish to GitHub";
+}
+
 async function doPublishRelease() {
   if (!_releaseData) return;
 
@@ -735,7 +779,7 @@ async function doPublishRelease() {
   const pubOut   = document.getElementById("release-publish-output");
   const errDiv   = document.getElementById("release-error");
 
-  const description = document.getElementById("release-description").value.trim()
+  const description = (_releaseData.description || "").trim()
     || `NetWatch v${_releaseData.version} release.`;
 
   btn.disabled = true;

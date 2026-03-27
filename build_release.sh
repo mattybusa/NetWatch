@@ -7,11 +7,13 @@
 #   (B) install.sh can use as the file source on a fresh install
 #
 # Usage:
-#   bash build_release.sh [version]
+#   bash build_release.sh [version] [description]
 #
-#   version  Optional. Defaults to the contents of the VERSION file.
-#            Use this to override for a public release version (e.g. 1.0.0)
-#            without changing the VERSION file first.
+#   version      Optional. Defaults to the contents of the VERSION file.
+#                Use this to override for a public release version (e.g. 1.0.0)
+#                without changing the VERSION file first.
+#   description  Optional. Human-readable description embedded in manifest.json.
+#                Defaults to "NetWatch vVERSION release." if not provided.
 #
 # Output:
 #   ~/backups/releases/netwatch-VERSION.zip
@@ -63,6 +65,13 @@ fi
 if [[ -z "$VERSION" ]]; then
     echo "ERROR: Version is empty." >&2
     exit 1
+fi
+
+# -- Description -------------------------------------------------------------
+if [[ -n "${2:-}" ]]; then
+    DESCRIPTION="$2"
+else
+    DESCRIPTION="NetWatch v${VERSION} release."
 fi
 
 OUTPUT_ZIP="$RELEASES_DIR/netwatch-${VERSION}.zip"
@@ -187,12 +196,20 @@ echo "  Writing manifest.json..."
 ACTIONS_TMP="$WORK_DIR/_actions.txt"
 printf '%b' "$MANIFEST_ACTIONS" > "$ACTIONS_TMP"
 
-python3 - "$WORK_DIR" "$VERSION" "$ACTIONS_TMP" << 'PYEOF'
+# Write description to a temp file to avoid quoting/escaping issues in argv
+DESC_TMP="$WORK_DIR/_description.txt"
+printf '%s' "$DESCRIPTION" > "$DESC_TMP"
+
+python3 - "$WORK_DIR" "$VERSION" "$ACTIONS_TMP" "$DESC_TMP" << 'PYEOF'
 import json, sys, os
 
-work_dir   = sys.argv[1]
-version    = sys.argv[2]
+work_dir     = sys.argv[1]
+version      = sys.argv[2]
 actions_file = sys.argv[3]
+desc_file    = sys.argv[4]
+
+with open(desc_file) as f:
+    description = f.read().strip() or f"NetWatch v{version} release."
 
 with open(actions_file) as f:
     raw = f.read()
@@ -210,7 +227,7 @@ actions.append({"action": "restart", "services": ["monitor", "web"]})
 
 manifest = {
     "version":     version,
-    "description": f"NetWatch v{version} release.",
+    "description": description,
     "actions":     actions,
 }
 
