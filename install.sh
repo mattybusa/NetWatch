@@ -42,14 +42,54 @@ read -rp "  Press Enter to continue or Ctrl+C to cancel..." _
 
 # = System packages ===================
 section "Installing system packages"
+
+# Resolve version-unstable package names dynamically from the Debian archive API.
+# The source package name (e.g. "libgpiod") is stable across renames; the binary
+# package name (e.g. libgpiod2 → libgpiod3) changes between Debian releases.
+# We ask Debian what the current binary is for "stable" at install time rather
+# than hardcoding a name that may be wrong on future OS releases.
+resolve_debian_package() {
+    local source="$1"      # Debian source package name
+    local pattern="$2"     # grep -E pattern to identify the right binary
+    local fallback="$3"    # use this name if API is unreachable
+
+    local api_url="https://api.ftp-master.debian.org/madison?package=${source}&f=json&S=true"
+    local result
+
+    result=$(curl -sf --max-time 10 "$api_url" 2>/dev/null | \
+        python3 -c "
+import sys, json, re
+try:
+    data = json.load(sys.stdin)
+    pattern = sys.argv[1]
+    for pkg_name, suites in data[0].items():
+        if re.match(pattern, pkg_name) and 'stable' in suites:
+            print(pkg_name)
+            sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" "$pattern" 2>/dev/null) || true
+
+    if [[ -n "$result" ]]; then
+        log "Resolved $source → $result"
+        echo "$result"
+    else
+        log "Warning: could not resolve $source from Debian API, using fallback: $fallback"
+        echo "$fallback"
+    fi
+}
+
+LIBGPIOD_PKG=$(resolve_debian_package "libgpiod" "^libgpiod[0-9]+$" "libgpiod3")
+
 sudo apt-get update -qq
 sudo apt-get install -y \
     python3 python3-pip python3-venv python3-dev \
     sqlite3 gpg rsync curl \
-    libgpiod2 python3-lgpio liblgpio-dev swig \
-    speedtest-cli 2>/dev/null || \
+    "$LIBGPIOD_PKG" python3-lgpio liblgpio-dev swig
+
 sudo apt-get install -y speedtest-cli || \
-    log "speedtest-cli not available = install manually if needed"
+    log "speedtest-cli not available -- install manually if needed"
 
 log "System packages installed"
 
