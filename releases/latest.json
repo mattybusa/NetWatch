@@ -1,9 +1,9 @@
 {
-  "version": "3.4.16",
-  "description": "TLS cert fix for Wi-Fi installs. Fixed a permission error during certificate generation when the Pi has an active Wi-Fi connection. The wlan0 IP address is now written to the cert config correctly without requiring service account permissions.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.16/netwatch-3.4.16.zip",
+  "version": "3.4.18",
+  "description": "WiFi monitoring fix for simple networks. On a simple network setup, NetWatch now independently verifies both your wired and wireless connections by pinging the gateway through each interface separately. Previously the WiFi check was skipped entirely on simple networks \u2014 now a disconnected WiFi interface is correctly detected and reported.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.18/netwatch-3.4.18.zip",
   "changelog_url": "",
-  "package_sha256": "aebcd3e287d7cd8e29e6c8f096b46a2655d7b4943eb7be5831d7ea0418bd5514",
+  "package_sha256": "0a62475622472555756958ba4a7dbaa3ef8c9ebc78d70633252d85fa77289f7e",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
