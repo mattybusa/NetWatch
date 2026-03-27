@@ -370,7 +370,7 @@
 
       <!-- Version input + Build -->
       <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap;">
-        <div style="flex:1;min-width:160px;">
+        <div style="flex:1;min-width:160px;padding-bottom:calc(1em + 3px);">
           <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px;">
             Version (leave blank to use VERSION file)
           </label>
@@ -395,11 +395,13 @@
           </div>
           <div id="gen-notes-hint" style="visibility:hidden;font-size:0.72rem;color:var(--text-muted);margin-top:3px;min-height:1em;"></div>
         </div>
-        <button id="release-build-btn" class="nw-btn nw-btn-primary"
-                onclick="doBuildRelease()"
-                style="white-space:nowrap;padding:7px 16px;">
-          🔨 Build Release
-        </button>
+        <div style="padding-bottom:calc(1em + 3px);">
+          <button id="release-build-btn" class="nw-btn nw-btn-primary"
+                  onclick="doBuildRelease()"
+                  style="white-space:nowrap;padding:7px 16px;">
+            🔨 Build Release
+          </button>
+        </div>
       </div>
 
       <!-- Build output -->
