@@ -786,8 +786,20 @@ The chown -R fix restores ownership but the real pattern to follow is:
 
 ---
 
-2026-03-25 | Session 31 (closeout packaging)
-DELETE OUTPUT ZIP BEFORE REBUILDING -- zip UPDATES NOT REPLACES
+2026-03-26 | v3.4.5 (Session 34)
+BUILD SCRIPTS INVOKED BY WEB SERVICE MUST USE ABSOLUTE PATHS, NOT $HOME
+When the web service (netwatch-svc) calls a shell script via subprocess, $HOME
+resolves to /nonexistent (netwatch-svc has no home directory). This affects any
+script that builds output paths with $HOME or any Python code using
+os.path.expanduser("~"). Both fail silently or with "Permission denied" on the
+output directory. Always use absolute paths derived from the script location:
+  NETWATCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  OUTPUT_DIR="/home/mboynton/backups/releases"   # hardcoded absolute path
+In Python routes, use os.path.dirname(NETWATCH_DIR) to get /home/mboynton,
+then join from there. Never use os.path.expanduser("~") in any code path that
+runs as netwatch-svc.
+
+---
 The zip command updates an existing archive rather than replacing it. If a package
 zip is rebuilt without first deleting the old file, files from the previous build
 remain in the zip alongside the new files. This causes patcher's _find_in_zip()
