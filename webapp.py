@@ -107,7 +107,8 @@ def web_manifest():
 def check_first_run():
     """Intercept all requests and redirect to setup wizard if not configured."""
     if is_first_run() and not request.path.startswith("/setup") and \
-       not request.path.startswith("/static"):
+       not request.path.startswith("/static") and \
+       not request.path.startswith("/api/setup"):
         return redirect(url_for("setup_wizard"))
 
 # ── Setup Wizard Routes ────────────────────────────────────────────────────────
