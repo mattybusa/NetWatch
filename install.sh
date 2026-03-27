@@ -429,7 +429,7 @@ else
     # Add wlan0 IP if present and different
     WLAN_IP=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1 || true)
     if [[ -n "$WLAN_IP" && "$WLAN_IP" != "$PI_IP" ]]; then
-        echo "IP.3  = $WLAN_IP" | sudo -u "$SVC_USER" tee -a "$EXT_FILE" > /dev/null
+        echo "IP.3  = $WLAN_IP" >> "$EXT_FILE"
     fi
 
     # Sign server certificate
