@@ -1,9 +1,9 @@
 {
-  "version": "3.4.29",
-  "description": "- v3.4.29: Migration test package 2 of 2: adds _test_col_2 to system_settings table to verify skip-version migration behavior.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.29/netwatch-3.4.29.zip",
+  "version": "3.4.30",
+  "description": "- v3.4.30: Migration test package 1 of 2: adds _test_col_1 to system_settings table to verify skip-version migration behavior.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.30/netwatch-3.4.30.zip",
   "changelog_url": "",
-  "package_sha256": "5d7324fbd6c2e6623b69419c0f3cab15029705f0c9b29f9c222ee431bfdd0b0f",
+  "package_sha256": "1899e9baaea34773e0ef10e2d3c049a00ee98fbcdf228ba19bacf46d458621b2",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
