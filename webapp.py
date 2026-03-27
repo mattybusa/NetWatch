@@ -2931,6 +2931,87 @@ def admin_publish_release():
         return jsonify({"status": "error", "message": f"Git error: {e}",
                         "steps": steps}), 500
 
+    # -- Step 5: Update GitHub Wiki Changelog.md -----------------------------
+    # Non-fatal — wiki update failure does not block the release.
+    try:
+        import tempfile, shutil
+        wiki_url = f"https://{pat}@github.com/{owner}/{repo}.wiki.git"
+        wiki_dir = tempfile.mkdtemp(prefix="nw_wiki_")
+        try:
+            # Clone the wiki repo
+            clone = subprocess.run(
+                ["git", "clone", "--depth=1", wiki_url, wiki_dir],
+                capture_output=True, timeout=30
+            )
+            if clone.returncode != 0:
+                steps.append(f"⚠ Wiki clone failed — changelog not updated")
+            else:
+                changelog_path = os.path.join(wiki_dir, "Changelog.md")
+
+                # Read existing content (may not exist yet)
+                existing = ""
+                if os.path.isfile(changelog_path):
+                    with open(changelog_path, "r") as f:
+                        existing = f.read()
+
+                # Build new entry — prepend so newest is at top
+                from datetime import date as _date
+                entry_lines = [f"## NetWatch v{version} — {_date.today().isoformat()}"]
+                for line in description.splitlines():
+                    if line.strip():
+                        entry_lines.append(line.strip())
+                entry_lines.append("")
+                new_entry = "\n".join(entry_lines) + "\n"
+
+                # If file doesn't exist yet, add a header
+                if not existing.strip():
+                    existing = "# NetWatch Changelog\n\nFull release history, newest first.\n\n"
+
+                # Insert new entry after the header block (first blank line after any # lines)
+                lines = existing.splitlines(keepends=True)
+                insert_at = 0
+                for i, line in enumerate(lines):
+                    if line.startswith("#"):
+                        insert_at = i + 1
+                    elif insert_at > 0 and line.strip() == "":
+                        insert_at = i + 1
+                        break
+
+                lines.insert(insert_at, new_entry)
+                updated = "".join(lines)
+
+                with open(changelog_path, "w") as f:
+                    f.write(updated)
+
+                # Commit and push
+                wiki_git = ["git", "-C", wiki_dir]
+                subprocess.run([*wiki_git, "config", "user.email", "netwatch@localhost"],
+                               capture_output=True, timeout=10)
+                subprocess.run([*wiki_git, "config", "user.name", "NetWatch"],
+                               capture_output=True, timeout=10)
+                subprocess.run([*wiki_git, "add", "Changelog.md"],
+                               capture_output=True, timeout=10)
+                commit = subprocess.run(
+                    [*wiki_git, "commit", "-m", f"v{version}: update changelog"],
+                    capture_output=True, timeout=15
+                )
+                if commit.returncode == 0:
+                    push = subprocess.run(
+                        [*wiki_git, "push", "origin", "master"],
+                        capture_output=True, timeout=30
+                    )
+                    if push.returncode == 0:
+                        steps.append(f"✓ Wiki Changelog.md updated")
+                    else:
+                        err = push.stderr.decode() if push.stderr else "unknown"
+                        steps.append(f"⚠ Wiki push failed: {err[:80]}")
+                else:
+                    steps.append(f"⚠ Wiki commit failed")
+        finally:
+            shutil.rmtree(wiki_dir, ignore_errors=True)
+    except Exception as e:
+        steps.append(f"⚠ Wiki update error: {str(e)[:80]}")
+
     log.info("release_published", version=version, asset_url=asset_url,
              user=auth.get_current_user().get("username"))
 
