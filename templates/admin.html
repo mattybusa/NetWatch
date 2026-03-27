@@ -26,7 +26,8 @@
 
   {% if current_user and current_user.manage_admin %}
 
-  <!-- Deployed Files -->
+  <!-- Deployed Files (dev only) -->
+  {% if is_dev_system %}
   <div class="nw-card p-4 mb-4">
     <div class="nw-collapse-header" onclick="toggleSection('updater')">
       <div class="nw-label" style="margin:0;">Deployed Files</div>
@@ -45,6 +46,7 @@
       </a>
     </div>
   </div>
+  {% endif %}
 
   <!-- Package Installer -->
   <div class="nw-card p-4 mb-4">
@@ -155,7 +157,17 @@
       <a href="/api/admin/export_resets" class="nw-btn w-100 mb-2" style="display:block;text-align:center;">
         <i class="bi bi-download me-2"></i>Export Reset Events (CSV)
       </a>
-      <hr class="nw-hr">
+    </div>
+  </div>
+
+  <!-- Developer Tools (dev only) -->
+  {% if is_dev_system %}
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-collapse-header" onclick="toggleSection('devtools')">
+      <div class="nw-label" style="margin:0;">Developer Tools</div>
+      <i class="bi bi-chevron-down nw-chevron" id="chevron-devtools"></i>
+    </div>
+    <div id="section-devtools" class="nw-collapse-body">
       <p style="font-size:0.82rem;color:var(--text-muted);margin:10px 0 14px;">
         Download a zip of the current code and Dev Documents. Excludes config.py (contains credentials),
         database, certs, logs, and venv. Use this to resume a development session in a new chat.
@@ -165,6 +177,7 @@
       </a>
     </div>
   </div>
+  {% endif %}
 
   <!-- Backup Manager (consolidated) -->
   <div class="nw-card p-4 mb-4">
