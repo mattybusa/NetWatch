@@ -27,5 +27,8 @@ prior version and no migrations to reconstruct.
 
 <!-- Entries begin below this line. Oldest at bottom, newest at top. -->
 
+## 3.4.31
+ALTER TABLE system_settings ADD COLUMN _test_col_2 TEXT DEFAULT NULL
+
 ## 3.4.30
 ALTER TABLE system_settings ADD COLUMN _test_col_1 TEXT DEFAULT NULL
