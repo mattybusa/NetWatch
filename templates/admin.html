@@ -383,9 +383,10 @@
             Description (shown in update banner)
           </label>
           <div style="display:flex;gap:6px;align-items:center;">
-            <input id="release-description" type="text" class="nw-input"
-                   placeholder="What's in this release?"
-                   style="font-size:0.85rem;flex:1;">
+            <textarea id="release-description" class="nw-input"
+                      placeholder="What's in this release?"
+                      rows="3"
+                      style="font-size:0.85rem;flex:1;resize:vertical;line-height:1.4;"></textarea>
             <button class="nw-btn" onclick="generateReleaseNotes()"
                     id="gen-notes-btn"
                     title="Auto-generate from changelog"
