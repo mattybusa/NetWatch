@@ -1,9 +1,9 @@
 {
-  "version": "3.4.34",
-  "description": "- v3.4.34: Release Manager: lock fields after build, Reset button to discard and rebuild, description embedded in release zip manifest.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.34/netwatch-3.4.34.zip",
+  "version": "3.4.35",
+  "description": "- v3.4.35: Security card on Admin page: MFA_REQUIRED config key toggles mandatory MFA enforcement for Admin/Operator roles.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.35/netwatch-3.4.35.zip",
   "changelog_url": "",
-  "package_sha256": "3eb0aa0382697fc4e47d474e9a08f140ba3c965f6f199e1ed48f0641acd2b80d",
+  "package_sha256": "4d1ee50ca818cccf925254b6f8d8e83d441a4b0dd65eb9bbb19bbb258eae6de1",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
