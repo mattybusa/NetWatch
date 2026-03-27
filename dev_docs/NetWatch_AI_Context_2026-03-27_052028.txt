@@ -23,7 +23,7 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.4.11
+- **Pi version:** v3.4.10
 - **Pi path:** `/home/mboynton/netwatch/`
 - **Canonical matches Pi at v3.3.95**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.

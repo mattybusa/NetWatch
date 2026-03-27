@@ -72,10 +72,10 @@ except Exception:
 " "$pattern" 2>/dev/null) || true
 
     if [[ -n "$result" ]]; then
-        log "Resolved $source → $result"
+        log "Resolved $source → $result" >&2
         echo "$result"
     else
-        log "Warning: could not resolve $source from Debian API, using fallback: $fallback"
+        log "Warning: could not resolve $source from Debian API, using fallback: $fallback" >&2
         echo "$fallback"
     fi
 }
