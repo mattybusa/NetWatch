@@ -800,6 +800,9 @@ then join from there. Never use os.path.expanduser("~") in any code path that
 runs as netwatch-svc.
 
 ---
+
+2026-03-25 | Session 31 (closeout packaging)
+DELETE OUTPUT ZIP BEFORE REBUILDING -- zip UPDATES NOT REPLACES
 The zip command updates an existing archive rather than replacing it. If a package
 zip is rebuilt without first deleting the old file, files from the previous build
 remain in the zip alongside the new files. This causes patcher's _find_in_zip()

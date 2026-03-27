@@ -154,6 +154,11 @@ DURING A SESSION
   Format each entry the same way: DATE | VERSION, TITLE, body, ---
 - Add to Gotchas.txt immediately when a hard-learned lesson is encountered
 - Do not wait until end of session — document gotchas as they happen
+- **Gotchas.txt must be delivered to the Pi every session where entries were added.**
+  At close-out, either include Gotchas.txt in a package (preferred — patcher creates
+  a dated backup) OR upload directly via Dev Docs. Do not rely on a future session
+  to carry it. Entries that never ship to the Pi are invisible to future sessions
+  that read the session-start zip. The close-out checklist verifies this explicitly.
 - Follow all rules in NetWatch_AI_Context_latest.txt without exception
 - When a feature or bug is completed, note it — the summary will capture it at session end
 - **Maintain inline documentation standards.** New functions, tables, and non-obvious
@@ -184,6 +189,11 @@ SESSION END — DO THIS BEFORE CLOSING
    New entries should have been added directly during the session per the DURING A SESSION
    rules above. At close-out, verify nothing was missed. Do not produce a separate
    append file — append directly to Gotchas.txt.
+   **Then verify Gotchas.txt will actually reach the Pi this session:**
+   - If any package this session already includes Gotchas.txt — done.
+   - If not, include Gotchas.txt in the closeout package, OR upload directly via Dev Docs.
+   - Do not close the session without confirming delivery. "Appended directly" in
+     Claude's working copy is not the same as delivered to the Pi.
 
 4. Update NetWatch_AI_Context_latest.txt
    - Current version number
@@ -198,8 +208,10 @@ Summary files (ChatSummary_N.txt, Feature_*.txt, Bug_*.txt) can be uploaded dire
 via NetWatch > Dev Docs -- no package required.
 
 Gotchas.txt: new entries are appended directly to the file during a dev session and at
-close-out. Upload the updated Gotchas.txt directly via Dev Docs. No separate append file
-is needed for dev sessions.
+close-out. The updated Gotchas.txt MUST be delivered to the Pi before the session ends —
+either by including it in the closeout package (preferred) or uploading directly via
+Dev Docs. Do not assume a future package will carry it. Entries not on the Pi are
+invisible to the next session's startup read.
 Note: summarization sessions (where Claude reads a transcript and produces a summary in
 a separate chat) produce a Gotchas_Append_SessionN.txt for the user to merge, because
 Gotchas.txt is not live in that context.
