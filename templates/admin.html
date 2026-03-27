@@ -382,9 +382,18 @@
           <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px;">
             Description (shown in update banner)
           </label>
-          <input id="release-description" type="text" class="nw-input"
-                 placeholder="What's in this release?"
-                 style="font-size:0.85rem;width:100%;">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input id="release-description" type="text" class="nw-input"
+                   placeholder="What's in this release?"
+                   style="font-size:0.85rem;flex:1;">
+            <button class="nw-btn" onclick="generateReleaseNotes()"
+                    id="gen-notes-btn"
+                    title="Auto-generate from changelog"
+                    style="white-space:nowrap;padding:6px 12px;font-size:0.78rem;">
+              ✨ Generate
+            </button>
+          </div>
+          <div id="gen-notes-hint" style="display:none;font-size:0.72rem;color:var(--text-muted);margin-top:3px;"></div>
         </div>
         <button id="release-build-btn" class="nw-btn nw-btn-primary"
                 onclick="doBuildRelease()"
@@ -634,6 +643,36 @@ async function loadStats() {
 
 // ── Release Manager ───────────────────────────────────────────────────────────
 let _releaseData = null;  // holds last successful build result
+
+async function generateReleaseNotes() {
+  const btn  = document.getElementById("gen-notes-btn");
+  const hint = document.getElementById("gen-notes-hint");
+  btn.disabled = true;
+  btn.textContent = "⟳";
+  hint.style.display = "none";
+  try {
+    const res = await fetch("/api/admin/release_notes_draft").then(r => r.json());
+    if (res.status === "ok") {
+      if (res.text) {
+        document.getElementById("release-description").value = res.text;
+        const since = res.last_published ? `since v${res.last_published}` : "all time";
+        hint.textContent = `${res.count} package${res.count !== 1 ? "s" : ""} ${since}`;
+        hint.style.display = "block";
+      } else {
+        hint.textContent = "No new packages since last release.";
+        hint.style.display = "block";
+      }
+    } else {
+      hint.textContent = "Error: " + (res.message || "unknown");
+      hint.style.display = "block";
+    }
+  } catch(e) {
+    hint.textContent = "Request failed — check server logs";
+    hint.style.display = "block";
+  }
+  btn.disabled = false;
+  btn.textContent = "✨ Generate";
+}
 
 async function doBuildRelease() {
   const btn     = document.getElementById("release-build-btn");

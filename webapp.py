@@ -107,8 +107,7 @@ def web_manifest():
 def check_first_run():
     """Intercept all requests and redirect to setup wizard if not configured."""
     if is_first_run() and not request.path.startswith("/setup") and \
-       not request.path.startswith("/static") and \
-       not request.path.startswith("/api/setup"):
+       not request.path.startswith("/static"):
         return redirect(url_for("setup_wizard"))
 
 # ── Setup Wizard Routes ────────────────────────────────────────────────────────
@@ -2592,6 +2591,74 @@ def admin_export_code():
     download_name = f"netwatch_code_{ts}.zip"
     return send_file(buf, mimetype="application/zip",
                      as_attachment=True, download_name=download_name)
+
+
+@app.route("/api/admin/release_notes_draft")
+@auth.login_required
+@auth.requires_permission("manage_users")
+def admin_release_notes_draft():
+    """
+    Generate a draft release description from changelog entries installed
+    since the last published release. Returns plain text, one line per package.
+    Format: v{version}: {description}
+    """
+    if not getattr(config, "DEVELOPMENT_SYSTEM", False):
+        return jsonify({"status": "error", "message": "Not a development system"}), 403
+
+    import json as json_lib
+
+    # Read last published version from releases/latest.json
+    last_published = ""
+    try:
+        manifest_path = os.path.join(NETWATCH_DIR, "releases", "latest.json")
+        with open(manifest_path) as f:
+            last_published = json_lib.load(f).get("version", "").strip()
+    except Exception:
+        pass  # No published release yet — include all changelog entries
+
+    # Query patch_log for successful entries newer than last published version
+    try:
+        import sqlite3 as _sq
+        from packaging import version as pkg_version
+
+        conn = _sq.connect(os.path.join(NETWATCH_DIR, "netwatch.db"))
+        conn.row_factory = _sq.Row
+        rows = conn.execute(
+            "SELECT package_version, description FROM patch_log "
+            "WHERE success = 1 AND package_version IS NOT NULL "
+            "AND description IS NOT NULL "
+            "ORDER BY id ASC"
+        ).fetchall()
+        conn.close()
+
+        # Filter to versions newer than last published
+        entries = []
+        for row in rows:
+            ver = (row["package_version"] or "").strip()
+            desc = (row["description"] or "").strip()
+            if not ver or not desc:
+                continue
+            if last_published:
+                try:
+                    if pkg_version.parse(ver) <= pkg_version.parse(last_published):
+                        continue
+                except Exception:
+                    continue
+            entries.append(f"v{ver}: {desc}")
+
+        if not entries:
+            return jsonify({"status": "ok", "text": "", "last_published": last_published})
+
+        return jsonify({
+            "status": "ok",
+            "text": "\n".join(entries),
+            "last_published": last_published,
+            "count": len(entries),
+        })
+
+    except Exception as e:
+        log.error("release_notes_draft_failed", error=str(e))
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/api/admin/build_release", methods=["POST"])
