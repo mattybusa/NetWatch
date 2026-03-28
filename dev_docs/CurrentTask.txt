@@ -2,53 +2,53 @@ NETWATCH CURRENT TASK
 =====================
 Updated: 2026-03-28 | Session 38 closed | v3.4.43 (pending install)
 
-STATUS: Session 38 complete. v3.4.43 package built, ready to install.
+STATUS: Session 38 complete. Closeout package ready to install.
 
 SESSION 38 SUMMARY
 ------------------
 Phase 1: Full security audit — findings in ChatSummary_38.txt.
-Phase 2: Security hardening packages:
+Phase 2: Seven security fixes across four packages:
   v3.4.41: C1 upload limit, H1 security headers, M1/M2 secure_filename, M3 setup guard
   v3.4.42: Fix package installer UI hang on oversized upload (413 not handled in JS)
   v3.4.43: H2 session rotation post-MFA (session.clear() in _complete_mfa_login)
+  Closeout: Updated ChatSummary_38, CurrentTask, context doc
 
 KEY STATE
 ---------
-- Production Pi: v3.4.42 (v3.4.43 package ready to install)
+- Production Pi: v3.4.43 (after installing this closeout package)
 - Test Pi: v3.4.40
-- GitHub: v3.4.40 is current public release
-- Security audit complete — findings in ChatSummary_38.txt
+- GitHub: v3.4.40 is current public release (hold — wait for C2+C3)
+- Security audit complete — full findings in ChatSummary_38.txt
 - Remaining security items: C2, C3, C4, H4
 
 NEXT SESSION
 ------------
 Priority order:
 
-  1. Install v3.4.43 on production Pi
-     To verify H2: log out, log back in with MFA, confirm you land on the
-     dashboard normally. That's the functional test — session rotation is
-     invisible when working correctly. Any regression would show as a login
-     loop or lost session immediately after MFA.
+  1. Verify MFA login works normally after v3.4.43 install
+     Log out, log back in with MFA. Should land on dashboard normally.
+     Any regression shows immediately as login loop or session drop after MFA.
 
   2. C2: DB restore validation
-     Harden restore route — validate uploaded DB schema before overwriting
-     live database. Prevent backdoor admin injection via crafted DB file.
+     Harden restore route — validate uploaded DB contains expected schema
+     before overwriting live database. Prevent backdoor admin via crafted DB.
 
   3. C3: run_sql SQL whitelist
-     Restrict run_sql manifest action to safe statement types only
-     (ALTER TABLE ADD COLUMN, CREATE TABLE IF NOT EXISTS).
+     Restrict run_sql manifest action to safe statement types only:
+     ALTER TABLE ADD COLUMN, CREATE TABLE IF NOT EXISTS. Reject DROP, DELETE,
+     INSERT, UPDATE. Requires careful testing — core install path.
 
-  4. C4: Package signing — design brief first, no code yet.
-     Key questions: public key storage, install.sh embedding, failure behaviour
-     for manual vs auto-update install paths.
+  4. C4: Package signing — design brief first, no code
+     Key questions: where public key lives, how install.sh embeds it,
+     failure behaviour for manual vs auto-update install paths.
 
-  5. Publish security release to GitHub once C2 + C3 are shipped.
-     Makes a cleaner security release bundle than publishing piecemeal.
+  5. Publish security release to GitHub once C2 + C3 shipped.
+     Test Pi updates automatically after publish.
 
 NOTES
 -----
-- v3.4.43 is a web-only restart. No DB changes, no monitor changes.
-- Session rotation is transparent to the user — no visible change during login.
-  Any regression shows immediately as inability to log in after MFA.
-- Test Pi will update once GitHub release is published. Hold for now.
-- H4 (git PAT in patch_log error field) is low urgency — leaving for later.
+- CSP 'unsafe-inline' is documented in code — not a mistake, Blueprint refactor
+  prerequisite to remove it.
+- H4 (PAT in patch_log error field) deferred — low urgency.
+- ChatSummary_38.txt is the expanded summary for the security audit — load it
+  next session if continuing security work for full finding details.
