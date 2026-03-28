@@ -886,19 +886,24 @@ def _complete_mfa_login(user_id):
     Internal helper: called when MFA challenge passes.
     Loads the full user record, calls login_user(), clears mfa_pending,
     and redirects to the intended destination.
+
+    Session rotation: session.clear() is called before login_user() to
+    invalidate the pre-MFA session cookie. Any cookie captured between
+    password entry and MFA completion becomes worthless after this point.
+    next_url and must_change are saved before the clear and restored after.
     """
-    next_url     = session.pop("mfa_next_url", None) or url_for("index")
-    must_change  = session.pop("mfa_must_change", False)
-    session.pop("mfa_pending", None)
-    session.pop("mfa_code_sent", None)
-    session.pop("mfa_send_error", None)
+    next_url    = session.pop("mfa_next_url", None) or url_for("index")
+    must_change = session.pop("mfa_must_change", False)
 
     user = auth.get_user_by_id(user_id)
     if not user:
         return redirect(url_for("login"))
 
+    # Rotate the session cookie — clears the pre-MFA session entirely so any
+    # captured pre-MFA cookie cannot be replayed as an authenticated session.
+    session.clear()
+
     auth.login_user(user)
-    session.pop("_flashes", None)
 
     if must_change:
         import config as _cfg

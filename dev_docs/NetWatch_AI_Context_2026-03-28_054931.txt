@@ -23,7 +23,7 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.4.43
+- **Pi version:** v3.4.42
 - **Pi path:** `/home/mboynton/netwatch/`
 - **Canonical matches Pi at v3.4.42**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.
@@ -700,11 +700,8 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   uploads, M3 setup/skip post-setup guard.
   SHIPPED v3.4.42: Fix package installer UI hang on oversized upload — preview and
   apply fetch blocks now handle 413 and non-JSON responses gracefully.
-  SHIPPED v3.4.43: H2 session rotation post-MFA — session.clear() called in
-  _complete_mfa_login() before login_user(). Pre-MFA captured cookies cannot
-  be replayed as authenticated sessions.
   REMAINING: C2 DB restore validation, C3 run_sql whitelist, C4 package signing,
-  H4 git PAT scrubbing from logs.
+  H2 session rotation post-MFA, H4 git PAT scrubbing from logs.
 
 **UI**
 - ✅ All UI backlog items complete as of v3.3.85.
@@ -871,11 +868,8 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   uploads, M3 setup/skip post-setup guard.
   SHIPPED v3.4.42: Fix package installer UI hang on oversized upload — preview and
   apply fetch blocks now handle 413 and non-JSON responses gracefully.
-  SHIPPED v3.4.43: H2 session rotation post-MFA — session.clear() called in
-  _complete_mfa_login() before login_user(). Pre-MFA captured cookies cannot
-  be replayed as authenticated sessions.
   REMAINING: C2 DB restore validation, C3 run_sql whitelist, C4 package signing,
-  H4 git PAT scrubbing from logs.
+  H2 session rotation post-MFA, H4 git PAT scrubbing from logs.
 
 **UI**
 - ✅ System log viewer: pkg_update.log tail in Admin page, collapsible card with
