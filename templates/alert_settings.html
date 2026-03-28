@@ -12,6 +12,85 @@
     <a href="/admin" style="color:var(--accent);">Users &amp; Roles → Alert Defaults</a>.
   </p>
 
+  <!-- ── Summary Settings ── -->
+  <div class="nw-card p-4 mb-4">
+    <div class="nw-label mb-1">Summary Settings</div>
+    <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px;">
+      Configure what appears in the scheduled network summary email.
+      Frequency and send time are set in
+      <a href="/config" style="color:var(--accent);">Config Editor → Alerts</a>.
+    </p>
+
+    <!-- Toggle rows -->
+    <div id="summary-toggles" style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;">
+
+      <div class="summary-toggle-row" data-key="SUMMARY_SHOW_UPTIME"
+           style="display:flex;align-items:center;justify-content:space-between;
+                  padding:10px 14px;border-radius:8px;background:var(--bg-input);
+                  border:1px solid var(--border);">
+        <div>
+          <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Uptime stats</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);">1h, 24h, 7d, and 30d uptime percentages</div>
+        </div>
+        <div class="summary-toggle-ctrl" style="flex-shrink:0;margin-left:16px;"></div>
+      </div>
+
+      <div class="summary-toggle-row" data-key="SUMMARY_SHOW_RESETS"
+           style="display:flex;align-items:center;justify-content:space-between;
+                  padding:10px 14px;border-radius:8px;background:var(--bg-input);
+                  border:1px solid var(--border);">
+        <div>
+          <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Reset count</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);">Number of automatic resets in the summary period</div>
+        </div>
+        <div class="summary-toggle-ctrl" style="flex-shrink:0;margin-left:16px;"></div>
+      </div>
+
+      <div class="summary-toggle-row" data-key="SUMMARY_SHOW_LATENCY"
+           style="display:flex;align-items:center;justify-content:space-between;
+                  padding:10px 14px;border-radius:8px;background:var(--bg-input);
+                  border:1px solid var(--border);">
+        <div>
+          <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Current latency &amp; packet loss</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);">Snapshot of latency and packet loss at send time</div>
+        </div>
+        <div class="summary-toggle-ctrl" style="flex-shrink:0;margin-left:16px;"></div>
+      </div>
+
+      <div class="summary-toggle-row" data-key="SUMMARY_SHOW_SPEEDTEST"
+           style="display:flex;align-items:center;justify-content:space-between;
+                  padding:10px 14px;border-radius:8px;background:var(--bg-input);
+                  border:1px solid var(--border);">
+        <div>
+          <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Speedtest results</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);">Average download, upload, and ping from tests in the period</div>
+        </div>
+        <div class="summary-toggle-ctrl" style="flex-shrink:0;margin-left:16px;"></div>
+      </div>
+
+      <div class="summary-toggle-row" data-key="SUMMARY_SHOW_RESET_LOG"
+           style="display:flex;align-items:center;justify-content:space-between;
+                  padding:10px 14px;border-radius:8px;background:var(--bg-input);
+                  border:1px solid var(--border);">
+        <div>
+          <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Reset log</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);">Time and type of each individual reset event in the period</div>
+        </div>
+        <div class="summary-toggle-ctrl" style="flex-shrink:0;margin-left:16px;"></div>
+      </div>
+
+    </div>
+
+    <!-- Test send -->
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <button class="nw-btn nw-btn-primary" onclick="sendTestSummary()"
+              id="test-summary-btn" style="white-space:nowrap;">
+        📧 Send Test Summary
+      </button>
+      <span id="test-summary-msg" style="font-size:0.8rem;color:var(--text-muted);"></span>
+    </div>
+  </div>
+
   <!-- ── Subscribers ── -->
   <div class="nw-card p-4 mb-4">
     <div class="nw-label mb-1">Subscribers</div>
@@ -737,6 +816,115 @@ async function deleteSubscriber(subId) {
 document.getElementById("sub-modal").addEventListener("click", function(e) {
   if (e.target === this) closeModal();
 });
+
+
+// ── Summary Settings ──────────────────────────────────────────────────────────
+
+const SUMMARY_KEYS = [
+  "SUMMARY_SHOW_UPTIME",
+  "SUMMARY_SHOW_RESETS",
+  "SUMMARY_SHOW_LATENCY",
+  "SUMMARY_SHOW_SPEEDTEST",
+  "SUMMARY_SHOW_RESET_LOG",
+];
+
+function buildToggle(key, enabled) {
+  const id = "st_" + key;
+  return `
+    <div style="position:relative;display:inline-block;width:44px;height:24px;cursor:pointer;"
+         onclick="toggleSummaryKey('${key}')">
+      <input type="checkbox" id="${id}" ${enabled ? "checked" : ""}
+             style="opacity:0;width:0;height:0;position:absolute;"
+             onclick="event.stopPropagation()">
+      <span id="st_track_${key}"
+            style="position:absolute;inset:0;border-radius:24px;
+                   background:${enabled ? "var(--ok)" : "var(--border)"};
+                   transition:background 0.2s;pointer-events:none;">
+        <span style="position:absolute;left:${enabled ? "22px" : "2px"};top:2px;
+                     width:20px;height:20px;border-radius:50%;background:white;
+                     transition:left 0.2s;" id="st_dot_${key}"></span>
+      </span>
+    </div>`;
+}
+
+async function loadSummaryToggles() {
+  try {
+    const res = await fetch("/api/config/values").then(r => r.json());
+    for (const key of SUMMARY_KEYS) {
+      const row  = document.querySelector(`.summary-toggle-row[data-key="${key}"]`);
+      if (!row) continue;
+      const ctrl = row.querySelector(".summary-toggle-ctrl");
+      const val  = res[key];
+      const enabled = (val === true || val === "True" || val === "true");
+      ctrl.innerHTML = buildToggle(key, enabled);
+    }
+  } catch (e) {
+    console.error("Failed to load summary toggles", e);
+  }
+}
+
+async function toggleSummaryKey(key) {
+  const cb      = document.getElementById("st_" + key);
+  const track   = document.getElementById("st_track_" + key);
+  const dot     = document.getElementById("st_dot_" + key);
+  const newVal  = !cb.checked;
+
+  // Optimistic UI update
+  cb.checked             = newVal;
+  track.style.background = newVal ? "var(--ok)" : "var(--border)";
+  dot.style.left         = newVal ? "22px" : "2px";
+
+  try {
+    const payload = {};
+    payload[key] = newVal ? "True" : "False";
+    const res = await fetch("/api/config/save_quiet", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    }).then(r => r.json());
+
+    if (!res.success) {
+      // Revert on failure
+      cb.checked             = !newVal;
+      track.style.background = !newVal ? "var(--ok)" : "var(--border)";
+      dot.style.left         = !newVal ? "22px" : "2px";
+      console.error("Toggle save failed:", res.message);
+    }
+  } catch (e) {
+    console.error("Toggle request failed", e);
+  }
+}
+
+async function sendTestSummary() {
+  const btn = document.getElementById("test-summary-btn");
+  const msg = document.getElementById("test-summary-msg");
+  btn.disabled    = true;
+  btn.textContent = "⏳ Sending...";
+  msg.textContent = "";
+
+  try {
+    const res = await fetch("/api/alerts/send_test_summary", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+    }).then(r => r.json());
+
+    if (res.success) {
+      msg.style.color = "var(--ok)";
+      msg.textContent = "✓ " + res.message;
+    } else {
+      msg.style.color = "var(--fail)";
+      msg.textContent = "✗ " + res.message;
+    }
+  } catch (e) {
+    msg.style.color = "var(--fail)";
+    msg.textContent = "✗ Request failed";
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = "📧 Send Test Summary";
+  }
+}
+
+loadSummaryToggles();
 
 loadAll();
 </script>

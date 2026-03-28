@@ -2299,6 +2299,34 @@ def control_run_speedtest():
     return jsonify({"status": "ok", "message": "Speedtest queued"})
 
 
+
+@app.route("/api/alerts/send_test_summary", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def api_send_test_summary():
+    """
+    Send the summary email immediately to the logged-in user's email address only.
+    Uses the same content as the scheduled summary, respecting all SUMMARY_SHOW_* flags.
+    Does not affect subscribers or the summary schedule.
+    """
+    user = auth.get_current_user()
+    sub  = alert_subscribers.get_subscriber_by_user_id(user["id"])
+    if not sub or not sub.get("email_address"):
+        return jsonify({"success": False,
+                        "message": "No email address found for your account. "
+                                   "Add one in Alerts → Subscribers first."}), 400
+
+    email = sub["email_address"]
+    try:
+        alerts.send_daily_summary(force_email=email)
+        log.info("test_summary_sent", user=user["username"], email=email)
+        return jsonify({"success": True,
+                        "message": f"Summary sent to {email}"})
+    except Exception as e:
+        log.error("test_summary_failed", error=str(e), user=user["username"])
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
 @app.route("/api/alerts/test/<int:sub_id>/<channel>", methods=["POST"])
 @auth.login_required
 @auth.requires_permission("manage_admin")
@@ -3602,6 +3630,31 @@ def config_editor():
                            unconfigured_keys=unconfigured_keys,
                            pending_notifications=pending_notifications)
 
+
+
+@app.route("/api/config/values")
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def api_config_values():
+    """Return all current config values as a flat JSON dict. Used by toggle UIs."""
+    return jsonify(configeditor.read_config())
+
+
+@app.route("/api/config/save_quiet", methods=["POST"])
+@auth.login_required
+@auth.requires_permission("manage_admin")
+def api_config_save_quiet():
+    """
+    Save one or more config values without triggering a service restart.
+    Only appropriate for keys whose new values are read at runtime (not at startup).
+    Currently used for SUMMARY_SHOW_* toggles.
+    """
+    data = request.get_json() or {}
+    user = auth.get_current_user()
+    success, error = configeditor.save_config(data, saved_by=user["username"])
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"success": False, "message": error})
 
 @app.route("/api/config/save", methods=["POST"])
 @auth.login_required

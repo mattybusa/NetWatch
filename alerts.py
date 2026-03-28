@@ -341,47 +341,151 @@ def send_test(subscriber_id, channel):
 
     return False, f"Unknown channel: {channel}"
 
-def send_daily_summary():
-    """
-    Compile and send a daily network health summary to all subscribers of the
-    daily_summary alert type. Called by the monitor loop at approximately 8:00 AM.
-    Covers the previous 24 hours.
-    """
-    if not config.ALERTS_ENABLED:
-        log.info("Daily summary suppressed (alerts disabled)")
-        return
-
-    try:
-        uptime   = database.get_uptime_stats()       # {'1h':x, '24h':x, '7d':x, '30d':x}
-        resets   = database.get_reset_count_today()  # int
-        latest   = database.get_latest_health()      # dict or None
-    except Exception as e:
-        log.error("Daily summary: failed to fetch stats", error=str(e))
-        return
-
-    uptime_24h = uptime.get("24h", 0)
-    uptime_7d  = uptime.get("7d",  0)
-
-    # Build a concise HTML summary table
-    status_color = "#4caf50" if uptime_24h >= 99 else ("#ff9800" if uptime_24h >= 95 else "#f44336")
-    latency_str  = f"{latest['latency_ms']} ms" if latest and latest.get("latency_ms") else "—"
-    loss_str     = f"{latest['packet_loss']}%" if latest and latest.get("packet_loss") is not None else "—"
-
-    message = (
-        f"<strong>24h uptime:</strong> "
-        f"<span style='color:{status_color};font-weight:700;'>{uptime_24h}%</span>"
-        f"&nbsp;&nbsp;|&nbsp;&nbsp;"
-        f"<strong>7d uptime:</strong> {uptime_7d}%"
-        f"<br><br>"
-        f"<strong>Auto-resets (today):</strong> {resets}"
-        f"<br>"
-        f"<strong>Current latency:</strong> {latency_str}"
-        f"&nbsp;&nbsp;|&nbsp;&nbsp;"
-        f"<strong>Packet loss:</strong> {loss_str}"
+def _summary_row(label, value, color=None):
+    """Build a single HTML table row for the summary email."""
+    val_style = f"color:{color};font-weight:700;" if color else "font-weight:600;"
+    return (
+        f"<tr>"
+        f"<td style='padding:6px 12px 6px 0;color:#aaa;font-size:0.88em;white-space:nowrap;'>{label}</td>"
+        f"<td style='padding:6px 0;{val_style}'>{value}</td>"
+        f"</tr>"
     )
 
-    send_alert("daily_summary", message)
-    log.info("Daily summary sent", uptime_24h=uptime_24h, resets=resets)
+
+def _uptime_color(pct):
+    """Return a color string based on uptime percentage."""
+    if pct >= 99:  return "#4caf50"
+    if pct >= 95:  return "#ff9800"
+    return "#f44336"
+
+
+def build_summary_message(force_email=None):
+    """
+    Compile the summary message HTML from available data, respecting
+    SUMMARY_SHOW_* config flags. Returns the HTML message string.
+    Used by send_daily_summary() and the test-send route.
+    """
+    show_uptime    = bool(getattr(config, "SUMMARY_SHOW_UPTIME",    True))
+    show_resets    = bool(getattr(config, "SUMMARY_SHOW_RESETS",    True))
+    show_latency   = bool(getattr(config, "SUMMARY_SHOW_LATENCY",   True))
+    show_speedtest = bool(getattr(config, "SUMMARY_SHOW_SPEEDTEST", False))
+    show_reset_log = bool(getattr(config, "SUMMARY_SHOW_RESET_LOG", False))
+
+    freq  = (getattr(config, "SUMMARY_FREQUENCY", "daily") or "daily").lower()
+    days  = 7 if freq == "weekly" else 1
+
+    try:
+        uptime  = database.get_uptime_stats()
+        latest  = database.get_latest_health()
+        resets  = database.get_reset_count(days=days)
+    except Exception as e:
+        log.error("Summary: failed to fetch core stats", error=str(e))
+        return None
+
+    rows = []
+    period_label = "7-day" if freq == "weekly" else "24h"
+
+    # ── Uptime block ──────────────────────────────────────────────────────────
+    if show_uptime:
+        u1h  = uptime.get("1h",  0)
+        u24h = uptime.get("24h", 0)
+        u7d  = uptime.get("7d",  0)
+        u30d = uptime.get("30d", 0)
+        rows.append(_summary_row("1h uptime",  f"{u1h}%",  _uptime_color(u1h)))
+        rows.append(_summary_row("24h uptime", f"{u24h}%", _uptime_color(u24h)))
+        rows.append(_summary_row("7d uptime",  f"{u7d}%",  _uptime_color(u7d)))
+        rows.append(_summary_row("30d uptime", f"{u30d}%", _uptime_color(u30d)))
+
+    # ── Reset count ───────────────────────────────────────────────────────────
+    if show_resets:
+        reset_color = "#4caf50" if resets == 0 else ("#ff9800" if resets <= 2 else "#f44336")
+        rows.append(_summary_row(
+            f"Auto-resets ({period_label})",
+            str(resets),
+            reset_color
+        ))
+
+    # ── Current latency & packet loss ─────────────────────────────────────────
+    if show_latency:
+        lat_str  = f"{latest['latency_ms']} ms" if latest and latest.get("latency_ms") else "—"
+        loss_str = f"{latest['packet_loss']}%"  if latest and latest.get("packet_loss") is not None else "—"
+        rows.append(_summary_row("Current latency",     lat_str))
+        rows.append(_summary_row("Current packet loss", loss_str))
+
+    # ── Speedtest results ─────────────────────────────────────────────────────
+    if show_speedtest:
+        try:
+            spd = database.get_speedtest_avg(days=days)
+            if spd["count"] > 0:
+                dl   = f"{spd['download_mbps']} Mbps" if spd["download_mbps"] is not None else "—"
+                ul   = f"{spd['upload_mbps']} Mbps"   if spd["upload_mbps"]   is not None else "—"
+                ping = f"{int(spd['ping_ms'])} ms"     if spd["ping_ms"]       is not None else "—"
+                rows.append(_summary_row(f"Avg download ({period_label})", dl))
+                rows.append(_summary_row(f"Avg upload ({period_label})",   ul))
+                rows.append(_summary_row(f"Avg ping ({period_label})",     ping))
+                rows.append(_summary_row("Speedtest runs", str(spd["count"])))
+            else:
+                rows.append(_summary_row("Speedtest", f"No tests in {period_label}"))
+        except Exception as e:
+            log.warning("Summary: failed to fetch speedtest data", error=str(e))
+
+    # ── Reset log ─────────────────────────────────────────────────────────────
+    reset_log_html = ""
+    if show_reset_log:
+        try:
+            reset_events = database.get_reset_history(days=days)
+            if reset_events:
+                log_rows = ""
+                for ev in reset_events:
+                    ts  = ev.get("timestamp", "")[:16].replace("T", " ")
+                    tby = ev.get("triggered_by", "auto").capitalize()
+                    log_rows += (
+                        f"<tr>"
+                        f"<td style='padding:3px 12px 3px 0;color:#aaa;font-size:0.83em;'>{ts}</td>"
+                        f"<td style='padding:3px 0;font-size:0.83em;'>{tby}</td>"
+                        f"</tr>"
+                    )
+                reset_log_html = (
+                    f"<div style='margin-top:12px;font-size:0.82em;color:#aaa;letter-spacing:1px;"
+                    f"text-transform:uppercase;margin-bottom:4px;'>Reset Log</div>"
+                    f"<table style='border-collapse:collapse;width:100%;'>{log_rows}</table>"
+                )
+            else:
+                reset_log_html = (
+                    f"<div style='margin-top:12px;font-size:0.82em;color:#aaa;'>No resets in {period_label}.</div>"
+                )
+        except Exception as e:
+            log.warning("Summary: failed to fetch reset log", error=str(e))
+
+    if not rows and not reset_log_html:
+        # All sections disabled — send a minimal message rather than nothing
+        rows.append(_summary_row("Status", "Summary content disabled — enable sections in Notifications settings."))
+
+    table_html = f"<table style='border-collapse:collapse;width:100%;'>{''.join(rows)}</table>"
+    return table_html + reset_log_html
+
+
+def send_daily_summary(force_email=None):
+    """
+    Compile and send the network summary email.
+    force_email: if set, send only to this address (used by the test-send route).
+    Called by the monitor loop on the configured schedule, or on demand via the web UI.
+    """
+    if not config.ALERTS_ENABLED:
+        log.info("Summary suppressed (alerts disabled)")
+        return
+
+    message = build_summary_message()
+    if message is None:
+        return  # error already logged in build_summary_message
+
+    if force_email:
+        send_alert("daily_summary", message, force_email=force_email)
+        log.info("Test summary sent", recipient=force_email)
+    else:
+        send_alert("daily_summary", message)
+        uptime_24h = database.get_uptime_stats().get("24h", 0)
+        log.info("Summary sent", uptime_24h=uptime_24h)
 
 
 def _strip_html(text):
