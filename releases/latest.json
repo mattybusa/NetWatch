@@ -1,9 +1,9 @@
 {
-  "version": "3.4.38",
-  "description": "- v3.4.36: Configurable summary frequency: SUMMARY_FREQUENCY (daily/weekly), SUMMARY_DAY, and SUMMARY_HOUR config keys. New-keys modal will prompt on next Config Editor open.\n- v3.4.37: Config Editor/modal improvements: allowed_values validation for SUMMARY_FREQUENCY, dropdowns in new-keys modal, HTML bold in descriptions.\n- v3.4.38: Config Editor main editor: dropdowns for allowed_values/day_names fields, bold descriptions rendering correctly.",
-  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.38/netwatch-3.4.38.zip",
+  "version": "3.4.40",
+  "description": "- v3.4.39: Summary Settings card on Notifications page: 5 content toggles, Send Test Summary button, richer HTML table email format.\n- v3.4.40: Fix: alerts import missing in send_test_summary route (name not defined error).\n- v3.4.40: Session 37 closeout: ChatSummary_37, CurrentTask, context doc, Gotchas update.",
+  "package_url": "https://github.com/mattybusa/NetWatch/releases/download/v3.4.40/netwatch-3.4.40.zip",
   "changelog_url": "",
-  "package_sha256": "250e802eb97870b7ee18da195561280baa2d67388cbeeea5b5c5da73b78506d8",
+  "package_sha256": "9de496d92ebc484a2f0d1c8325895eb24cad29768bd0bb1b2aedccc5679e6688",
   "min_version": "",
   "critical": false,
   "released": "2026-03-27"
