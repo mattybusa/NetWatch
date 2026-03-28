@@ -1,0 +1,163 @@
+NETWATCH CHAT SUMMARY — SESSION 38
+====================================
+Date: 2026-03-28
+Starting version: v3.4.40 (both Pis current at session start — v3.4.40 published
+  and installed on test Pi before session began)
+Ending version: v3.4.41
+Session focus: Security audit and first wave of hardening fixes.
+
+SCOPE NOTE: Session divided into two phases — full security audit with findings
+  documented, followed by implementation of the quick-win items (C1, H1, M1, M2, M3).
+  Remaining higher-effort items deferred to future sessions.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+PHASE 1 — Security Audit
+
+Full code audit conducted across patcher.py, webapp.py, auth.py, config_schema.py,
+and all upload/restore routes. Findings organized into four tiers:
+
+CRITICAL (must fix before public promotion):
+  C1 — No upload size limit. Flask reads entire file into memory before any size
+       check. OOM risk on Pi 3B+. Fix: MAX_CONTENT_LENGTH = 10MB.
+  C2 — DB restore accepts any SQLite file with only a single table check. A crafted
+       DB could replace the users table with a known-password admin backdoor.
+  C3 — run_sql manifest action executes arbitrary SQL with no restrictions.
+       Could DROP tables, INSERT backdoor admin accounts, DELETE all data.
+  C4 — No package signature verification. Any well-formed zip installs. Compromised
+       GitHub account or releases/latest.json would push malicious code to all users.
+
+HIGH (fix before wider distribution):
+  H1 — No HTTP security headers. Missing X-Frame-Options (clickjacking),
+       X-Content-Type-Options (MIME sniffing), Content-Security-Policy.
+  H2 — Session cookie not rotated after MFA completion. Pre-MFA captured cookie
+       remains valid through the full login flow.
+  H3 — Password reset tokens valid simultaneously with real password (deliberate
+       design — documented, not a bug).
+  H4 — Git PAT embedded in remote URL appears in patch_log.git_push_error on
+       push failure. Could leak in exported changelogs or screenshots.
+
+MEDIUM (harden when practical):
+  M1 — Deployed files uploader passes file.filename directly without sanitization.
+       Path traversal possible via crafted filename.
+  M2 — Dev docs uploader same issue as M1.
+  M3 — setup/skip route has no auth and no post-setup guard. Can rotate SECRET_KEY
+       (invalidating all sessions) if hit accidentally post-install.
+  M4 — Config export returns credentials in JSON (GMAIL_APP_PASSWORD, SECRET_KEY).
+       Admin-only + HTTPS mitigates; client-side AES-GCM encryption is correct approach.
+  M5 — Brute-force protection is user-scoped only, no per-IP rate limiting.
+
+ACCEPTED/LOW (no action needed):
+  A1 — config.py plaintext credentials: deliberate LAN trade-off.
+  A2 — Hand-rolled auth: deliberate RAM constraint trade-off.
+  A3 — Self-signed TLS: correct for LAN deployment.
+  A4 — netwatch-svc PAT in git remote: low risk on home LAN.
+  A5 — Snapshots exclude config.py: correct and intentional.
+
+Recommended fix order established:
+  1. C1 + H1 + M1 + M2 + M3 — quick wins, one package (this session)
+  2. C2 + H2 — next session
+  3. C3 — careful, touches core install path
+  4. C4 — separate design session (package signing)
+
+
+PHASE 2 — v3.4.41 Security Hardening Package
+
+Five changes to webapp.py, web restart only, no DB migration:
+
+C1 — MAX_CONTENT_LENGTH = 10 * 1024 * 1024 (10MB)
+  Added alongside existing SESSION_COOKIE_* config block. Flask enforces this at the
+  HTTP layer before file.read() is called — prevents RAM exhaustion from oversized
+  uploads. Covers all upload routes: package installer, deployed files, DB restore,
+  dev docs, theme files. 10MB chosen as generous ceiling for any realistic NetWatch
+  file (largest expected is a DB restore at ~5-8MB).
+
+H1 — HTTP Security Headers
+  Renamed after_request handler from set_cache_headers to set_security_headers.
+  Added three headers to ALL responses (not just HTML):
+    X-Frame-Options: DENY — prevents clickjacking
+    X-Content-Type-Options: nosniff — prevents MIME sniffing
+    Content-Security-Policy — allowlists 'self' + cdn.jsdelivr.net (Chart.js and
+      Bootstrap Icons are the only external resources NetWatch loads). 'unsafe-inline'
+      required for script-src and style-src because Flask embeds server-side data in
+      inline <script> blocks throughout templates. Documented limitation: inline XSS
+      injection not blocked, but external script loads and data exfiltration are.
+  Cache headers unchanged, still HTML-only.
+
+M1 — secure_filename in api_update_apply (Deployed Files upload)
+  from werkzeug.utils import secure_filename applied to file.filename before passing
+  to updater.apply_file(). Empty string check added (secure_filename returns "" for
+  fully unsafe filenames). werkzeug already installed as Flask dependency.
+
+M2 — secure_filename in api_devdocs_upload (Dev Docs upload)
+  Same pattern as M1. Success message now uses sanitized fname rather than
+  file.filename so the logged name matches what was actually saved.
+
+M3 — setup/skip post-setup guard
+  Added is_first_run() check at top of setup_skip(). If setup already complete,
+  redirects to index without touching config.py. Prevents accidental SECRET_KEY
+  rotation post-install (which would log out all active sessions). Route remains
+  fully functional during actual first-run wizard flow.
+
+
+DECISIONS MADE
+--------------
+- 10MB chosen as upload size limit: covers all realistic NetWatch files with 2×
+  headroom, meaningfully restricts abuse, standard for small admin tools.
+- CSP uses 'unsafe-inline' for script-src: required by Flask's inline data embedding
+  pattern. Removing it would require refactoring all inline JS to external files —
+  a Blueprint refactor prerequisite, not practical now. Documented explicitly in code.
+- cdn.jsdelivr.net is the only external CDN NetWatch uses (Chart.js + Bootstrap Icons).
+  No Google Fonts. CSP reflects this exactly.
+- setup/skip redirects to index (not login) post-setup: user is likely already logged
+  in if they hit this URL accidentally. Sending to login would be confusing.
+- C2, C3, C4, H2 deferred: each requires more design thought and carries higher
+  implementation risk than the quick wins. Better to ship the easy ones, validate
+  the install, then tackle the harder items.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] C2: DB restore validation — need to define what a "valid" restore looks
+  like beyond the current single-table check.
+- [PENDING] C3: run_sql SQL whitelist — need to decide exact allowed statement types
+  and how to handle edge cases (e.g. CREATE TABLE IF NOT EXISTS with multiple columns).
+- [PENDING] C4: Package signing — design brief needed before any code. Key questions:
+  where does the public key live, how does install.sh embed it, what happens on
+  signature failure in the update installer vs manual installer.
+- [PENDING] H2: Session rotation post-MFA — straightforward but needs care around
+  session data preservation (theme, preferences already in session at that point).
+- [PENDING] H4: PAT scrubbing from patch_log — low urgency but worth a targeted fix.
+- [PENDING] Documentation (User PDF, Admin guide, Developer reference).
+- [PENDING] Version reset to v1.0.0.
+- [PENDING] Fresh install re-test with current codebase.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Full security audit (findings documented in this summary)
+- v3.4.41: C1 upload limit, H1 security headers, M1/M2 secure_filename, M3 setup guard
+
+Added this session:
+- C2, C3, C4, H2, H4 security items as distinct pending work items
+
+No change in status:
+- Documentation, v1.0.0 reset, fresh install re-test — still pending
+
+
+NEW GOTCHAS ADDED
+-----------------
+None this session.
+
+
+CURRENT STATE
+-------------
+- Production Pi: v3.4.41 (pending install)
+- Test Pi: v3.4.40
+- GitHub: v3.4.40 is current public release
+- Next session: install v3.4.41, confirm headers visible in browser dev tools,
+  then continue security audit fixes (C2 DB restore validation + H2 session rotation
+  are the next logical pair).

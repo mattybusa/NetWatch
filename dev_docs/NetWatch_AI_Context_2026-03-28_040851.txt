@@ -23,9 +23,9 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.4.41
+- **Pi version:** v3.4.40
 - **Pi path:** `/home/mboynton/netwatch/`
-- **Canonical matches Pi at v3.4.41**
+- **Canonical matches Pi at v3.4.40**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.
 - **GitHub:** Public repo at https://github.com/mattybusa/NetWatch. Remote named `github` on Pi (PAT embedded). Manual push workflow — push to github remote when ready to publish a release. Manifest URL: https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json (live). releases/latest.json committed to both remotes. Session 32.
 - **ops-pi (formerly gitea-pi):** 192.168.100.230 | https://ops-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos (both private, MIT)
@@ -694,12 +694,9 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   per alert type per role. available=0 purges user overrides immediately and enforces at
   send time in get_active_recipients(). Replaces hardcoded ALLOWED_GROUPS in preferences.html
   with data-driven check from type_settings_user API. SHIPPED v3.3.89.
-- Security audit: COMPLETE Session 38. Full findings in ChatSummary_38.txt.
-  SHIPPED v3.4.41: C1 upload size limit (10MB), H1 security headers (X-Frame-Options,
-  X-Content-Type-Options, CSP), M1/M2 secure_filename on deployed files and dev docs
-  uploads, M3 setup/skip post-setup guard.
-  REMAINING: C2 DB restore validation, C3 run_sql whitelist, C4 package signing,
-  H2 session rotation post-MFA, H4 git PAT scrubbing from logs.
+- Security audit: review attack surface for package installer and deployed files uploader
+  (malicious package injection, path traversal, code execution). Broader auth/session/
+  physical/remote access hardening review. Goal: confidence before distributing to others.
 
 **UI**
 - ✅ All UI backlog items complete as of v3.3.85.
@@ -860,12 +857,9 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   per alert type per role. available=0 purges user overrides immediately and enforces at
   send time in get_active_recipients(). Replaces hardcoded ALLOWED_GROUPS in preferences.html
   with data-driven check from type_settings_user API. SHIPPED v3.3.89.
-- Security audit: COMPLETE Session 38. Full findings in ChatSummary_38.txt.
-  SHIPPED v3.4.41: C1 upload size limit (10MB), H1 security headers (X-Frame-Options,
-  X-Content-Type-Options, CSP), M1/M2 secure_filename on deployed files and dev docs
-  uploads, M3 setup/skip post-setup guard.
-  REMAINING: C2 DB restore validation, C3 run_sql whitelist, C4 package signing,
-  H2 session rotation post-MFA, H4 git PAT scrubbing from logs.
+- Security audit: review attack surface for package installer and deployed files uploader
+  (malicious package injection, path traversal, code execution). Broader auth/session/
+  physical/remote access hardening review. Goal: confidence before distributing to others.
 
 **UI**
 - ✅ System log viewer: pkg_update.log tail in Admin page, collapsible card with

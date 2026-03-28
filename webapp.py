@@ -44,6 +44,7 @@ app.secret_key = config.SECRET_KEY
 app.config["SESSION_COOKIE_HTTPONLY"] = True   # JS cannot read session cookie
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"  # CSRF protection
 app.config["SESSION_COOKIE_SECURE"]   = True   # HTTPS only
+app.config["MAX_CONTENT_LENGTH"]      = 10 * 1024 * 1024  # 10MB upload limit — Flask rejects oversized uploads before file.read()
 # Cap browser cookie lifetime at 2 days — idle timeout logic handles normal
 # expiry; this is a hard ceiling so cookies don't persist for Flask's 31-day default.
 from datetime import timedelta
@@ -51,14 +52,38 @@ app.permanent_session_lifetime = timedelta(days=2)
 
 
 @app.after_request
-def set_cache_headers(response):
-    """Prevent browsers from caching authenticated pages.
-    Stops back-button showing stale pages from previous users."""
-    # Only apply to HTML pages, not static assets or API responses
+def set_security_headers(response):
+    """Apply security headers to all responses.
+
+    Cache headers: prevent browsers from caching authenticated pages so
+    the back-button never shows stale content from a previous session.
+
+    Security headers (applied to all responses):
+      X-Frame-Options        — blocks clickjacking (NetWatch must never load in an iframe)
+      X-Content-Type-Options — stops browsers guessing MIME types (prevents content sniffing)
+      Content-Security-Policy — restricts which external origins may load scripts, styles,
+                                 and fonts. 'unsafe-inline' is required because Flask embeds
+                                 server-side data directly in <script> blocks; this limits
+                                 protection against injected inline scripts but still blocks
+                                 externally-hosted malicious scripts and data exfiltration.
+    """
+    # Cache-control: HTML pages only
     if response.content_type and "text/html" in response.content_type:
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"]        = "no-cache"
         response.headers["Expires"]       = "0"
+
+    # Security headers: all responses
+    response.headers["X-Frame-Options"]        = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
+        "font-src 'self' cdn.jsdelivr.net; "
+        "img-src 'self' data:; "
+        "connect-src 'self';"
+    )
     return response
 
 CMD_FILE   = os.path.join(NETWATCH_DIR, "pending_command.json")
@@ -142,7 +167,11 @@ def setup_interfaces():
 
 @app.route("/setup/skip")
 def setup_skip():
-    """Mark setup as done by writing a minimal config, redirect to login."""
+    """Mark setup as done by writing a minimal config, redirect to login.
+    If setup is already complete, redirects to dashboard without touching config —
+    prevents accidental SECRET_KEY rotation post-install."""
+    if not is_first_run():
+        return redirect(url_for("index"))
     # Write a random secret key so first-run check passes
     import secrets as _secrets
     _write_config_value("SECRET_KEY", _secrets.token_hex(32))
@@ -3469,12 +3498,16 @@ def deployed_files():
 @auth.login_required
 @auth.requires_permission("manage_admin")
 def api_update_apply():
+    from werkzeug.utils import secure_filename
     if "file" not in request.files:
         return jsonify({"success": False, "message": "No file in request"})
     file    = request.files["file"]
+    fname   = secure_filename(file.filename)
+    if not fname:
+        return jsonify({"success": False, "message": "Invalid filename"})
     user    = auth.get_current_user()
     content = file.read()
-    result  = updater.apply_file(file.filename, content, uploaded_by=user["username"])
+    result  = updater.apply_file(fname, content, uploaded_by=user["username"])
     return jsonify(result)
 
 
@@ -3523,13 +3556,17 @@ def api_devdocs_list():
 @auth.login_required
 @auth.requires_permission("manage_admin")
 def api_devdocs_upload():
+    from werkzeug.utils import secure_filename
     if "file" not in request.files:
         return jsonify({"success": False, "message": "No file in request"})
-    file = request.files["file"]
+    file  = request.files["file"]
+    fname = secure_filename(file.filename)
+    if not fname:
+        return jsonify({"success": False, "message": "Invalid filename"})
     content = file.read()
-    success, error = updater.save_dev_doc(file.filename, content)
+    success, error = updater.save_dev_doc(fname, content)
     if success:
-        return jsonify({"success": True, "message": f"'{file.filename}' saved to Dev Documents."})
+        return jsonify({"success": True, "message": f"'{fname}' saved to Dev Documents."})
     return jsonify({"success": False, "message": error}), 400
 
 

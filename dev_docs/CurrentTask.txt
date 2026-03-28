@@ -1,51 +1,61 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-27 | Session 37 closed | v3.4.40 (production)
+Updated: 2026-03-28 | Session 38 closed | v3.4.41 (pending install)
 
-STATUS: Session 37 complete and closed out.
+STATUS: Session 38 complete. Package built, ready to install.
 
-SESSION 37 SUMMARY
+SESSION 38 SUMMARY
 ------------------
-Six features across 7 packages:
-- v3.4.34: Release Manager field locking + Reset button + description in zip manifest
-- v3.4.35: MFA_REQUIRED config key + Security card on Admin page
-- v3.4.36: SUMMARY_FREQUENCY / SUMMARY_DAY / SUMMARY_HOUR config keys
-- v3.4.37-38: Config Editor allowed_values dropdowns + HTML bold descriptions
-- v3.4.39-40: Summary Settings card on Notifications page + Send Test Summary
+Two phases:
+1. Full security audit — findings documented in ChatSummary_38.txt
+2. v3.4.41 security hardening package (quick-win items):
+   - C1: 10MB upload size limit (MAX_CONTENT_LENGTH)
+   - H1: Security headers (X-Frame-Options, X-Content-Type-Options, CSP)
+   - M1: secure_filename on deployed files upload
+   - M2: secure_filename on dev docs upload
+   - M3: setup/skip post-setup guard
 
 KEY STATE
 ---------
-- Production Pi: v3.4.40
-- Test Pi: v3.4.33 (needs publish before it can update)
-- GitHub: v3.4.38 is current public release
-- New config keys added this session (auto-added by validator on startup):
-    MFA_REQUIRED, SUMMARY_FREQUENCY, SUMMARY_DAY, SUMMARY_HOUR,
-    SUMMARY_SHOW_UPTIME, SUMMARY_SHOW_RESETS, SUMMARY_SHOW_LATENCY,
-    SUMMARY_SHOW_SPEEDTEST, SUMMARY_SHOW_RESET_LOG
-- save_quiet route pattern: POST /api/config/save_quiet — saves config without
-  service restart. Currently used for SUMMARY_SHOW_* toggles. Reusable pattern.
+- Production Pi: v3.4.40 (v3.4.41 package ready to install)
+- Test Pi: v3.4.40
+- GitHub: v3.4.40 is current public release
+- Security audit complete — findings in ChatSummary_38.txt
+- Remaining security items: C2, C3, C4, H2, H4 (see audit findings)
 
 NEXT SESSION
 ------------
 Priority order:
 
-  1. Publish v3.4.40 to GitHub
-     Test Pi at v3.4.33 needs this to update via update checker.
+  1. Install v3.4.41 on production Pi
+     Verify security headers visible in browser dev tools (F12 → Network tab →
+     any request → Response Headers). Should see X-Frame-Options, 
+     X-Content-Type-Options, Content-Security-Policy.
 
-  2. Security audit
-     Attack surface review before public promotion. Package installer,
-     auth/session, physical/remote access hardening.
+  2. C2: DB restore validation
+     Harden the restore route to validate the uploaded DB contains expected
+     schema before overwriting the live database.
 
-  3. Documentation
-     User PDF, Admin guide, Developer reference.
+  3. H2: Session rotation post-MFA
+     Rotate session cookie after successful MFA verification to prevent
+     session fixation from captured pre-MFA cookies.
 
-  4. Version reset to v1.0.0
-     After above. Clear MIGRATIONS.md of 3.x.x entries when cutting v1.0.0.
+  4. C3: run_sql SQL whitelist
+     Restrict run_sql manifest action to safe statement types only
+     (ALTER TABLE ADD COLUMN, CREATE TABLE IF NOT EXISTS).
+
+  5. C4: Package signing — design brief first, no code yet
+     Public key storage, install.sh embedding, failure behaviour.
+
+  6. Publish updated release to GitHub once security items are complete
+     (hold off until C2+H2 are shipped — makes a cleaner security release).
 
 NOTES
 -----
-- alerts.py is never imported at module level in webapp.py. Always use
-  local "import alerts" inside any route function that needs it.
-- allowed_values in config_schema.py triggers dropdowns in both Config Editor
-  modal and main editor. Reusable pattern for future constrained string keys.
-- save_quiet is appropriate only for runtime-read keys (not startup-read ones).
+- CSP 'unsafe-inline' is a documented limitation — required by Flask's inline
+  data embedding pattern. Not a mistake, not something to "fix" without the
+  Blueprint refactor first.
+- Test Pi will update to v3.4.41 automatically via update checker once GitHub
+  release is published. Hold off on publishing until more security items are done.
+- Security audit findings are in ChatSummary_38.txt — load it at next session
+  start if continuing security work (it's an expanded summary for this topic).
