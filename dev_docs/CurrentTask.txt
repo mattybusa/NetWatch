@@ -1,61 +1,53 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-28 | Session 38 closed | v3.4.41 (pending install)
+Updated: 2026-03-28 | Session 38 closed | v3.4.42 (pending install)
 
-STATUS: Session 38 complete. Package built, ready to install.
+STATUS: Session 38 complete. v3.4.42 package built, ready to install.
 
 SESSION 38 SUMMARY
 ------------------
-Two phases:
-1. Full security audit — findings documented in ChatSummary_38.txt
-2. v3.4.41 security hardening package (quick-win items):
-   - C1: 10MB upload size limit (MAX_CONTENT_LENGTH)
-   - H1: Security headers (X-Frame-Options, X-Content-Type-Options, CSP)
-   - M1: secure_filename on deployed files upload
-   - M2: secure_filename on dev docs upload
-   - M3: setup/skip post-setup guard
+Phase 1: Full security audit — findings documented in ChatSummary_38.txt.
+Phase 2: Security hardening packages:
+  v3.4.41: C1 upload limit, H1 security headers, M1/M2 secure_filename, M3 setup guard
+  v3.4.42: Fix package installer UI hang on oversized upload (413 not handled by JS)
 
 KEY STATE
 ---------
-- Production Pi: v3.4.40 (v3.4.41 package ready to install)
+- Production Pi: v3.4.41 (v3.4.42 package ready to install)
 - Test Pi: v3.4.40
 - GitHub: v3.4.40 is current public release
 - Security audit complete — findings in ChatSummary_38.txt
-- Remaining security items: C2, C3, C4, H2, H4 (see audit findings)
+- Remaining security items: C2, C3, C4, H2, H4
 
 NEXT SESSION
 ------------
 Priority order:
 
-  1. Install v3.4.41 on production Pi
-     Verify security headers visible in browser dev tools (F12 → Network tab →
-     any request → Response Headers). Should see X-Frame-Options, 
-     X-Content-Type-Options, Content-Security-Policy.
+  1. Install v3.4.42 on production Pi
+     Test the 10MB limit works correctly — upload a file over 10MB to the
+     package installer and confirm you see "File is too large. Maximum upload
+     size is 10 MB." instead of a spinner hang.
 
   2. C2: DB restore validation
-     Harden the restore route to validate the uploaded DB contains expected
-     schema before overwriting the live database.
+     Harden restore route to validate uploaded DB schema before overwriting
+     the live database.
 
   3. H2: Session rotation post-MFA
-     Rotate session cookie after successful MFA verification to prevent
-     session fixation from captured pre-MFA cookies.
+     Rotate session cookie after successful MFA verification.
 
   4. C3: run_sql SQL whitelist
-     Restrict run_sql manifest action to safe statement types only
-     (ALTER TABLE ADD COLUMN, CREATE TABLE IF NOT EXISTS).
+     Restrict run_sql to safe statement types only.
 
-  5. C4: Package signing — design brief first, no code yet
-     Public key storage, install.sh embedding, failure behaviour.
+  5. C4: Package signing — design brief first, no code yet.
 
-  6. Publish updated release to GitHub once security items are complete
-     (hold off until C2+H2 are shipped — makes a cleaner security release).
+  6. Publish security release to GitHub once C2 + H2 are shipped.
+     Hold off until then — makes a cleaner security release bundle.
 
 NOTES
 -----
-- CSP 'unsafe-inline' is a documented limitation — required by Flask's inline
-  data embedding pattern. Not a mistake, not something to "fix" without the
-  Blueprint refactor first.
-- Test Pi will update to v3.4.41 automatically via update checker once GitHub
-  release is published. Hold off on publishing until more security items are done.
-- Security audit findings are in ChatSummary_38.txt — load it at next session
-  start if continuing security work (it's an expanded summary for this topic).
+- v3.4.41 package was superseded by v3.4.42 in the same session. Install v3.4.42
+  only — it contains all v3.4.41 changes plus the UI fix.
+- CSP 'unsafe-inline' is documented as a known limitation in the code comments.
+  Not a mistake. Requires Blueprint refactor to remove.
+- Test Pi will update once GitHub release is published. Hold off until more
+  security items are complete.

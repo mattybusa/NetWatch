@@ -324,8 +324,19 @@ async function onFileSelected(file) {
   form.append("file", file);
 
   const endpoint = isZipPackage ? "/api/patch/preview" : "/api/update/preview_single";
-  const res  = await fetch(endpoint, { method: "POST", body: form });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch(endpoint, { method: "POST", body: form });
+    if (res.status === 413) {
+      data = { valid: false, error: "File is too large. Maximum upload size is 10 MB.", preview: [] };
+    } else if (!res.ok) {
+      data = { valid: false, error: `Server error (${res.status}) — check logs.`, preview: [] };
+    } else {
+      data = await res.json();
+    }
+  } catch (e) {
+    data = { valid: false, error: "Request failed — check network connection.", preview: [] };
+  }
 
   document.getElementById("validating").style.display = "none";
   previewData = data;
@@ -409,8 +420,19 @@ async function applyPackage() {
   form.append("file", currentFile);
 
   const endpoint = isZipPackage ? "/api/patch/apply" : "/api/update/apply";
-  const res  = await fetch(endpoint, { method: "POST", body: form });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch(endpoint, { method: "POST", body: form });
+    if (res.status === 413) {
+      data = { success: false, message: "File is too large. Maximum upload size is 10 MB.", results: [] };
+    } else if (!res.ok) {
+      data = { success: false, message: `Server error (${res.status}) — check logs.`, results: [] };
+    } else {
+      data = await res.json();
+    }
+  } catch (e) {
+    data = { success: false, message: "Request failed — check network connection.", results: [] };
+  }
 
   const title = document.getElementById("result-title");
   const steps = document.getElementById("result-steps");
