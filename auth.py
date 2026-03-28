@@ -741,6 +741,20 @@ def request_password_reset(username):
     if not email and not sms_address:
         return False, "no_verified_contact", None
 
+    # Refuse if a valid reset token already exists — prevents inbox flooding
+    # and rolling fresh-token attacks. Caller treats "reset_pending" as success
+    # (generic response) so no signal leaks to the requester.
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    token_row = conn.execute(
+        "SELECT reset_token_hash, reset_expires_at FROM users WHERE id=?", (user_id,)
+    ).fetchone()
+    conn.close()
+    if (token_row and token_row["reset_token_hash"] and
+            token_row["reset_expires_at"] and
+            _is_token_valid(token_row["reset_expires_at"])):
+        return False, "reset_pending", None
+
     # Generate temp password — store in reset_token_hash ONLY, never overwrite real password
     chars = string.ascii_letters + string.digits
     temp_password = "".join(random.choices(chars, k=10))

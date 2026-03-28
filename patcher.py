@@ -253,6 +253,20 @@ def validate_and_preview(zip_bytes):
             sql = action.get("sql", "")
             item["detail"] = f"Run SQL: {sql[:80]}{'...' if len(sql)>80 else ''}"
             item["sql"]    = sql
+            # Check for destructive statements — blocked unless ALLOW_DESTRUCTIVE_SQL is True
+            destructive_keywords = ("DROP", "DELETE", "TRUNCATE")
+            sql_upper = sql.strip().upper()
+            if any(sql_upper.startswith(kw) for kw in destructive_keywords):
+                allow = getattr(config, "ALLOW_DESTRUCTIVE_SQL", False)
+                if not allow:
+                    item["status"]  = "error"
+                    item["warning"] = (
+                        f"Destructive SQL blocked. Enable 'Allow Destructive SQL' "
+                        f"in Config Editor > Security to permit this operation."
+                    )
+                    errors.append(f"Action {i}: destructive SQL requires ALLOW_DESTRUCTIVE_SQL=True")
+                else:
+                    item["warning"] = "Destructive SQL allowed (ALLOW_DESTRUCTIVE_SQL is enabled)."
 
         elif act == "restart":
             services = action.get("services", [])
@@ -498,6 +512,16 @@ def apply_package(zip_bytes, applied_by="web"):
             # ── run_sql ───────────────────────────────────────────────────────
             elif act == "run_sql":
                 sql = action["sql"]
+                # Hard guard at apply time — belt-and-suspenders alongside preview check
+                destructive_keywords = ("DROP", "DELETE", "TRUNCATE")
+                sql_upper = sql.strip().upper()
+                if any(sql_upper.startswith(kw) for kw in destructive_keywords):
+                    allow = getattr(config, "ALLOW_DESTRUCTIVE_SQL", False)
+                    if not allow:
+                        raise ValueError(
+                            f"Destructive SQL blocked at install time. "
+                            f"Enable 'Allow Destructive SQL' in Config Editor > Security."
+                        )
                 _run_sql(sql)
                 result["message"] = f"SQL executed: {sql[:60]}..."
 
@@ -528,6 +552,32 @@ def apply_package(zip_bytes, applied_by="web"):
     # ── Update installed version ──────────────────────────────────────────────
     if not had_error and "version" in manifest:
         set_installed_version(manifest["version"])
+
+    # ── Auto-reset ALLOW_DESTRUCTIVE_SQL after any successful install that
+    #    contained destructive SQL — so the gate re-locks without manual action ──
+    if not had_error:
+        destructive_keywords = ("DROP", "DELETE", "TRUNCATE")
+        had_destructive = any(
+            a.get("action", "").lower() == "run_sql" and
+            any(a.get("sql", "").strip().upper().startswith(kw) for kw in destructive_keywords)
+            for a in actions
+        )
+        if had_destructive:
+            try:
+                cfg_path = os.path.join(NETWATCH_DIR, "config.py")
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg_text = f.read()
+                import re as _re
+                cfg_text = _re.sub(
+                    r"^ALLOW_DESTRUCTIVE_SQL\s*=\s*.+$",
+                    "ALLOW_DESTRUCTIVE_SQL = False",
+                    cfg_text, flags=_re.MULTILINE
+                )
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    f.write(cfg_text)
+                log.info("ALLOW_DESTRUCTIVE_SQL auto-reset to False after destructive install")
+            except Exception as e:
+                log.warning("Failed to auto-reset ALLOW_DESTRUCTIVE_SQL", error=str(e))
 
     # ── Execute restarts ──────────────────────────────────────────────────────
     restart_results = []

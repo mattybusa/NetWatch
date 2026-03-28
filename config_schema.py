@@ -713,6 +713,23 @@ CONFIG_SCHEMA = [
         "ui_hidden":   False,
     },
 
+    {
+        "key":         "ALLOW_DESTRUCTIVE_SQL",
+        "default":     False,
+        "required":    False,
+        "group":       "security",
+        "section":     "Security",
+        "label":       "Allow Destructive SQL in Packages",
+        "description": "When disabled (default), the package installer will refuse to execute "
+                       "SQL statements containing DROP, DELETE, or TRUNCATE. Enable this only "
+                       "when intentionally installing a package that removes or restructures "
+                       "database tables. The setting resets to disabled automatically after "
+                       "any package containing destructive SQL is installed.",
+        "sensitive":   False,
+        "type":        "bool",
+        "ui_hidden":   False,
+    },
+
     # ── Logging ───────────────────────────────────────────────────────────────
     {
         "key":         "LOG_FORMAT",

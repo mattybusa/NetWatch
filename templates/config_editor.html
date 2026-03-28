@@ -412,7 +412,7 @@ function openPassphraseModal(mode) {
 
   title.textContent = mode === "export" ? "EXPORT CONFIG" : "IMPORT CONFIG";
   desc.textContent  = mode === "export"
-    ? "Choose a passphrase to encrypt the config backup. You will need this passphrase to import it later. Store it somewhere safe."
+    ? "Choose a passphrase to encrypt the config backup. This file contains your full configuration including credentials — keep it secure. You will need this passphrase to import it later."
     : "Enter the passphrase that was used to encrypt this backup file.";
 
   msg.style.display = "none";

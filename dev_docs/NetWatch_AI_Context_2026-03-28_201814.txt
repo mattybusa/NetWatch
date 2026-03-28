@@ -23,9 +23,9 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.4.44
+- **Pi version:** v3.4.43
 - **Pi path:** `/home/mboynton/netwatch/`
-- **Canonical matches Pi at v3.4.44**
+- **Canonical matches Pi at v3.4.42**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.
 - **GitHub:** Public repo at https://github.com/mattybusa/NetWatch. Remote named `github` on Pi (PAT embedded). Manual push workflow — push to github remote when ready to publish a release. Manifest URL: https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json (live). releases/latest.json committed to both remotes. Session 32.
 - **ops-pi (formerly gitea-pi):** 192.168.100.230 | https://ops-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos (both private, MIT)
@@ -874,23 +874,18 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   SHIPPED v3.4.43: H2 session rotation post-MFA — session.clear() called in
   _complete_mfa_login() before login_user(). Pre-MFA captured cookies cannot
   be replayed as authenticated sessions.
-  SHIPPED v3.4.44: H3b reset token replay block — request_password_reset()
-    refuses new token if valid one already exists (reset_pending response).
-    C2 DB restore validation — checks all 16 required tables present plus
-    column signatures on users, roles, system_settings before overwriting live DB.
-    C3 destructive SQL guard — patcher blocks DROP/DELETE/TRUNCATE at preview
-    and apply time unless ALLOW_DESTRUCTIVE_SQL=True in config; auto-resets to
-    False after any destructive install succeeds.
-    M4 config export warning — passphrase modal now notes file contains credentials.
+  REMAINING: C2 DB restore validation, C3 run_sql whitelist, C4 package signing,
+  H4 git PAT scrubbing from logs.
   Session 39 audit item review (discussion only, no packages):
   H3 — reset token simultaneous with real password: NOT a real issue. Code
     correctly clears token on use (auth.py lines 322-329). Closed.
+  H3b (new) — no rate limit on reset requests: DESIGN COMPLETE. Option C:
+    refuse new token if one already exists and is valid. One-liner fix in
+    request_password_reset(). Bundled for next package.
   A1 — config.py plaintext credentials: DESIGN COMPLETE. Novel network-bound
     credential protection system. Full brief in
     Feature_NetworkBoundCredentialProtection.txt. Depends on Blueprint refactor.
-  A2, A3, A4, A5 — ACCEPTED/CLOSED (see ChatSummary_39.txt).
-  M4 — CLOSED v3.4.44. M5 — ACCEPTED/DEFERRED to mBase.
-  REMAINING: C4 package signing (design brief needed), H4 git PAT scrubbing.
+  A2, A3, A4, A5, M4, M5 — NEEDS DISCUSSION (next session).
 
 **UI**
 - ✅ System log viewer: pkg_update.log tail in Admin page, collapsible card with
