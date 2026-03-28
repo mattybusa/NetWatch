@@ -835,3 +835,27 @@ was necessary but not sufficient. The replace action is equally required.
 Root cause discovered during skip-version migration test, Session 36.
 
 ---
+
+---
+
+2026-03-27 | Session 37
+CLOSEOUT PACKAGES REQUIRE A MANIFEST JUST LIKE ANY OTHER PACKAGE
+All packages installed via the Package Installer require a manifest.json at the
+zip root — including doc-only closeout packages. The manifest must have an "actions"
+list (even if it only contains replace actions for dev_docs files) and no restart
+action is needed for doc-only packages. Without a manifest.json, the patcher rejects
+the zip entirely.
+
+Correct closeout manifest example:
+  {
+    "version": "X.Y.Z",
+    "description": "Session N closeout: summary, CurrentTask, context doc.",
+    "session": N,
+    "actions": [
+      { "action": "replace", "file": "dev_docs/ChatSummary_N.txt" },
+      { "action": "replace", "file": "dev_docs/CurrentTask.txt" },
+      { "action": "replace", "file": "dev_docs/NetWatch_AI_Context_latest.txt" }
+    ]
+  }
+
+No "restart" action needed — patcher skips it and no services are touched.

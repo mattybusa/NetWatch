@@ -1,38 +1,40 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-27 | Session 36 closed | v3.4.33 (production)
+Updated: 2026-03-27 | Session 37 closed | v3.4.40 (production)
 
-STATUS: Session 36 complete and closed out.
+STATUS: Session 37 complete and closed out.
 
-SESSION 36 SUMMARY
+SESSION 37 SUMMARY
 ------------------
-Setup wizard interface auto-detection fix (v3.4.19). Dev/prod UI separation —
-Deployed Files and Developer Tools hidden on non-dev installs (v3.4.20). Release
-description auto-generation with Generate button (v3.4.21). Layout fixes (v3.4.22-23).
-Bullet list formatting fix (v3.4.24, v3.4.27). Minor fixes: remove Install Another
-Package button (v3.4.25), email emoji fix (v3.4.26). Skip-version migration test —
-confirmed working, critical gotcha found re: MIGRATIONS.md replace action (v3.4.30-32).
-GitHub Wiki Changelog.md automation on publish (v3.4.33).
+Six features across 7 packages:
+- v3.4.34: Release Manager field locking + Reset button + description in zip manifest
+- v3.4.35: MFA_REQUIRED config key + Security card on Admin page
+- v3.4.36: SUMMARY_FREQUENCY / SUMMARY_DAY / SUMMARY_HOUR config keys
+- v3.4.37-38: Config Editor allowed_values dropdowns + HTML bold descriptions
+- v3.4.39-40: Summary Settings card on Notifications page + Send Test Summary
 
 KEY STATE
 ---------
-- Production Pi: v3.4.33
-- Test Pi: v3.4.31 (v3.4.32 and v3.4.33 not yet installed)
-- GitHub: v3.4.31 is current public release (v3.4.32 and v3.4.33 not yet published)
-- Wiki: Changelog.md live and confirmed working
-- MIGRATIONS.md: cleaned up after test, no production entries yet
-- DB: system_settings has _test_col_1 and _test_col_2 as harmless test artifacts
-  on both Pis
+- Production Pi: v3.4.40
+- Test Pi: v3.4.33 (needs publish before it can update)
+- GitHub: v3.4.38 is current public release
+- New config keys added this session (auto-added by validator on startup):
+    MFA_REQUIRED, SUMMARY_FREQUENCY, SUMMARY_DAY, SUMMARY_HOUR,
+    SUMMARY_SHOW_UPTIME, SUMMARY_SHOW_RESETS, SUMMARY_SHOW_LATENCY,
+    SUMMARY_SHOW_SPEEDTEST, SUMMARY_SHOW_RESET_LOG
+- save_quiet route pattern: POST /api/config/save_quiet — saves config without
+  service restart. Currently used for SUMMARY_SHOW_* toggles. Reusable pattern.
 
 NEXT SESSION
 ------------
 Priority order:
 
-  1. Publish v3.4.32 and v3.4.33 to GitHub
-     Test Pi will update via update checker.
+  1. Publish v3.4.40 to GitHub
+     Test Pi at v3.4.33 needs this to update via update checker.
 
   2. Security audit
-     Attack surface review before public promotion.
+     Attack surface review before public promotion. Package installer,
+     auth/session, physical/remote access hardening.
 
   3. Documentation
      User PDF, Admin guide, Developer reference.
@@ -40,10 +42,10 @@ Priority order:
   4. Version reset to v1.0.0
      After above. Clear MIGRATIONS.md of 3.x.x entries when cutting v1.0.0.
 
-NOTE
-----
-MIGRATIONS.md rule (updated Session 36): whenever a session package includes a
-run_sql action, that SQL must also be added to MIGRATIONS.md under the new version
-heading AND a replace action for MIGRATIONS.md must be included in the manifest.
-Both steps are required. See Gotchas.txt: PACKAGES WITH run_sql MUST ALSO REPLACE
-MIGRATIONS.md ON DISK.
+NOTES
+-----
+- alerts.py is never imported at module level in webapp.py. Always use
+  local "import alerts" inside any route function that needs it.
+- allowed_values in config_schema.py triggers dropdowns in both Config Editor
+  modal and main editor. Reusable pattern for future constrained string keys.
+- save_quiet is appropriate only for runtime-read keys (not startup-read ones).

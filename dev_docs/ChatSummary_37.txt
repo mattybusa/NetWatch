@@ -1,0 +1,134 @@
+NETWATCH CHAT SUMMARY — SESSION 37
+====================================
+Date: 2026-03-27
+Starting version: v3.4.33 (both Pis current at session start)
+Ending version: v3.4.40
+Session focus: Release Manager UX, MFA disable toggle, configurable summary
+  frequency, Config Editor improvements, and summary content config card.
+
+SCOPE NOTE: Six distinct features across 7 packages. Expanded summaries produced
+  for the two largest arcs. Minor arcs noted inline.
+
+
+WHAT WAS ACCOMPLISHED
+---------------------
+
+v3.4.34 — Release Manager: lock fields after build, Reset button, description
+  in zip manifest. After Build Release, all inputs (version, description, generate,
+  build) are disabled. Reset button (↩ Reset) appears above Build — calls
+  POST /api/admin/discard_release to delete the zip, then re-enables everything.
+  Description now sent in build POST body, passed as argv[2] to build_release.sh,
+  written to temp file and passed to Python manifest block. Release zip manifest.json
+  now contains the real description — test Pi Package History shows it correctly.
+  doPublishRelease() reads from _releaseData.description (locked at build time).
+
+v3.4.35 — MFA disable toggle. New MFA_REQUIRED bool config key (default True,
+  Security section). mfa_enforcement_enabled() helper in auth.py reads it at runtime.
+  Three enforcement points in webapp.py gated: before_request grace banner, login
+  route forced-setup redirect, per-user disable grace deadline restart. Security card
+  added to Admin page (above Backup Manager) with toggle button, description, and
+  orange warning strip when disabled. Toggle POSTs to /api/config/save and reloads
+  after restart. Both services restart (auth.py change). Validated all test steps.
+
+v3.4.36 — Configurable summary frequency. Three new config keys: SUMMARY_FREQUENCY
+  (daily/weekly, default daily), SUMMARY_DAY (0-6, default 0=Monday), SUMMARY_HOUR
+  (0-23, default 8). main.py scheduling block reads all three at runtime each loop
+  iteration — no restart needed after config change except monitor restart.
+  New-keys modal fires on next Config Editor open.
+
+v3.4.37 — Config Editor/modal improvements (first attempt). Added allowed_values to
+  SUMMARY_FREQUENCY in config_schema.py. configeditor.py passes allowed_values and
+  day_names through _build_fields(), validates against allowed_values in save_config().
+  New-keys modal uses dropdowns for allowed_values/day_names fields. Modal descriptions
+  switch from esc() to innerHTML so HTML bold renders. Main Config Editor descriptions
+  unchanged (still raw HTML tags visible — fixed in v3.4.38).
+
+v3.4.38 — Config Editor main editor fix. Added allowed_values and day_names dropdown
+  branches to the Jinja2 template ({% elif field.get('allowed_values') %} etc.).
+  Fixed {{ field.desc }} → {{ field.desc | safe }} so HTML bold renders correctly
+  in the main editor. Confirmed: Summary Frequency shows dropdown, descriptions show
+  bold values.
+
+v3.4.39 — Summary content config card on Notifications page.
+  Five new SUMMARY_SHOW_* bool config keys (Alerts section):
+    SUMMARY_SHOW_UPTIME (default True), SUMMARY_SHOW_RESETS (True),
+    SUMMARY_SHOW_LATENCY (True), SUMMARY_SHOW_SPEEDTEST (False),
+    SUMMARY_SHOW_RESET_LOG (False).
+  alerts.py rewritten: build_summary_message() builds HTML table, _summary_row()
+  helper, _uptime_color() helper. send_daily_summary() accepts force_email param.
+  Speedtest uses get_speedtest_avg(days=days). Reset log uses get_reset_history(days=days).
+  Period adapts to frequency (1 day or 7 days).
+  webapp.py: POST /api/alerts/send_test_summary (sends to logged-in user's email only,
+  uses get_subscriber_by_user_id to find address). GET /api/config/values (flat dict
+  of all config values). POST /api/config/save_quiet (saves without service restart,
+  used for toggles that take effect at next summary send).
+  alert_settings.html: Summary Settings card at top of Notifications page, 5 toggle
+  rows with sliding switch UI, Send Test Summary button with inline status.
+
+v3.4.40 — Fix alerts import in send_test_summary route. alerts was not imported at
+  module level in webapp.py — only via local imports in other routes. Added
+  "import alerts" inside the try block of api_send_test_summary(). Confirmed working.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+- v3.4.37 main editor: bold descriptions still showed raw HTML tags. Root cause:
+  {{ field.desc }} in Jinja2 auto-escapes HTML. Fixed in v3.4.38 with | safe filter.
+- v3.4.39 Send Test Summary: "name 'alerts' is not defined" error. Root cause:
+  alerts not imported at module level. Fixed in v3.4.40 with local import.
+
+
+DECISIONS MADE
+--------------
+- Release Manager description flows at Build time (zip is the source of truth).
+  Reset is non-fatal — if zip already gone, UI resets cleanly.
+- MFA_REQUIRED defaults to True (safe default). mfa_enforcement_enabled() reads
+  config at runtime so restart takes effect cleanly.
+- Summary frequency is system-wide (not per-subscriber). Simple enough for home install.
+- save_quiet route added for toggle-style settings that don't need a service restart.
+  Currently only used for SUMMARY_SHOW_* keys. Document pattern for future use.
+- allowed_values in config_schema triggers dropdown in both modal and main editor.
+  day_names triggers a "N — DayName" dropdown. Both patterns reusable for future keys.
+- Test summary sends to logged-in admin's subscriber email only (not all subscribers).
+- alerts.py import pattern: always use local "import alerts" inside functions in
+  webapp.py — it is never imported at module level.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None this session — the alerts import pattern is already in Gotchas.txt
+(WEBAPP.PY FUNCTION CALLS THAT REFERENCE MODULES NOT YET DEPLOYED covers the
+general principle). The specific "always import alerts locally" pattern is
+captured in the Decisions Made section above and in the context doc.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- [PENDING] Security audit before public promotion.
+- [PENDING] Documentation (User PDF, Admin guide, Developer reference).
+- [PENDING] Version reset to v1.0.0.
+- [PENDING] Fresh install re-test with current codebase.
+- [PENDING] cloud-init / firstboot install path.
+- [PENDING] 9 PENDING DISCUSSION items in Audit_Findings.txt still open.
+- [PENDING] Summary frequency — test Pi will validate weekly cadence over time.
+- [PENDING] Publish v3.4.40 as public release so test Pi can update.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- Release Manager field locking + Reset + description in zip manifest (v3.4.34)
+- MFA disable toggle — MFA_REQUIRED config key + Admin Security card (v3.4.35)
+- Configurable summary frequency/day/hour (v3.4.36)
+- Config Editor allowed_values validation + dropdowns + HTML bold descriptions (v3.4.37-38)
+- Summary content config card on Notifications page (v3.4.39-40)
+
+No new backlog items added.
+
+
+CURRENT STATE
+-------------
+- Production Pi: v3.4.40
+- Test Pi: v3.4.33 (not updated this session — needs publish of v3.4.40 first)
+- GitHub: v3.4.38 is current public release (v3.4.39-40 not yet published)
+- Next session: publish v3.4.40, then security audit or documentation
