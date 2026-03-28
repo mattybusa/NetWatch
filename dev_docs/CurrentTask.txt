@@ -1,54 +1,97 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-28 | Session 38 closed | v3.4.43 (pending install)
+Updated: 2026-03-28 | Session 39 closed | v3.4.43
 
-STATUS: Session 38 complete. Closeout package ready to install.
+STATUS: Session 39 complete. Security audit discussion only — no packages.
+  Major strategic decisions made. See ChatSummary_39.txt for full detail.
 
-SESSION 38 SUMMARY
-------------------
-Phase 1: Full security audit — findings in ChatSummary_38.txt.
-Phase 2: Seven security fixes across four packages:
-  v3.4.41: C1 upload limit, H1 security headers, M1/M2 secure_filename, M3 setup guard
-  v3.4.42: Fix package installer UI hang on oversized upload (413 not handled in JS)
-  v3.4.43: H2 session rotation post-MFA (session.clear() in _complete_mfa_login)
-  Closeout: Updated ChatSummary_38, CurrentTask, context doc
+
+STRATEGIC DIRECTION (read this first)
+--------------------------------------
+Session 39 established a new direction for the project:
+
+1. PAUSE new NetWatch feature development.
+2. COMPLETE the remaining security audit discussion (Session 40).
+3. DEDICATE a full session to mBase architecture — load all four architecture
+   docs, work through all PENDING DISCUSSION items, resolve foundational
+   decisions (auth library, phone-first transport, module system, Blueprint
+   refactor approach).
+4. THEN resume NetWatch development with mBase direction clear, ensuring
+   NetWatch's final state matches what mBase would have produced from the
+   start.
+
+Key decision: Flask-Security-Too is the intended auth foundation for mBase
+and therefore for NetWatch. Don't implement twice — implement once in mBase,
+NetWatch transitions onto it.
+
+
+SECURITY AUDIT STATUS (complete picture)
+-----------------------------------------
+SHIPPED:
+  C1 ✅ Upload size limit (v3.4.41)
+  H1 ✅ Security headers (v3.4.41)
+  M1 ✅ secure_filename deployed files (v3.4.41)
+  M2 ✅ secure_filename dev docs (v3.4.41)
+  M3 ✅ setup/skip post-setup guard (v3.4.41)
+  H2 ✅ Session rotation post-MFA (v3.4.43)
+
+DISCUSSED AND CLOSED THIS SESSION (no code needed):
+  H3 ✅ Reset token simultaneous with real password — NOT a real issue.
+         Code already correct (auth.py 322-329 clears token on use).
+  A4 ✅ PAT in git remote — dev environment only, not NetWatch product.
+  A5 ✅ Snapshots exclude config.py — intentional and correct.
+  A3 ✅ Self-signed TLS — accepted for LAN. mBase CA = network-level asset.
+         Phone-first transport = mBase architecture decision.
+  A2 ✅ Hand-rolled auth — accepted for now. Flask-Security-Too is mBase
+         auth foundation. Implement once in mBase, not twice.
+  A1 ✅ config.py plaintext — DESIGN COMPLETE. Novel Network-Bound
+         Credential Protection system designed. Full brief in
+         Feature_NetworkBoundCredentialProtection.txt. Backlogged,
+         depends on Blueprint refactor.
+
+BUNDLE PENDING (small fixes, accumulate before packaging):
+  H3b — Refuse new reset token if one already exists and is valid.
+         One-liner in request_password_reset() in auth.py:
+         if reset_token_hash and reset_expires_at and
+         _is_token_valid(reset_expires_at): return False, "reset_pending", None
+         Caller treats "reset_pending" same as success — generic response.
+
+NEEDS DISCUSSION (Session 40):
+  M4 — Config export returns credentials in JSON
+  M5 — No per-IP rate limiting
+
+NEEDS IMPLEMENTATION/DESIGN (Session 40):
+  C2 — DB restore validation (harden restore route — validate schema
+        before overwriting live DB)
+  C3 — run_sql SQL whitelist (restrict to safe statement types only)
+  C4 — Package signing (design brief first, no code)
+  H4 — PAT scrubbing from patch_log error field (low urgency)
+
+AFTER AUDIT COMPLETE:
+  - Publish security release to GitHub (hold until C2+C3 shipped)
+  - Test Pi update (v3.4.40 → current)
+  - mBase architecture session (load all four architecture docs)
+
+
+NEXT SESSION CHECKLIST
+-----------------------
+1. Verify MFA login still works on production Pi (v3.4.43 check)
+2. Discuss M4 (config export credentials)
+3. Discuss M5 (per-IP rate limiting)
+4. Implement C2 (DB restore validation) — design brief first
+5. Implement C3 (run_sql whitelist) — careful testing, core install path
+6. Design brief for C4 (package signing)
+7. Address H4 if time permits
+8. Bundle H3b with any small fixes into a package
+9. Publish to GitHub after C2+C3 ship
+10. Transition to mBase architecture session
+
 
 KEY STATE
 ---------
-- Production Pi: v3.4.43 (after installing this closeout package)
+- Production Pi: v3.4.43
 - Test Pi: v3.4.40
-- GitHub: v3.4.40 is current public release (hold — wait for C2+C3)
-- Security audit complete — full findings in ChatSummary_38.txt
-- Remaining security items: C2, C3, C4, H4
-
-NEXT SESSION
-------------
-Priority order:
-
-  1. Verify MFA login works normally after v3.4.43 install
-     Log out, log back in with MFA. Should land on dashboard normally.
-     Any regression shows immediately as login loop or session drop after MFA.
-
-  2. C2: DB restore validation
-     Harden restore route — validate uploaded DB contains expected schema
-     before overwriting live database. Prevent backdoor admin via crafted DB.
-
-  3. C3: run_sql SQL whitelist
-     Restrict run_sql manifest action to safe statement types only:
-     ALTER TABLE ADD COLUMN, CREATE TABLE IF NOT EXISTS. Reject DROP, DELETE,
-     INSERT, UPDATE. Requires careful testing — core install path.
-
-  4. C4: Package signing — design brief first, no code
-     Key questions: where public key lives, how install.sh embeds it,
-     failure behaviour for manual vs auto-update install paths.
-
-  5. Publish security release to GitHub once C2 + C3 shipped.
-     Test Pi updates automatically after publish.
-
-NOTES
------
-- CSP 'unsafe-inline' is documented in code — not a mistake, Blueprint refactor
-  prerequisite to remove it.
-- H4 (PAT in patch_log error field) deferred — low urgency.
-- ChatSummary_38.txt is the expanded summary for the security audit — load it
-  next session if continuing security work for full finding details.
+- GitHub: v3.4.40 (hold)
+- Feature_NetworkBoundCredentialProtection.txt: written, in dev_docs
+- ChatSummary_39.txt: written, in dev_docs
+- No Gotchas added this session

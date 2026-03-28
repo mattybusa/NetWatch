@@ -1,0 +1,252 @@
+NETWATCH CHAT SUMMARY — SESSION 39
+====================================
+Date: 2026-03-28
+Starting version: v3.4.43 (production Pi, session 38 closeout installed)
+Ending version: v3.4.43 (no packages this session — discussion only)
+Session focus: Security audit continuation. Full review of all remaining
+  audit items — H3, H3b, A1-A5, M4 partial. Major strategic decisions
+  made about NetWatch/mBase direction. One new feature design brief written.
+
+SCOPE NOTE: This was a long discussion-heavy session with no code shipped.
+  Every audit item touched generated significant design conversation. Two
+  major architectural directions were decided: (1) Flask-Security-Too as
+  the intended auth foundation for mBase, and (2) a formal pause on new
+  NetWatch feature development pending mBase architecture design. These
+  decisions are as significant as any code shipped this project.
+
+
+WHAT WAS ACCOMPLISHED
+----------------------
+
+SECURITY AUDIT ITEM REVIEW (discussion only, no packages)
+
+H3 — Reset token simultaneous with real password
+  Reviewed auth.py code directly. Finding is NOT a real issue. When a user
+  logs in with the reset token (temp password), lines 322-329 immediately
+  clear reset_token_hash and reset_expires_at. Token is single-use. The
+  original audit description was inaccurate. CLOSED.
+
+H3b — No rate limit on reset requests (NEW ITEM identified this session)
+  Discovered during H3 review. An attacker who knows a valid username can
+  spam reset requests, generating a rolling fresh 15-minute temp password
+  window indefinitely, and flooding the user's inbox.
+  Decision: Option C — refuse new token if one already exists and is valid.
+  One-liner fix in request_password_reset(): if reset_token_hash and
+  reset_expires_at are set and _is_token_valid() returns True, return
+  (False, "reset_pending", None). Caller treats "reset_pending" same as
+  success — generic response, no signal to attacker.
+  Note: Option A (cooldown) and Option C are mechanically identical when
+  cooldown period equals token lifetime (15 min). C is simpler — no new
+  columns, uses existing data.
+  STATUS: DESIGN COMPLETE. Bundled for next package.
+
+A1 — config.py plaintext credentials
+  Extensive design session. Explored and ruled out: pass/GPG (unattended
+  boot problem), Tang/Clevis (needs second server), TPM add-ons (not
+  standard hardware), README-derived keys (on SD card), router MAC via ARP
+  (stored in ARP cache on disk, changes with hardware), SSID from
+  wpa_supplicant.conf (stored on disk), public IP/geolocation (dynamic,
+  unstable), shared secret (still needs to be stored somewhere).
+  
+  Matt independently invented the concept of network-bound encryption
+  (Tang/Clevis exists for this at disk level, but not at app level).
+  
+  NOVEL DESIGN — Network-Bound Credential Protection (NBCP):
+  Composite key derived from multiple live network "anchors" queried at
+  boot — not stored on SD card, not reachable by attacker who stole the
+  device. Anchors: gateway IP reachability, subnet, router hostname via
+  mDNS (default and custom), SSID via iwgetid (WiFi installs), UPnP UUID.
+  Key = KDF(anchor_composite + install_time_salt). Key never stored —
+  derived fresh at boot. If anchors fail → degraded mode (correct behavior,
+  nothing to monitor anyway). Protection levels: Minimal → Maximum based
+  on anchors found. Setup wizard shows protection level, recommends
+  improvements. Confirmation email sent at setup with anchor summary and
+  recovery instructions. Re-initialization UI for hardware changes.
+  Full design in Feature_NetworkBoundCredentialProtection.txt.
+  STATUS: DESIGN COMPLETE. Depends on Blueprint refactor. Backlogged.
+
+A2 — Hand-rolled authentication
+  Reviewed what "hand-rolled" actually means in NetWatch context. The
+  crypto is NOT custom — bcrypt via bcrypt package, TOTP via pyotp, session
+  management via Flask signed cookies. What's custom is the orchestration
+  flow (login, lockout, permission checking, MFA routing).
+  Established libraries: Flask-Security-Too covers session auth, roles,
+  permissions, password reset, 2FA — essentially everything NetWatch built.
+  Migration cost: near-complete rewrite of auth.py, webapp.py, all
+  templates, DB schema. Largest single change ever made to NetWatch.
+  MAJOR DECISION: Flask-Security-Too is the intended auth foundation for
+  mBase. Don't implement twice — implement once in mBase, NetWatch
+  transitions onto it. See strategic decisions below.
+  STATUS: DEFERRED to mBase. Accept current implementation for NetWatch
+  until mBase transition. Document rationale.
+
+A3 — Self-signed TLS
+  Extensive discussion on certificate options:
+  - Let's Encrypt for public IPs: won't work for private LAN IPs (192.168.x.x
+    explicitly prohibited by CA/Browser Forum)
+  - Shared certificate system: requires users to install NetWatch root CA
+    anyway — same friction as current approach
+  - TPM add-ons: available for Pi but not standard hardware
+  - DuckDNS + Let's Encrypt DNS-01 challenge: cert issuance works without
+    port forwarding (outbound only), BUT accessing via domain name requires
+    port forwarding — Pi must be exposed to internet. Not plug and play,
+    not acceptable for general user base.
+  - Tailscale/Cloudflare Tunnel: third-party dependency, routes traffic
+    through their servers
+  - Self-signed with guided CA installation: works, one-time friction,
+    getting harder on Android 14+
+  
+  Key insight from Matt: self-signed certs provide identical encryption
+  strength to public certs. The warning is an identity verification issue,
+  not an encryption issue. Security professionals would not fail an audit
+  for self-signed certs on a LAN-only deployment.
+  
+  Phone-first app discussion: PWA vs native app vs browser web app.
+  Native app could bundle local CA cert internally — certificate problem
+  solved permanently. This is an mBase architecture decision, not a
+  NetWatch decision. Captured as open mBase question.
+  
+  mBase CA architecture insight: mBase should generate one root CA at
+  install time. Every app built on mBase gets a cert signed by that CA.
+  User installs CA cert once — all future mBase apps trusted automatically.
+  CA is a network-level asset, not an app-level asset.
+  STATUS: ACCEPTED. Self-signed correct for LAN deployment. mBase CA
+  strategy and phone-first transport decision captured as mBase
+  architecture items.
+
+A4 — netwatch-svc PAT in git remote
+  PAT lives in .git/config embedded in remote URL. patcher.py contains
+  NO credentials — just calls standard git commands. .git directory is
+  never committed or pushed by fundamental git design (not a .gitignore
+  concern — git never includes itself). Not part of NetWatch distributable
+  product — specific to Matt's dev environment. Any future developer would
+  set up their own remote with their own token. Auto-push only fires when
+  git is initialized AND remote origin exists (_is_git_configured() check).
+  Confirmed patcher.py code — git push lives in _git_push(), guarded by
+  _is_git_configured(). Production installs: .git doesn't exist, code path
+  is completely dormant.
+  Worth documenting in developer resources: how to set up auto-push to
+  personal Gitea for development.
+  STATUS: ACCEPTED. Not a NetWatch security concern. Dev environment only.
+
+A5 — Snapshots exclude config.py
+  Deliberate design decision confirmed correct. Config changes have been
+  additive only — no keys ever removed. If code rolls back to older version
+  that doesn't know about a newer key, getattr() with default silently
+  handles it — no crash. Orphaned keys after rollback are harmless.
+  Real recovery path if config.py corrupted: full backup restore.
+  STATUS: ACCEPTED. Intentional and correct.
+
+ITEMS NOT REACHED THIS SESSION (deferred to Session 40)
+  M4 — Config export returns credentials in JSON
+  M5 — No per-IP rate limiting
+  C2 — DB restore validation (implementation)
+  C3 — run_sql SQL whitelist (implementation)
+  C4 — Package signing (design brief)
+  H4 — PAT scrubbing from patch_log error field
+
+
+MAJOR STRATEGIC DECISIONS
+--------------------------
+These are the most significant outcomes of this session.
+
+DECISION 1 — Pause new NetWatch feature development
+  Matt identified a pattern: decisions have repeatedly been deferred with
+  "do it later" and "not worth it now." Each deferral creates more work
+  downstream. The auth system is the canonical example — if Flask-Security-
+  Too is the right foundation for mBase, implementing the current hand-rolled
+  auth in NetWatch first and then replacing it for mBase means doing the
+  same work twice.
+  
+  Decision: Pause active new feature development on NetWatch. Complete the
+  security audit discussion (remaining items in Session 40). Then dedicate
+  a full session to mBase architecture using the four architecture docs.
+  Come out of that session with a clear picture of what mBase looks like
+  and how NetWatch transitions onto it.
+
+DECISION 2 — Flask-Security-Too as mBase auth foundation
+  Implement once in mBase. NetWatch transitions onto it when mBase is ready.
+  Do not implement in NetWatch now only to replace it later.
+
+DECISION 3 — mBase direction reaffirmed
+  Matt's original intent: get to a proper foundation level, make hard
+  decisions, build right. NetWatch was always meant to eventually look no
+  different than if it had been built on mBase from the start. The path
+  there requires working through the mBase architecture decisions properly
+  before adding more NetWatch features.
+  
+  The four mBase architecture docs (Networked_App_Standards_Summary.txt,
+  Audit_Findings.txt, mBase_Plan.txt, Audit_PreMBase.txt) must be loaded
+  and worked through in Session 40 or 41 after the security audit is
+  complete.
+
+DECISION 4 — Phone-first transport is an mBase architecture decision
+  Browser web app vs PWA vs native app affects everything about certificate
+  handling, encryption transport, and user experience on phones. This
+  question was never formally asked during NetWatch development and should
+  have been. It must be resolved in the mBase architecture session before
+  any new app development begins.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+------------------------------
+None — this was a discussion-only session with no implementation attempts.
+
+
+NEW FEATURE DESIGN BRIEF PRODUCED
+-----------------------------------
+Feature_NetworkBoundCredentialProtection.txt
+  Complete design brief for novel network-bound credential protection system.
+  Addresses A1 (config.py plaintext credentials). Covers: anchor catalogue
+  (6 anchor types), protection levels, key derivation approach, setup wizard
+  integration, confirmation email, re-initialization flow, honest limitations,
+  implementation notes. Depends on Blueprint refactor. Full context preserved
+  for future implementation session.
+
+
+NEW GOTCHAS ADDED
+-----------------
+None this session.
+
+
+DECISIONS MADE
+--------------
+- H3: Closed — not a real issue, code already handles it correctly
+- H3b: New item, Option C design complete, bundle for next package
+- A1: Design complete — NBCP system, full brief written, backlogged
+- A2: Flask-Security-Too is mBase auth foundation, don't implement twice
+- A3: Self-signed TLS accepted for LAN, mBase CA = network-level asset,
+      phone-first transport question = mBase architecture decision
+- A4: Accepted, dev environment only, document in developer resources
+- A5: Accepted, intentional and correct
+- Strategic: pause new NetWatch features, complete audit, do mBase session
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+----------------------------------
+- M4, M5: Not discussed, NEEDS DISCUSSION Session 40
+- C2, C3, C4, H4: Not discussed this session, pending implementation/design
+- mBase architecture session: must load all four architecture docs, work
+  through all PENDING DISCUSSION items in Audit_Findings.txt, resolve
+  Flask-Security-Too integration approach, resolve phone-first transport
+  question (browser/PWA/native), resolve module system design
+- How does NetWatch transition to mBase foundation when ready?
+- Blueprint refactor: prerequisite for NBCP and CSP unsafe-inline removal
+
+
+CURRENT STATE
+-------------
+- Production Pi: v3.4.43
+- Test Pi: v3.4.40
+- GitHub: v3.4.40 (hold — wait for C2+C3)
+- No packages this session
+- Bundle pending: H3b one-liner fix (accumulate with M4/M5 fixes)
+- Next session: complete remaining audit items (M4, M5, C2, C3, C4, H4),
+  then transition to mBase architecture session
+
+
+EXPANDED SUMMARIES PRODUCED
+-----------------------------
+Feature_NetworkBoundCredentialProtection.txt — Complete design brief for
+  novel network-bound credential protection (A1). Full anchor catalogue,
+  key derivation, setup wizard integration, re-initialization flow.

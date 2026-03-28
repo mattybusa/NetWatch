@@ -876,16 +876,6 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   be replayed as authenticated sessions.
   REMAINING: C2 DB restore validation, C3 run_sql whitelist, C4 package signing,
   H4 git PAT scrubbing from logs.
-  Session 39 audit item review (discussion only, no packages):
-  H3 — reset token simultaneous with real password: NOT a real issue. Code
-    correctly clears token on use (auth.py lines 322-329). Closed.
-  H3b (new) — no rate limit on reset requests: DESIGN COMPLETE. Option C:
-    refuse new token if one already exists and is valid. One-liner fix in
-    request_password_reset(). Bundled for next package.
-  A1 — config.py plaintext credentials: DESIGN COMPLETE. Novel network-bound
-    credential protection system. Full brief in
-    Feature_NetworkBoundCredentialProtection.txt. Depends on Blueprint refactor.
-  A2, A3, A4, A5, M4, M5 — NEEDS DISCUSSION (next session).
 
 **UI**
 - ✅ System log viewer: pkg_update.log tail in Admin page, collapsible card with
@@ -998,22 +988,7 @@ references to gitea-pi.home should be updated to ops-pi.home.**
 - Changelog PDF retroactive
 - NetWatch brochure
 
-**mBase & Architecture (PRIORITY — Session 39 strategic decision)**
-- NEW DIRECTION (Session 39): Pause new NetWatch feature development. Complete
-  security audit (Session 40), then dedicate full session to mBase architecture.
-  NetWatch's final state must match what mBase would have produced from the start.
-- Flask-Security-Too: decided as mBase auth foundation (Session 39). Do not
-  implement in NetWatch now — implement once in mBase, NetWatch transitions onto it.
-- Phone-first transport decision UNRESOLVED: browser web app vs PWA vs native app.
-  Affects certificate handling, encryption transport, UX. Must resolve in mBase
-  architecture session before any new app development.
-- mBase CA architecture: local CA generated at mBase install level (not app level).
-  One CA trust installation covers all mBase apps permanently. CA is a network-level
-  asset. mBase apps can optionally use DuckDNS + Let's Encrypt DNS-01 if user has
-  a domain — setup wizard walks through it. Local CA is always the fallback.
-- Network-Bound Credential Protection (NBCP): novel system designed Session 39.
-  Full brief in Feature_NetworkBoundCredentialProtection.txt. Depends on Blueprint
-  refactor. Backlogged.
+**mBase & Architecture (active design work — see mBase Strategy section)**
 - Work through all PENDING DISCUSSION items in Audit_Findings.txt (9 decisions needed)
 - Decide git strategy: commit discipline, what goes in git, branching approach
 - Decide sharing/publishing approach: GitHub vs Gitea, licensing, README requirements
