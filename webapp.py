@@ -2318,6 +2318,7 @@ def api_send_test_summary():
 
     email = sub["email_address"]
     try:
+        import alerts
         alerts.send_daily_summary(force_email=email)
         log.info("test_summary_sent", user=user["username"], email=email)
         return jsonify({"success": True,
