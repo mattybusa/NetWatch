@@ -51,6 +51,15 @@ SECTION 1: NETWATCH PI — BASE SYSTEM
     --home-dir /nonexistent --no-create-home netwatch-svc
 [IN INSTALL.SH] Installing user added to group:
   sudo usermod -aG netwatch-svc mboynton
+[IN INSTALL.SH] netwatch-svc added to gpio group:
+  sudo usermod -aG gpio netwatch-svc
+  WHY: RPi.GPIO requires /dev/mem access for GPIO output. Without gpio group
+  membership, GPIO imports succeed (GPIO_AVAILABLE=True, no simulation warning)
+  but all GPIO.output() calls silently fail. Relays do not fire. Discovered
+  Session 40 when relay worked from CLI (as mboynton) but not from NetWatch
+  (as netwatch-svc). Fix: usermod -a -G gpio netwatch-svc + restart monitor.
+  NOTE: lgpio (used by button.py) uses /dev/gpiochip and does NOT need gpio
+  group membership — but relay.py still uses RPi.GPIO and does need it.
 [IN INSTALL.SH] Sudoers written to /etc/sudoers.d/netwatch-svc (chmod 440):
   netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-web.service
   netwatch-svc ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart netwatch-monitor.service
@@ -415,6 +424,14 @@ GAP-9: Production Pi venv missing requests
   FIXED manually on production at Session 34 -- see Section 1.4.
   Lesson: any new server-side HTTP call should check that requests is actually present
   in the production venv, not just in install.sh.
+
+GAP-10: lgpio not in venv on installs before Session 40
+  lgpio was in the install.sh pip block but the venv on earlier installs
+  did not have it. button.py was rewritten to use lgpio in v3.4.45 (Session 40).
+  On older installs: sudo /home/mboynton/netwatch/venv/bin/pip install lgpio
+  Requires: swig and liblgpio-dev (apt). Already in install.sh apt block.
+  FIXED in install.sh for all fresh installs -- only manual fix needed on
+  Pis originally provisioned before Session 31.
 
 ================================================================================
 SECTION 5: LOG FORMAT REFERENCE

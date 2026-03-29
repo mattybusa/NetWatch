@@ -155,14 +155,14 @@ class ButtonHandler:
                 if hold_duration >= self.LONG_PRESS_DURATION:
                     # Long press detected — act immediately, clear press count
                     log.info(
-                        "Long press detected: modem reset",
+                        "Long press detected: router reset",
                         hold_duration_s=round(hold_duration, 1)
                     )
                     self.press_count = 0
                     if self.eval_timer:
                         self.eval_timer.cancel()
                     threading.Thread(
-                        target=self._do_modem_reset,
+                        target=self._do_router_reset,
                         daemon=True
                     ).start()
                     return
@@ -208,12 +208,12 @@ class ButtonHandler:
         relay.cycle_full(triggered_by="button", reason="Manual button press")
         alerts.send_alert("reset_performed", "Full reset triggered by button press.")
 
-    def _do_modem_reset(self):
-        """Trigger a modem-only reset via relay module."""
+    def _do_router_reset(self):
+        """Trigger a router-only reset via relay module."""
         import relay
         import alerts
-        relay.cycle_modem(triggered_by="button")
-        alerts.send_alert("reset_performed", "Modem reset triggered by long button press.")
+        relay.cycle_router(triggered_by="button")
+        alerts.send_alert("reset_performed", "Router reset triggered by long button press.")
 
     def _toggle_lockout(self):
         """Toggle lockout mode on the shared monitor state."""
