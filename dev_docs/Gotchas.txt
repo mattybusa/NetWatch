@@ -859,3 +859,30 @@ Correct closeout manifest example:
   }
 
 No "restart" action needed — patcher skips it and no services are touched.
+
+2026-03-29 | Session 40 (button/relay troubleshooting)
+NETWATCH-SVC NEEDS GPIO GROUP MEMBERSHIP FOR RPi.GPIO OUTPUT
+RPi.GPIO requires access to /dev/mem for GPIO output operations. The
+netwatch-svc account does not have /dev/mem access by default. Without gpio
+group membership, RPi.GPIO imports and initialises successfully (GPIO_AVAILABLE
+stays True, no simulation mode warning), but all GPIO.output() calls silently
+fail — relays do not fire even though the monitor logs show the reset cycle
+completing normally. Fix: sudo usermod -a -G gpio netwatch-svc, then restart
+the monitor service. install.sh already adds netwatch-svc to the gpio group
+at install time — this only affects installs done before that line was added.
+
+---
+
+2026-03-29 | Session 40 (button troubleshooting)
+RPi.GPIO EDGE DETECTION BROKEN ON RECENT PI OS — USE LGPIO FOR BUTTON
+RPi.GPIO raises RuntimeError "Failed to add edge detection" on Raspberry Pi OS
+versions that use the new GPIO kernel driver (gpiochip-based). This affects
+gpio_claim_alert/add_event_detect on input pins. RPi.GPIO output (GPIO.output)
+still works for relay control, but edge detection for the button does not.
+Fix: rewrite button.py to use lgpio instead of RPi.GPIO. lgpio uses
+/dev/gpiochip, works correctly as netwatch-svc without gpio group issues,
+and supports the same BOTH_EDGES callback pattern via gpio_claim_alert +
+lgpio.callback(). The callback signature is (chip, gpio, level, timestamp)
+rather than RPi.GPIO's (channel,). Shipped v3.4.45.
+
+---
