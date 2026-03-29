@@ -886,3 +886,42 @@ lgpio.callback(). The callback signature is (chip, gpio, level, timestamp)
 rather than RPi.GPIO's (channel,). Shipped v3.4.45.
 
 ---
+
+2026-03-29 | Session 40 (post-closeout)
+EXPORT_CODE_FULL HANGS — TWO ROOT CAUSES
+The export_code_full route had two separate issues that caused it to hang:
+(1) lgpio button handler creates a named pipe (.lgd-nfy0) in NETWATCH_DIR.
+    zf.write() on a named pipe blocks indefinitely. Fix: add os.path.isfile()
+    check before zipping any file — skips pipes, sockets, and device files.
+    This pipe appears whenever the button handler is running (lgpio installed).
+(2) BytesIO + sync gunicorn worker + TLS cannot efficiently stream a 2MB buffer.
+    The worker times out even at 120s. Fix: write zip to a temp file in /tmp
+    and use send_file() with a file path — Flask uses OS-level file transfer.
+    Backup downloads work because they use send_file() with a path from the start.
+Rule: any route that builds a large in-memory buffer and streams it via send_file()
+should use a temp file on disk instead of BytesIO when running under gunicorn TLS.
+
+---
+
+2026-03-29 | Session 40 (post-closeout)
+GUNICORN ACCESS LOGGER CRASHES ON STREAMING FILE RESPONSES
+gunicorn.conf.py StructlogAccessLogger.access() used resp.status_code to get the
+HTTP status. Regular JSON responses have status_code but streaming file responses
+(send_file with a path) use resp.status (an integer). The crash was silent —
+the worker exited with code 255 and the download never completed.
+Fix: status = getattr(resp, "status_code", None) or getattr(resp, "status", 0)
+with a fallback to handle string status values (e.g. "200 OK").
+
+---
+
+2026-03-29 | Session 40 (post-closeout)
+CSP BLOCKS GOOGLE FONTS — ADMIN PAGE BROKEN
+The Content-Security-Policy added in v3.4.41 only allowlisted cdn.jsdelivr.net
+for style-src and font-src. The admin page loads fonts from fonts.googleapis.com
+(styles) and fonts.gstatic.com (font files). The CSP blocked both, breaking
+page rendering and preventing the Dev Docs download button from working.
+Fix: add fonts.googleapis.com to style-src and fonts.gstatic.com to font-src.
+Rule: when adding CSP, audit all external resources loaded by every template,
+not just the ones you know about.
+
+---

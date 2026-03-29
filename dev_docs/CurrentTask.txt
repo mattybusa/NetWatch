@@ -1,68 +1,34 @@
 NETWATCH CURRENT TASK
 =====================
-Updated: 2026-03-29 | Session 40 closed | v3.4.47
+Updated: 2026-03-29 | Session 40 fully closed | v3.4.54
 
-STATUS: Session 40 complete. Security audit finished. Hardware fully operational
-  for the first time. See ChatSummary_40.txt for full detail.
-
-
-SECURITY AUDIT — COMPLETE
---------------------------
-All items resolved, accepted, or formally deferred:
-
-SHIPPED THIS SESSION (v3.4.44):
-  C2 ✅ DB restore schema validation
-  C3 ✅ Destructive SQL guard + auto-reset (ALLOW_DESTRUCTIVE_SQL config key)
-  H3b ✅ Reset token replay block
-  M4 ✅ Config export credential warning
-
-DISCUSSED AND CLOSED THIS SESSION:
-  M4 ✅ Config export — already encrypted (.nwcfg), warning text added
-  M5 ✅ Per-IP rate limiting — accepted/deferred (single-user, per-user lockout sufficient)
-  C4 ✅ Package signing — CLOSED. SHA-256 on GitHub releases is sufficient.
-         Revisit if distribution moves beyond GitHub.
-
-STILL PENDING (low urgency):
-  H4 — PAT scrubbing from patch_log error field
-
-
-HARDWARE — NOW FULLY OPERATIONAL
-----------------------------------
-All hardware working as of Session 40:
-- Relays: working via web UI and auto-trigger
-- Button: working (lgpio, GPIO 22)
-- Button mapping:
-    Short press  → Full reset (modem + router)
-    Long press   → Router only reset
-    Triple press → Toggle lockout mode
-
-Manual fixes applied this session (already in install.sh for fresh installs):
-- sudo usermod -a -G gpio netwatch-svc (relay GPIO access)
-- sudo /home/mboynton/netwatch/venv/bin/pip install lgpio (button lgpio)
-- echo "192.168.100.230 ops-pi.home" >> /etc/hosts (Gitea DNS)
-
+STATUS: Session 40 complete. Security audit finished. Hardware fully operational.
+  Post-closeout fixes shipped (v3.4.49–v3.4.54): CSP, gunicorn logger, export route.
 
 NEXT SESSION
 ------------
-Strategic direction from Session 39 still applies:
-1. H4 — PAT scrubbing (low urgency, can bundle with any small fixes)
-2. mBase architecture session — load all four architecture docs, work through
-   all PENDING DISCUSSION items in Audit_Findings.txt, resolve:
-   - Flask-Security-Too integration approach
-   - Phone-first transport decision (browser/PWA/native)
-   - Module system design
-   - Blueprint refactor approach
-3. Test Pi update (v3.4.40 → v3.4.47)
-4. Publish security release to GitHub (audit now complete)
-5. Documentation (User PDF, Admin guide, Developer reference)
-6. v1.0.0 version reset
-
+1. H4 — PAT scrubbing from patch_log error field (low urgency, bundle with any fix)
+2. Update test Pi (v3.4.40 → v3.4.54)
+3. Publish security release to GitHub (audit complete, hold until test Pi confirms)
+4. mBase architecture session — load all four architecture docs, work through all
+   PENDING DISCUSSION items in Audit_Findings.txt
+5. Documentation, v1.0.0 reset — still pending
 
 KEY STATE
 ---------
-- Production Pi: v3.4.47
-- Test Pi: v3.4.40
-- GitHub: v3.4.40 (hold — publish after test Pi confirms update path)
-- Gitea: v3.4.47 (pushed manually after DNS fix)
-- All security audit items resolved
-- Hardware fully operational
+- Production Pi: v3.4.54
+- Test Pi: v3.4.40 (needs update)
+- GitHub: v3.4.40 (hold until test Pi update confirmed)
+- Gitea: needs push after this package installs
+- Hardware: fully operational — relays and button confirmed working
+- Security audit: complete
+- Dev Docs download: working (temp file fix)
+
+POST-CLOSEOUT FIXES (v3.4.49–v3.4.54)
+---------------------------------------
+v3.4.49 — CSP fix attempt (incomplete — gunicorn logger crash discovered)
+v3.4.50 — Gunicorn access logger fix (status_code → getattr fallback)
+v3.4.51 — Gunicorn timeout 30s→120s (not root cause but kept)
+v3.4.52 — .git excluded from export walk (not root cause but correct)
+v3.4.53 — isfile() check to skip lgpio pipe (partial fix)
+v3.4.54 — BytesIO→temp file for export (root cause fix, download working)
