@@ -1,0 +1,186 @@
+NETWATCH CHAT SUMMARY — SESSION 40
+====================================
+Date: 2026-03-29
+Starting version: v3.4.43 (production Pi, per context doc at session start)
+Ending version: v3.4.47
+Session focus: Security audit completion, hardware bring-up (relays + button),
+  and infrastructure fixes.
+
+SCOPE NOTE: This session covered 8 distinct arcs. Expanded summary produced for
+  the hardware troubleshooting arc. All other items fit in this base summary.
+
+
+WHAT WAS ACCOMPLISHED
+----------------------
+
+SECURITY AUDIT — DISCUSSION ITEMS (no code)
+
+M4 — Config export credential risk: Reviewed and found the export is already
+  client-side encrypted (.nwcfg format, passphrase required). Risk was lower than
+  the original audit suggested. Decision: add a warning note to the export modal
+  and close. Shipped in v3.4.44.
+
+M5 — Per-IP rate limiting: Discussed Flask-Limiter (Option A). Decided to accept
+  and defer. Single-user install means per-user lockout already closes the attack —
+  spreading across IPs gains the attacker nothing. Revisit in mBase with
+  Flask-Security-Too.
+
+C4 — Package signing: Extended design discussion covering GPG, Minisign, Python-
+  native Ed25519, and ops-pi-as-signing-authority. Ultimately concluded that SHA-256
+  verification on GitHub-hosted releases (already implemented) is what most open
+  source projects rely on and is sufficient for this distribution model. Closed.
+  No code needed.
+
+SECURITY HARDENING — v3.4.44
+
+  C2 — DB restore validation: admin_restore_db() now checks all 16 expected tables
+    are present in the uploaded file, plus column signatures on users, roles, and
+    system_settings before overwriting the live database. Rejects corrupt or wrong-
+    database uploads with a clear error message. webapp.py.
+
+  C3 — Destructive SQL guard: patcher.py now blocks DROP, DELETE, and TRUNCATE at
+    both preview time and apply time unless ALLOW_DESTRUCTIVE_SQL=True in config.
+    Preview shows a clear rejection with instructions. Apply has a belt-and-suspenders
+    hard guard. Auto-resets to False after any destructive install completes.
+    New config key ALLOW_DESTRUCTIVE_SQL (bool, default False, Security section)
+    added to config_schema.py. Both services restart.
+
+  H3b — Reset token replay block: request_password_reset() in auth.py now refuses
+    to issue a new token if a valid one already exists. Returns "reset_pending"
+    (treated as success by caller — no signal leaks to requester). Prevents inbox
+    flooding and rolling fresh-token attacks.
+
+  M4 — Config export warning: export passphrase modal text updated to note the file
+    contains credentials. config_editor.html.
+
+HARDWARE BRING-UP (see Feature_HardwareBringup_Session40.txt for full detail)
+
+v3.4.45 — button.py rewritten to use lgpio: RPi.GPIO edge detection broken on
+  new Pi OS gpiochip kernel driver. lgpio uses /dev/gpiochip, works correctly
+  as netwatch-svc. Callback signature changed to (chip, gpio, level, timestamp).
+  lgpio installed in venv manually (swig + liblgpio-dev required).
+
+v3.4.46 — Button long press changed from modem-only to router-only reset.
+  Rationale: modem-only rarely makes sense (router downstream), router-only is
+  the more useful deliberate action.
+
+v3.4.47 — Button long press + SystemSetup.txt update: docs updated with gpio group
+  membership requirement, lgpio venv gap (GAP-10), and ops-pi.home hosts entry.
+  Supersedes v3.4.46 — install only v3.4.47.
+
+INFRASTRUCTURE FIXES (manual, not packaged)
+
+- netwatch-svc added to gpio group: RPi.GPIO output requires /dev/mem access.
+  Without gpio group membership, relay GPIO calls silently fail — monitor logs
+  show reset cycle completing but relay never fires. Fix: usermod -a -G gpio
+  netwatch-svc. Already in install.sh for fresh installs.
+
+- lgpio installed in venv: button.py uses lgpio but it was not in the venv on
+  older installs. Required swig + liblgpio-dev (apt) then pip install lgpio.
+  Documented as GAP-10 in SystemSetup.txt.
+
+- ops-pi.home DNS: git remote uses ops-pi.home but mDNS resolves ops-pi.local.
+  Gitea TLS cert issued for ops-pi.home — cannot use .local hostname. Fixed with
+  static /etc/hosts entry: 192.168.100.230 ops-pi.home. Gitea push confirmed
+  working after fix.
+
+
+WHAT WAS ATTEMPTED BUT FAILED
+-------------------------------
+- Initial C4 design went deep into PKI (Ed25519, ops-pi signing server, key rotation)
+  before stepping back to ask what other open source projects do. The answer (SHA-256
+  on GitHub releases) made the entire design unnecessary. Should have asked that
+  question first.
+
+- lgpio not in venv: first pip install attempt failed with "swig not found", then
+  after installing swig failed with "cannot find -llgpio". Required two separate apt
+  installs (swig, liblgpio-dev) before pip install succeeded. Then failed with
+  Permission denied — required sudo pip install.
+
+- Relay not firing from web UI: initially suspected simulation mode, permissions,
+  config mismatch, and path issues before identifying the root cause (gpio group
+  membership). The monitor logs showed reset cycles completing with correct log
+  messages because the log statements are before/after the GPIO calls — not inside
+  them. The GPIO calls executed silently without effect.
+
+- Button wiring appeared incorrect (physical pin numbering vs BCM numbering concern)
+  but turned out to be correct — pin 14 is GND, pin 15 is BCM GPIO 22.
+
+- Relay DIP switch was set incorrectly on the new hardware (user caught this and
+  corrected it — not a code issue).
+
+
+DECISIONS MADE
+---------------
+- M5 accepted/deferred: per-user lockout is sufficient for single-user installs.
+  Per-IP limiting adds no meaningful protection. Revisit in mBase.
+- C4 closed: SHA-256 on GitHub releases is the right level for this project.
+  No key management infrastructure warranted at this stage.
+- C3 implemented as guardrail not security control: ALLOW_DESTRUCTIVE_SQL prevents
+  accidental data loss, not malicious attacks. Consistent with overall threat model.
+- Button long press → router reset (not modem). Modem-only reset rarely makes sense
+  since router is downstream. Router-only is the more deliberate useful action.
+- v3.4.46 superseded by v3.4.47 within same session — install only .47.
+- ops-pi.home in /etc/hosts rather than changing git remote — TLS cert is issued
+  for .home, cannot use .local without cert mismatch.
+- End-of-session context doc + CurrentTask.txt update in closeout package.
+
+
+OPEN QUESTIONS / UNRESOLVED ITEMS
+-----------------------------------
+- H4 — PAT scrubbing from patch_log error field: still pending, low urgency.
+  Bundle with any small fix in next session.
+- Test Pi still at v3.4.40 — needs update to v3.4.47 to validate upgrade path
+  before GitHub publish.
+- GitHub still at v3.4.40 — hold until test Pi confirms upgrade path.
+- mBase architecture session still pending (all four architecture docs unloaded).
+- 9 PENDING DISCUSSION items in Audit_Findings.txt unresolved.
+- Documentation (User PDF, Admin guide, Developer reference) still pending.
+- v1.0.0 version reset still pending.
+
+
+BACKLOG CHANGES
+---------------
+Completed this session:
+- C2: DB restore schema validation (v3.4.44)
+- C3: Destructive SQL guard + ALLOW_DESTRUCTIVE_SQL config key (v3.4.44)
+- H3b: Reset token replay block (v3.4.44)
+- M4: Config export credential warning (v3.4.44)
+- M5: Accepted/deferred — per-IP rate limiting not needed for single-user install
+- C4: Closed — SHA-256 on GitHub releases is sufficient
+- Button handler: rewritten to use lgpio, long press → router reset (v3.4.45–v3.4.47)
+- Security audit: ALL items resolved, accepted, or formally deferred
+
+Added this session:
+- H4: PAT scrubbing from patch_log error field (low urgency, pending)
+
+Status unchanged:
+- mBase architecture session, documentation, v1.0.0 reset, test Pi update,
+  GitHub publish — all still pending
+
+
+EXPANDED SUMMARIES PRODUCED
+-----------------------------
+Feature_HardwareBringup_Session40.txt — Full detail on relay and button
+  troubleshooting: gpio group membership, lgpio migration, DIP switch correction,
+  ops-pi DNS fix, all failed diagnostic paths documented.
+
+
+NEW GOTCHAS ADDED
+------------------
+Two new entries appended directly to Gotchas.txt during this session:
+- NETWATCH-SVC NEEDS GPIO GROUP MEMBERSHIP FOR RPi.GPIO OUTPUT (new)
+- RPi.GPIO EDGE DETECTION BROKEN ON RECENT PI OS — USE LGPIO FOR BUTTON (new)
+Gotchas.txt delivered to Pi in v3.4.45 package.
+
+
+CURRENT STATE
+-------------
+- Production Pi: v3.4.47
+- Test Pi: v3.4.40 (needs update)
+- GitHub: v3.4.40 (hold until test Pi update confirmed)
+- Gitea: v3.4.47 (manually pushed after DNS fix)
+- Hardware: fully operational — relays and button confirmed working
+- Security audit: complete
+- Next session: H4 (bundle), test Pi update, GitHub publish, then mBase
+  architecture session (load all four architecture docs)

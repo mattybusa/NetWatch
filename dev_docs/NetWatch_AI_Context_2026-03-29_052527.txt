@@ -23,9 +23,9 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.4.48
+- **Pi version:** v3.4.47
 - **Pi path:** `/home/mboynton/netwatch/`
-- **Canonical matches Pi at v3.4.48**
+- **Canonical matches Pi at v3.4.47**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.
 - **GitHub:** Public repo at https://github.com/mattybusa/NetWatch. Remote named `github` on Pi (PAT embedded). Manual push workflow — push to github remote when ready to publish a release. Manifest URL: https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json (live). releases/latest.json committed to both remotes. Session 32.
 - **ops-pi (formerly gitea-pi):** 192.168.100.230 | https://ops-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos (both private, MIT)
@@ -703,7 +703,8 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   SHIPPED v3.4.43: H2 session rotation post-MFA — session.clear() called in
   _complete_mfa_login() before login_user(). Pre-MFA captured cookies cannot
   be replayed as authenticated sessions.
-  All items resolved, accepted, or formally deferred. Audit complete Session 40.
+  REMAINING: C2 DB restore validation, C3 run_sql whitelist, C4 package signing,
+  H4 git PAT scrubbing from logs.
 
 **UI**
 - ✅ All UI backlog items complete as of v3.3.85.
@@ -889,10 +890,7 @@ references to gitea-pi.home should be updated to ops-pi.home.**
     Feature_NetworkBoundCredentialProtection.txt. Depends on Blueprint refactor.
   A2, A3, A4, A5 — ACCEPTED/CLOSED (see ChatSummary_39.txt).
   M4 — CLOSED v3.4.44. M5 — ACCEPTED/DEFERRED to mBase.
-  C4 — Package signing: CLOSED. SHA-256 on GitHub releases is sufficient.
-    Revisit if distribution moves beyond GitHub.
-  H4 — PAT scrubbing from patch_log error field: low urgency, still pending.
-  SECURITY AUDIT COMPLETE (all items resolved, accepted, or formally deferred).
+  REMAINING: C4 package signing (design brief needed), H4 git PAT scrubbing.
 
 **UI**
 - ✅ System log viewer: pkg_update.log tail in Admin page, collapsible card with
@@ -1018,14 +1016,6 @@ references to gitea-pi.home should be updated to ops-pi.home.**
   One CA trust installation covers all mBase apps permanently. CA is a network-level
   asset. mBase apps can optionally use DuckDNS + Let's Encrypt DNS-01 if user has
   a domain — setup wizard walks through it. Local CA is always the fallback.
-- Button handler: rewritten to use lgpio (v3.4.45) — RPi.GPIO edge detection
-  broken on new Pi OS kernel driver. lgpio uses /dev/gpiochip, no /dev/mem needed.
-  Button long press changed to router-only reset (was modem-only) v3.4.46/v3.4.47.
-  Button confirmed working Session 40.
-- netwatch-svc gpio group: required for RPi.GPIO output (relay control). Added via
-  usermod manually Session 40 (install.sh already handles this for fresh installs).
-- ops-pi.home DNS: added static /etc/hosts entry on NetWatch Pi (192.168.100.230).
-  mDNS (.local) resolves but Gitea TLS cert is issued for .home — hosts entry needed.
 - Network-Bound Credential Protection (NBCP): novel system designed Session 39.
   Full brief in Feature_NetworkBoundCredentialProtection.txt. Depends on Blueprint
   refactor. Backlogged.

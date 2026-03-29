@@ -1,0 +1,131 @@
+FEATURE: Hardware Bring-Up — Relays and Button
+===============================================
+Type: Bug / Hardware commissioning
+Date: 2026-03-29
+Sessions: Session 40
+Outcome: Complete — all hardware confirmed working
+
+
+BACKGROUND
+----------
+NetWatch was built with relay and button support from early sessions but the
+hardware was never actually connected during development. Session 40 was the
+first time relays were wired to real equipment and the button was connected.
+Two independent problems were discovered: relays fired from CLI but not from
+NetWatch, and the button edge detection had never worked.
+
+
+WHAT WAS TRIED AND FAILED
+--------------------------
+
+RELAY TROUBLESHOOTING:
+
+GPIO_AVAILABLE false hypothesis: First suspected relay.py was running in
+simulation mode because GPIO_AVAILABLE was False. Checked journalctl at startup
+— saw "Relay GPIO initialized modem_gpio=17 router_gpio=27" which confirmed
+GPIO_AVAILABLE was True. Ruled out.
+
+Simulation mode silent failure hypothesis: Monitor logs showed full reset cycle
+completing ("Modem reset started", "Modem power restored, "Modem reset complete")
+but lamp never flickered. This was the most confusing diagnostic phase — the logs
+looked correct but nothing happened. The logging statements are before and after
+the GPIO calls, not inside _relay_on()/_relay_off(), so a silent GPIO failure
+looks identical to a successful one in the logs.
+
+Config mismatch hypothesis: Checked RELAY_MODEM, RELAY_ROUTER, RELAY_ACTIVE_LOW
+in config.py — all correct. Checked that CLI test used same pin (GPIO 17) and
+same logic as relay.py with RELAY_ACTIVE_LOW=False. They matched.
+
+Web → IPC → monitor path: Confirmed POST /api/control/reset_modem returned 200.
+Confirmed pending_command.json was being written and picked up (web_command_received
+log entry appeared). Ruled out IPC as the problem.
+
+DIP switch hardware issue: User had DIP switches on relay boards set incorrectly
+initially. Corrected — not a code issue.
+
+BUTTON TROUBLESHOOTING:
+
+RPi.GPIO edge detection failure: The "Failed to add edge detection" error had been
+present since early development but was never investigated because the button was
+never connected. RPi.GPIO.add_event_detect() raises RuntimeError on Raspberry Pi OS
+versions using the new gpiochip kernel driver. This is a known RPi.GPIO limitation
+on recent Pi OS — it affects interrupt registration on input pins. GPIO output
+(for relays) still works. Only edge detection is broken.
+
+lgpio import failed in venv: After rewriting button.py to use lgpio, the monitor
+logged "lgpio not available: button handler in simulation mode". lgpio was in
+install.sh's pip block but had never been installed in the venv on this Pi (which
+predated that install.sh addition). Required three steps:
+  1. sudo apt-get install -y swig (pip needs swig to build lgpio)
+  2. sudo apt-get install -y liblgpio-dev (linker needs -llgpio)
+  3. sudo /home/mboynton/netwatch/venv/bin/pip install lgpio
+  Note: must use sudo for pip install — regular user got Permission denied on venv.
+
+
+WHAT WORKED
+-----------
+
+ROOT CAUSE — RELAY: netwatch-svc was not in the gpio group. RPi.GPIO requires
+/dev/mem access for GPIO output. The gpio group grants this access. Without it,
+GPIO.output() calls execute silently without error but do nothing. GPIO_AVAILABLE
+stays True (import succeeded), no simulation mode warning fires, and all log
+statements around the GPIO calls execute normally — making the failure completely
+invisible in logs. Fix: sudo usermod -a -G gpio netwatch-svc && sudo systemctl
+restart netwatch-monitor. Confirmed: lamp flickered on next web-triggered reset.
+
+Note: install.sh already includes "sudo usermod -aG gpio netwatch-svc" (added
+Session 31). This only affects Pis provisioned before that addition.
+
+ROOT CAUSE — BUTTON: RPi.GPIO edge detection broken on new Pi OS kernel driver.
+Fixed by rewriting button.py to use lgpio instead of RPi.GPIO.
+
+lgpio API used:
+  lgpio.gpiochip_open(0)                           — open main GPIO chip
+  lgpio.gpio_claim_input(h, pin, lgpio.SET_PULL_UP) — claim input with pull-up
+  lgpio.gpio_set_debounce_micros(h, pin, 50000)    — 50ms debounce
+  lgpio.gpio_claim_alert(h, pin, lgpio.BOTH_EDGES)  — register for edge alerts
+  lgpio.callback(h, pin, lgpio.BOTH_EDGES, fn)      — register callback
+    callback signature: fn(chip, gpio, level, timestamp)
+    level: 0=LOW/pressed, 1=HIGH/released, 2=watchdog
+
+Key difference from RPi.GPIO: callback must be stored as instance variable
+(_cb = lgpio.callback(...)) or it gets garbage collected and stops firing.
+gpiochip handle must also be kept alive (_handle).
+
+FILES MODIFIED:
+- button.py: complete rewrite. Replaced RPi.GPIO with lgpio. GPIO_AVAILABLE
+  renamed to LGPIO_AVAILABLE. Added _handle and _cb instance variables.
+  Added _cleanup_handle() method. _on_edge() signature changed to match lgpio.
+  stop() now calls _cb.cancel() before closing handle.
+
+BUTTON MAPPING CHANGE:
+  Long press was: modem-only reset (_do_modem_reset → relay.cycle_modem)
+  Long press now: router-only reset (_do_router_reset → relay.cycle_router)
+  Rationale: modem-only rarely makes sense (router is downstream of modem).
+  Router-only is the more deliberate and useful action.
+
+Final button mapping:
+  Short press (tap)     → Full reset (modem + router) — relay.cycle_full()
+  Long press (3+ sec)   → Router only reset — relay.cycle_router()
+  Triple press (<2s ea) → Toggle lockout mode
+
+PACKAGES: v3.4.45 (button.py lgpio rewrite), v3.4.46 (long press → router),
+  v3.4.47 (same button.py + SystemSetup.txt docs). Install only v3.4.47.
+
+INFRASTRUCTURE FIX — ops-pi.home DNS:
+Git remote uses ops-pi.home but mDNS resolves ops-pi.local. Gitea TLS cert
+issued for ops-pi.home — changing remote to .local causes SSL hostname mismatch.
+Fix: add static hosts entry on NetWatch Pi:
+  echo "192.168.100.230 ops-pi.home" | sudo tee -a /etc/hosts
+This bypasses mDNS entirely. Git push confirmed working after fix.
+Documented in SystemSetup.txt.
+
+
+KNOWN LIMITATIONS / DEFERRED ITEMS
+------------------------------------
+- relay.py still uses RPi.GPIO for output. Output works correctly with gpio group
+  membership — no migration to lgpio needed for relay control at this time.
+- lgpio venv installation is manual for Pis provisioned before Session 31.
+  Documented as GAP-10 in SystemSetup.txt.
+- ops-pi.home /etc/hosts entry is manual — not in install.sh. Would need to know
+  ops-pi IP at install time. Wizard candidate for future distributable.
