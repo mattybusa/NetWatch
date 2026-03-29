@@ -3618,7 +3618,7 @@ def api_devdocs_download():
 @auth.requires_permission("manage_admin")
 def admin_export_code_full():
     """Stream a zip of current code files + dev_docs directory contents."""
-    import zipfile, io
+    import zipfile, io, tempfile
 
     # dev_docs excluded from walk and handled separately below to avoid double-inclusion
     # (os.walk descends into dev_docs/ as a NETWATCH_DIR subdirectory without this exclusion)
@@ -3627,34 +3627,45 @@ def admin_export_code_full():
     EXCLUDE_PREFIXES = {"netwatch.db"}
     EXCLUDE_FILES    = {"config.py", "gunicorn.ctl"}
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Code files — walk NETWATCH_DIR, skipping dev_docs (handled separately below)
-        for root, dirs, files in os.walk(NETWATCH_DIR):
-            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
-            for fname in sorted(files):
-                if fname in EXCLUDE_FILES:
-                    continue
-                if os.path.splitext(fname)[1] in EXCLUDE_EXTS:
-                    continue
-                if any(fname.startswith(p) for p in EXCLUDE_PREFIXES):
-                    continue
-                full_path = os.path.join(root, fname)
-                arc_name  = os.path.relpath(full_path, NETWATCH_DIR)
-                zf.write(full_path, arc_name)
-        # Dev docs — single explicit loop; skip .bak files (dated summaries are the real backup)
-        dev_docs_dir = updater.DEV_DOCS_DIR
-        if os.path.isdir(dev_docs_dir):
-            for fname in sorted(os.listdir(dev_docs_dir)):
-                if os.path.splitext(fname)[1] == ".bak":
-                    continue
-                fpath = os.path.join(dev_docs_dir, fname)
-                if os.path.isfile(fpath):
-                    zf.write(fpath, os.path.join("dev_docs", fname))
-    buf.seek(0)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return send_file(buf, mimetype="application/zip",
-                     as_attachment=True, download_name=f"netwatch_full_{ts}.zip")
+    # Write to a temp file on disk so Flask can stream it efficiently via sendfile()
+    # rather than buffering a 2MB BytesIO object through the TLS stack
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip", dir="/tmp")
+    os.close(tmp_fd)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            # Code files — walk NETWATCH_DIR, skipping dev_docs (handled separately below)
+            for root, dirs, files in os.walk(NETWATCH_DIR):
+                dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+                for fname in sorted(files):
+                    if fname in EXCLUDE_FILES:
+                        continue
+                    if os.path.splitext(fname)[1] in EXCLUDE_EXTS:
+                        continue
+                    if any(fname.startswith(p) for p in EXCLUDE_PREFIXES):
+                        continue
+                    full_path = os.path.join(root, fname)
+                    if not os.path.isfile(full_path):  # skip pipes, sockets, device files
+                        continue
+                    arc_name  = os.path.relpath(full_path, NETWATCH_DIR)
+                    zf.write(full_path, arc_name)
+            # Dev docs — single explicit loop; skip .bak files (dated summaries are the real backup)
+            dev_docs_dir = updater.DEV_DOCS_DIR
+            if os.path.isdir(dev_docs_dir):
+                for fname in sorted(os.listdir(dev_docs_dir)):
+                    if os.path.splitext(fname)[1] == ".bak":
+                        continue
+                    fpath = os.path.join(dev_docs_dir, fname)
+                    if os.path.isfile(fpath):
+                        zf.write(fpath, os.path.join("dev_docs", fname))
+        return send_file(tmp_path, mimetype="application/zip",
+                         as_attachment=True, download_name=f"netwatch_full_{ts}.zip")
+    finally:
+        # Clean up temp file after Flask finishes sending it
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
