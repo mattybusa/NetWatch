@@ -2649,6 +2649,8 @@ def admin_export_code():
                 if any(fname.startswith(p) for p in EXCLUDE_PREFIXES):
                     continue
                 full_path = os.path.join(root, fname)
+                if not os.path.isfile(full_path):  # skip pipes, sockets, device files
+                    continue
                 arc_name  = os.path.relpath(full_path, NETWATCH_DIR)
                 zf.write(full_path, arc_name)
     buf.seek(0)
