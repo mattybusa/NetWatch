@@ -23,9 +23,9 @@ _Keep updated as patterns change._
 ---
 
 ## Current State
-- **Pi version:** v3.4.49
+- **Pi version:** v3.4.48
 - **Pi path:** `/home/mboynton/netwatch/`
-- **Canonical matches Pi at v3.4.49**
+- **Canonical matches Pi at v3.4.48**
 - **Git:** Initialized in ~/netwatch/, remote origin at https://ops-pi.home:3000/mboynton/netwatch.git (active — auto-push on every package install from v3.3.91 onward). .git directory owned by netwatch-svc. PAT embedded in remote URL for passwordless push. Confirmed working Session 30/31.
 - **GitHub:** Public repo at https://github.com/mattybusa/NetWatch. Remote named `github` on Pi (PAT embedded). Manual push workflow — push to github remote when ready to publish a release. Manifest URL: https://raw.githubusercontent.com/mattybusa/NetWatch/main/releases/latest.json (live). releases/latest.json committed to both remotes. Session 32.
 - **ops-pi (formerly gitea-pi):** 192.168.100.230 | https://ops-pi.home:3000 | mboynton/netwatch + mboynton/mbase repos (both private, MIT)

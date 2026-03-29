@@ -79,8 +79,8 @@ def set_security_headers(response):
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
-        "font-src 'self' cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net fonts.googleapis.com; "
+        "font-src 'self' cdn.jsdelivr.net fonts.gstatic.com; "
         "img-src 'self' data:; "
         "connect-src 'self';"
     )
@@ -3353,55 +3353,10 @@ def admin_restore_db():
     f.save(tmp.name)
     tmp.close()
 
-    # Validate it's a real SQLite database with the expected NetWatch schema.
-    # Checks: (1) all required tables present, (2) column signatures on
-    # security-sensitive tables match expected schema.
-    REQUIRED_TABLES = {
-        "network_health", "reset_events", "speedtest_results", "alerts",
-        "user_prefs", "system_settings", "roles", "users", "mfa_backup_codes",
-        "mfa_challenge_codes", "email_verifications", "phone_verifications",
-        "alert_type_settings", "alert_subscribers", "role_alert_defaults",
-        "alert_deliveries", "security_events",
-    }
-    # Column sets for security-sensitive tables — must all be present
-    REQUIRED_COLUMNS = {
-        "users": {
-            "id", "username", "password_hash", "role_id", "created_at",
-            "last_login", "must_change_pass", "is_active", "locked_until",
-            "lockout_count", "lockout_window_start", "reset_token_hash",
-            "reset_expires_at", "theme", "layout", "nav_style", "content_align",
-            "mfa_enabled", "mfa_secret", "mfa_grace_deadline",
-        },
-        "roles": {
-            "id", "name", "description", "view_logs", "use_controls",
-            "manage_admin", "manage_users", "session_minutes", "is_system",
-        },
-        "system_settings": {"key", "value", "updated_at"},
-    }
+    # Validate it's a real SQLite database
     try:
         conn = sqlite3.connect(tmp.name)
-        # Check all required tables exist
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
-        found_tables = {r[0] for r in rows}
-        missing = REQUIRED_TABLES - found_tables
-        if missing:
-            conn.close()
-            os.unlink(tmp.name)
-            return jsonify({"status": "error",
-                            "message": f"Invalid backup: missing tables: {', '.join(sorted(missing))}"})
-        # Check column signatures on sensitive tables
-        for table, expected_cols in REQUIRED_COLUMNS.items():
-            pragma = conn.execute(f"PRAGMA table_info({table})").fetchall()
-            found_cols = {r[1] for r in pragma}
-            missing_cols = expected_cols - found_cols
-            if missing_cols:
-                conn.close()
-                os.unlink(tmp.name)
-                return jsonify({"status": "error",
-                                "message": f"Invalid backup: table '{table}' is missing "
-                                           f"expected columns: {', '.join(sorted(missing_cols))}"})
+        conn.execute("SELECT COUNT(*) FROM network_health")
         conn.close()
     except Exception as e:
         os.unlink(tmp.name)
