@@ -112,8 +112,10 @@ class StructlogAccessLogger(Logger):
         except (TypeError, ValueError):
             response_bytes = 0
 
-        # Status is an integer on the response object
-        status = resp.status_code
+        # Status — streaming responses use resp.status (int), regular use resp.status_code
+        status = getattr(resp, "status_code", None) or getattr(resp, "status", 0)
+        if isinstance(status, str):
+            status = int(status.split()[0])
 
         method  = environ.get("REQUEST_METHOD", "-")
         path    = environ.get("PATH_INFO", "-")
