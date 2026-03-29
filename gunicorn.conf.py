@@ -17,7 +17,7 @@ keyfile     = os.path.join(NETWATCH_DIR, "certs", "netwatch.key")
 # Workers
 workers     = 2
 worker_class = "sync"
-timeout     = 30
+timeout     = 120
 
 # Load the app in the master process before forking workers.
 # This means init() runs once, not once per worker, avoiding

@@ -3620,7 +3620,7 @@ def admin_export_code_full():
 
     # dev_docs excluded from walk and handled separately below to avoid double-inclusion
     # (os.walk descends into dev_docs/ as a NETWATCH_DIR subdirectory without this exclusion)
-    EXCLUDE_DIRS     = {"__pycache__", "venv", "certs", "logs", "data", "backups", "snapshots", "dev_docs", ".gnupg"}
+    EXCLUDE_DIRS     = {"__pycache__", "venv", "certs", "logs", "data", "backups", "snapshots", "dev_docs", ".gnupg", ".git"}
     EXCLUDE_EXTS     = {".pyc", ".bak", ".gpg", ".gz", ".zip", ".tar"}
     EXCLUDE_PREFIXES = {"netwatch.db"}
     EXCLUDE_FILES    = {"config.py", "gunicorn.ctl"}
